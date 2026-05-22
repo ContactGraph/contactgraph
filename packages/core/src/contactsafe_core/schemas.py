@@ -69,6 +69,8 @@ class ConnectSourceResult(BaseModel):
     email: str | None = None
     scopes: list[str] = Field(default_factory=list)
     source_id: UUID | None = None
+    access_token: str | None = None
+    refresh_token: str | None = None
 
 
 class SourceStatusResult(BaseModel):

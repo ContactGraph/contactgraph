@@ -10,9 +10,12 @@ from starlette.applications import Starlette
 
 from contactsafe_server.config import Settings, get_settings
 from contactsafe_server.db.connection import init_db, shutdown_db
-from contactsafe_server.deps import build_app_context
+from contactsafe_server.deps import build_app_context, build_jwt_service
+from contactsafe_server.mcp.auth_middleware import McpAuthMiddleware
+from contactsafe_server.mcp.path_middleware import NormalizeMcpPathMiddleware
 from contactsafe_server.mcp.server import create_mcp_server
 from contactsafe_server.oauth.router import router as oauth_router
+from contactsafe_server.oauth.well_known import router as well_known_router
 
 
 def create_app() -> FastAPI:
@@ -21,6 +24,11 @@ def create_app() -> FastAPI:
     # FastMCP defaults to /mcp; mounting at /mcp would make the real path /mcp/mcp.
     mcp_server.settings.streamable_http_path = "/"
     mcp_http_app: Starlette = mcp_server.streamable_http_app()
+    mcp_http_app = McpAuthMiddleware(
+        mcp_http_app,
+        settings=settings,
+        jwt_service=build_jwt_service(settings),
+    )
 
     @asynccontextmanager
     async def app_lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
@@ -45,8 +53,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(NormalizeMcpPathMiddleware, mcp_path=settings.mcp_path)
 
     app.include_router(oauth_router)
+    app.include_router(well_known_router)
     app.mount(settings.mcp_path, mcp_http_app)
 
     @app.get("/health")  # pyright: ignore[reportUnusedFunction]

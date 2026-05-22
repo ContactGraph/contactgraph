@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from typing import cast
 
 import httpx
@@ -19,7 +20,7 @@ Schema:
 - categories_any: person categories (e.g. ["vc", "founder", "engineer"])
 - role_keywords: job title keywords (e.g. ["revops", "revenue operations"])
 - relationship_types_any: edge types (e.g. ["investor", "colleague"])
-- require_genuine_contact: true for real back-and-forth relationships
+- require_genuine_contact: default false; true only when the question asks for real back-and-forth (not for "what VCs do I know" style lists)
 - exclude_broadcast: true to omit newsletters/marketing (default true)
 - semantic_query: full text for topical search when intent is semantic_search
 - sort_by: tie_strength | last_seen
@@ -38,7 +39,7 @@ class QueryPlanner:
             return heuristic_plan
         try:
             llm_plan: QueryPlan = await self._plan_with_llm(question)
-            return self._merge_plans(heuristic_plan, llm_plan)
+            return self._merge_plans(heuristic_plan, llm_plan, question)
         except Exception:
             logger.exception("LLM query planning failed; using heuristics")
             return heuristic_plan
@@ -72,7 +73,7 @@ class QueryPlanner:
         return QueryPlan.model_validate(data)
 
     @staticmethod
-    def _merge_plans(heuristic: QueryPlan, llm: QueryPlan) -> QueryPlan:
+    def _merge_plans(heuristic: QueryPlan, llm: QueryPlan, question: str) -> QueryPlan:
         """Prefer LLM plan but keep heuristic filters the model often misses."""
         merged = llm.model_copy(deep=True)
         if not merged.name_tokens:
@@ -86,4 +87,17 @@ class QueryPlanner:
         if merged.semantic_query is None and heuristic.semantic_query is not None:
             merged.semantic_query = heuristic.semantic_query
             merged.intent = heuristic.intent
+        if not _question_requires_genuine_contact(question):
+            merged.require_genuine_contact = False
         return merged
+
+
+def _question_requires_genuine_contact(question: str) -> bool:
+    """Detect explicit requests for two-way relationships only."""
+    q_lower: str = question.lower()
+    return bool(
+        re.search(
+            r"\b(genuine|two-way|back-and-forth|real conversation|actually (talk|email|met))\b",
+            q_lower,
+        )
+    )

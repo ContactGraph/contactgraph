@@ -1,13 +1,24 @@
 import uuid
 
-from sqlalchemy import func, or_, select
-from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy import Text, cast, func, or_, select
+from sqlalchemy.dialects.postgresql import ARRAY, array as pg_array
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import InstrumentedAttribute, selectinload
+from sqlalchemy.sql.elements import ColumnElement
 
 from contactsafe_core.query_plan import QueryIntent, QueryPlan, QuerySortBy
 from contactsafe_core.schemas import PersonMatch
 from contactsafe_server.db.models import InteractionExcerpt, Org, Person, PersonEdge
+
+
+
+def _pg_text_array_overlaps(
+    column: InstrumentedAttribute[list[str]],
+    values: list[str],
+) -> ColumnElement[bool]:
+    """`column && values` with explicit text[] typing for Postgres."""
+    rhs = cast(pg_array(values), ARRAY(Text))
+    return column.op("&&")(rhs)
 
 
 class NetworkQueryService:
@@ -75,7 +86,7 @@ class NetworkQueryService:
 
         if plan.categories_any:
             lowered: list[str] = [c.lower() for c in plan.categories_any]
-            stmt = stmt.where(Person.inferred_categories.overlap(lowered))
+            stmt = stmt.where(_pg_text_array_overlaps(Person.inferred_categories, lowered))
 
         for role_kw in plan.role_keywords:
             role_pattern: str = f"%{role_kw.lower()}%"
@@ -83,7 +94,9 @@ class NetworkQueryService:
 
         if plan.relationship_types_any:
             lowered_rel: list[str] = [r.lower() for r in plan.relationship_types_any]
-            stmt = stmt.where(PersonEdge.relationship_types.overlap(lowered_rel))
+            stmt = stmt.where(
+                _pg_text_array_overlaps(PersonEdge.relationship_types, lowered_rel)
+            )
 
         if plan.sort_by == QuerySortBy.LAST_SEEN:
             stmt = stmt.order_by(

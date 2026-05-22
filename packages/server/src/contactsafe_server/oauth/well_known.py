@@ -1,0 +1,34 @@
+from fastapi import APIRouter, Depends
+
+from contactsafe_server.config import Settings, get_settings
+from contactsafe_server.services.jwt_service import MCP_SCOPES
+
+router: APIRouter = APIRouter(tags=["oauth-metadata"])
+
+
+@router.get("/.well-known/oauth-protected-resource")
+async def oauth_protected_resource_metadata(
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    base: str = settings.base_url.rstrip("/")
+    return {
+        "resource": settings.mcp_resource_url,
+        "authorization_servers": [base],
+        "scopes_supported": list(MCP_SCOPES),
+    }
+
+
+@router.get("/.well-known/oauth-authorization-server")
+async def oauth_authorization_server_metadata(
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    base: str = settings.base_url.rstrip("/")
+    return {
+        "issuer": settings.effective_jwt_issuer,
+        "authorization_endpoint": f"{base}/oauth/authorize",
+        "token_endpoint": f"{base}/oauth/token",
+        "scopes_supported": list(MCP_SCOPES),
+        "response_types_supported": ["code"],
+        "code_challenge_methods_supported": ["S256"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+    }

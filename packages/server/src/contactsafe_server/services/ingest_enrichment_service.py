@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import Person, PersonEdge
 from contactsafe_server.services.openai_json import content_from_chat_completion, parse_json_object
+from contactsafe_server.services.category_inference import infer_categories_from_contact
 from contactsafe_server.services.email_parse import (
     ContactAccumulator,
     is_human_edge,
@@ -46,27 +47,36 @@ class IngestEnrichmentService:
         user_id: uuid.UUID,
         contact_by_email: dict[str, ContactAccumulator],
     ) -> None:
+        result = await self._db.execute(select(Person).where(Person.user_id == user_id))
+        people: list[Person] = list(result.scalars().all())
+        if not people:
+            return
+
+        for person in people:
+            acc: ContactAccumulator | None = contact_by_email.get(
+                person.email_addresses[0] if person.email_addresses else ""
+            )
+            self._heuristic_enrich_person(person, acc)
+
+        if self._settings.openai_api_key:
+            top_for_llm = await self._load_top_people_by_tie_strength(
+                user_id, limit=self._settings.enrichment_contact_limit
+            )
+            await self._llm_enrich_batch(top_for_llm, contact_by_email)
+
+        await self._db.flush()
+
+    async def _load_top_people_by_tie_strength(
+        self, user_id: uuid.UUID, *, limit: int
+    ) -> list[Person]:
         result = await self._db.execute(
             select(Person)
             .join(PersonEdge, PersonEdge.person_id == Person.id)
             .where(Person.user_id == user_id)
             .order_by(PersonEdge.tie_strength_score.desc())
-            .limit(self._settings.enrichment_contact_limit)
+            .limit(limit)
         )
-        people: list[Person] = list(result.scalars().unique().all())
-        if not people:
-            return
-
-        if self._settings.openai_api_key:
-            await self._llm_enrich_batch(people, contact_by_email)
-        else:
-            for person in people:
-                acc: ContactAccumulator | None = contact_by_email.get(
-                    person.email_addresses[0] if person.email_addresses else ""
-                )
-                self._heuristic_enrich_person(person, acc)
-
-        await self._db.flush()
+        return list(result.scalars().unique().all())
 
     def _heuristic_enrich_person(
         self,
@@ -77,12 +87,21 @@ class IngestEnrichmentService:
         if accumulator is not None:
             blob = f"{blob} {accumulator.display_name} {accumulator.email}"
 
-        categories: list[str] = []
+        email: str = person.email_addresses[0] if person.email_addresses else ""
+        pitch_hits: int = accumulator.pitch_outbound_count if accumulator is not None else 0
+        categories: list[str] = infer_categories_from_contact(
+            email=email,
+            display_name=person.canonical_name,
+            org_name=person.current_org_name,
+            pitch_outbound_count=pitch_hits,
+        )
         for category, patterns in _CATEGORY_KEYWORDS.items():
+            if category in categories:
+                continue
             if any(re.search(p, blob) for p in patterns):
                 categories.append(category)
         if categories:
-            person.inferred_categories = categories
+            person.inferred_categories = [c.lower() for c in categories]
 
         if not person.current_role:
             for pattern, role_label in _ROLE_PATTERNS:

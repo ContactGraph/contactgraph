@@ -48,6 +48,12 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     sessions: Mapped[list["ConnectSession"]] = relationship(back_populates="user")
+    authorization_codes: Mapped[list["AuthorizationCode"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    refresh_tokens: Mapped[list["RefreshToken"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
     sources: Mapped[list["Source"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     persons: Mapped[list["Person"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     person_edges: Mapped[list["PersonEdge"]] = relationship(
@@ -154,12 +160,59 @@ class ConnectSession(Base):
     state: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     requested_scopes: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    oauth_redirect_uri: Mapped[str | None] = mapped_column(Text, nullable=True)
+    oauth_client_state: Mapped[str | None] = mapped_column(Text, nullable=True)
+    code_challenge: Mapped[str | None] = mapped_column(Text, nullable=True)
+    code_challenge_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     user: Mapped["User | None"] = relationship(back_populates="sessions")
+
+
+class AuthorizationCode(Base):
+    __tablename__ = "authorization_codes"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    code_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    code_challenge: Mapped[str | None] = mapped_column(Text, nullable=True)
+    code_challenge_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    redirect_uri: Mapped[str] = mapped_column(Text, nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    user: Mapped["User"] = relationship(back_populates="authorization_codes")
+
+
+class RefreshToken(Base):
+    __tablename__ = "refresh_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    scopes: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    user: Mapped["User"] = relationship(back_populates="refresh_tokens")
 
 
 class Org(Base):

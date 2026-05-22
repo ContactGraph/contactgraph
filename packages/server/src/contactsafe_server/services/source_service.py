@@ -161,11 +161,32 @@ class SourceService:
             result.message = self._oauth_session_message(session_status)
         return result
 
+    async def get_source_status_for_user(self, user_id: uuid.UUID) -> SourceStatusResult:
+        source: Source | None = await self._get_default_google_mail_source(user_id)
+        if source is None:
+            user: User | None = await self._db.get(User, user_id)
+            return SourceStatusResult(
+                source_id=user_id,
+                status=SessionStatus.CONNECTED,
+                connection_status=SourceConnectionStatus.PENDING_OAUTH,
+                sync_state=SyncState.PENDING,
+                email=user.email if user is not None else None,
+                message="OAuth connected but no mail source record yet. Call sync_source.",
+            )
+        result = await self.get_source_status(source.id)
+        result.status = SessionStatus.CONNECTED
+        return result
+
+    async def request_sync_for_user(self, user_id: uuid.UUID) -> SyncSourceResult:
+        source_id: uuid.UUID = await self.resolve_source_id(user_id=user_id)
+        return await self.request_sync(source_id)
+
     async def resolve_source_id(
         self,
         *,
         source_id: uuid.UUID | None = None,
         connect_session_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         if source_id is not None:
             source: Source | None = await self._db.get(Source, source_id)
@@ -173,8 +194,14 @@ class SourceService:
                 raise ValueError(f"Unknown source_id: {source_id}")
             return source_id
 
+        if user_id is not None:
+            source = await self._get_default_google_mail_source(user_id)
+            if source is None:
+                raise ValueError("No google_mail source for this user")
+            return source.id
+
         if connect_session_id is None:
-            raise ValueError("Provide source_id or connect_session_id")
+            raise ValueError("Provide source_id, user_id, or connect_session_id")
 
         session: ConnectSession | None = await self._db.get(ConnectSession, connect_session_id)
         if session is None:
@@ -192,7 +219,10 @@ class SourceService:
         *,
         source_id: uuid.UUID | None = None,
         connect_session_id: uuid.UUID | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
+        if user_id is not None:
+            return user_id
         resolved_source_id: uuid.UUID = await self.resolve_source_id(
             source_id=source_id,
             connect_session_id=connect_session_id,

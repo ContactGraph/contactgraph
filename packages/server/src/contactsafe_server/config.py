@@ -31,6 +31,19 @@ class Settings(BaseSettings):
     )
     session_secret: str = Field(description="Secret for signing OAuth state parameters")
 
+    jwt_signing_key: str | None = Field(
+        default=None,
+        description="HMAC secret for MCP JWT tokens; falls back to SESSION_SECRET in dev",
+    )
+    jwt_algorithm: str = "HS256"
+    jwt_access_token_expire_minutes: int = 15
+    jwt_refresh_token_expire_days: int = 30
+    jwt_issuer: str | None = Field(
+        default=None,
+        description="JWT issuer claim; defaults to BASE_URL",
+    )
+    jwt_audience: str = "contactsafe-mcp"
+
     google_client_id: str
     google_client_secret: str
     google_redirect_uri: str = "http://localhost:8000/oauth/callback"
@@ -98,6 +111,18 @@ class Settings(BaseSettings):
     @property
     def oauth_start_url_template(self) -> str:
         return f"{self.base_url.rstrip('/')}/oauth/start/{{session_id}}"
+
+    @property
+    def effective_jwt_signing_key(self) -> str:
+        return self.jwt_signing_key or self.session_secret
+
+    @property
+    def effective_jwt_issuer(self) -> str:
+        return (self.jwt_issuer or self.base_url).rstrip("/")
+
+    @property
+    def mcp_resource_url(self) -> str:
+        return f"{self.base_url.rstrip('/')}{self.mcp_path.rstrip('/')}/"
 
 
 @lru_cache

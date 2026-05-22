@@ -2,8 +2,10 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 from mcp.server.fastmcp import Context, FastMCP
+from starlette.requests import Request
 
 from contactsafe_core.enums import SessionStatus, SourceConnectionStatus, SourceType
 from contactsafe_core.schemas import (
@@ -17,6 +19,7 @@ from contactsafe_core.schemas import (
 from contactsafe_server.deps import (
     AppContext,
     build_app_context,
+    build_oauth_server_service,
     build_oauth_service,
     build_source_service,
 )
@@ -25,6 +28,10 @@ from contactsafe_server.services.query_planner import QueryPlanner
 from contactsafe_server.services.oauth_service import OAuthService
 from contactsafe_server.services.source_service import SourceService
 from contactsafe_server.utils import parse_connect_session_id, parse_source_id
+
+_DEPRECATION_SUFFIX: str = (
+    " Deprecated: use Authorization: Bearer <access_token> instead of connect_session_id."
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +50,7 @@ def create_mcp_server() -> FastMCP:
         "ContactSafe",
         instructions=(
             "ContactSafe builds a private contact graph from connected data sources. "
+            "Authenticate with OAuth 2.1 Bearer tokens (see /.well-known/oauth-protected-resource). "
             "Use connect_source to start OAuth, list_sources to see connections, "
             "sync_source to (re)start ingestion, get_source_status for progress, "
             "and query_network to search contacts."
@@ -60,7 +68,8 @@ def create_mcp_server() -> FastMCP:
     ) -> ConnectSourceResult:
         """Connect a data source (google_mail supported today).
 
-        Returns connect_session_id and oauth_url when browser authorization is needed.
+        Returns oauth_url when browser authorization is needed, or access_token when
+        the account is already connected.
         """
         lifespan: McpLifespanState = _require_lifespan(ctx)
         try:
@@ -74,27 +83,49 @@ def create_mcp_server() -> FastMCP:
                 user_token,
                 source_type=parsed_type,
             )
+            if result.already_connected and result.source_id is not None:
+                sources: SourceService = build_source_service(db)
+                user_id: UUID = await sources.resolve_user_id(source_id=result.source_id)
+                token_response = await build_oauth_server_service(
+                    db, lifespan.app_context
+                ).mint_tokens_for_user(user_id)
+                result = result.model_copy(
+                    update={
+                        "access_token": token_response.access_token,
+                        "refresh_token": token_response.refresh_token,
+                    }
+                )
             await db.commit()
             return result
 
     @mcp.tool()  # pyright: ignore[reportUnusedFunction]
     async def list_sources(
-        connect_session_id: str,
+        connect_session_id: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> ListSourcesResult:
-        """List connected data sources for the user linked to a connect session."""
+        """List connected data sources for the authenticated user."""
         lifespan: McpLifespanState = _require_lifespan(ctx)
-        session_uuid = parse_connect_session_id(connect_session_id)
         async with lifespan.app_context.session_factory() as db:
             oauth: OAuthService = build_oauth_service(db, lifespan.app_context)
-            session = await oauth.get_session_by_id(session_uuid)
-            if session is None or session.user_id is None:
+            user_id, deprecated = await _resolve_authenticated_user_id(
+                ctx, connect_session_id, oauth
+            )
+            if user_id is None:
                 return ListSourcesResult(
                     sources=[],
-                    message="Unknown session or OAuth not completed yet.",
+                    message=(
+                        "Authentication required. Obtain a Bearer token via OAuth "
+                        f"({lifespan.app_context.settings.base_url.rstrip('/')}"
+                        "/.well-known/oauth-protected-resource)."
+                    ),
                 )
             sources: SourceService = build_source_service(db)
-            return await sources.list_sources_for_user(session.user_id)
+            result = await sources.list_sources_for_user(user_id)
+            if deprecated:
+                result = result.model_copy(
+                    update={"message": _with_deprecation(result.message)}
+                )
+            return result
 
     @mcp.tool()  # pyright: ignore[reportUnusedFunction]
     async def get_source_status(
@@ -105,6 +136,10 @@ def create_mcp_server() -> FastMCP:
         """Check connection and sync status for a data source."""
         lifespan: McpLifespanState = _require_lifespan(ctx)
         async with lifespan.app_context.session_factory() as db:
+            oauth: OAuthService = build_oauth_service(db, lifespan.app_context)
+            user_id, deprecated = await _resolve_authenticated_user_id(
+                ctx, connect_session_id, oauth
+            )
             sources: SourceService = build_source_service(db)
             if source_id is not None:
                 source_uuid = parse_source_id(source_id)
@@ -113,14 +148,21 @@ def create_mcp_server() -> FastMCP:
                     if connect_session_id
                     else None
                 )
-                return await sources.get_source_status(
+                result = await sources.get_source_status(
                     source_uuid,
                     connect_session_id=connect_uuid,
                 )
-            if connect_session_id is None:
-                raise ValueError("Provide source_id or connect_session_id")
-            session_uuid = parse_connect_session_id(connect_session_id)
-            return await sources.get_source_status_for_connect_session(session_uuid)
+            elif user_id is not None:
+                result = await sources.get_source_status_for_user(user_id)
+            else:
+                raise ValueError(
+                    "Authentication required (Bearer token) or provide source_id"
+                )
+            if deprecated:
+                result = result.model_copy(
+                    update={"message": _with_deprecation(result.message)}
+                )
+            return result
 
     @mcp.tool()  # pyright: ignore[reportUnusedFunction]
     async def sync_source(
@@ -131,16 +173,25 @@ def create_mcp_server() -> FastMCP:
         """Start or restart ingestion for a connected source (no browser step)."""
         lifespan: McpLifespanState = _require_lifespan(ctx)
         async with lifespan.app_context.session_factory() as db:
+            oauth: OAuthService = build_oauth_service(db, lifespan.app_context)
+            user_id, deprecated = await _resolve_authenticated_user_id(
+                ctx, connect_session_id, oauth
+            )
             sources: SourceService = build_source_service(db)
             if source_id is not None:
                 source_uuid = parse_source_id(source_id)
                 result = await sources.request_sync(source_uuid)
-            elif connect_session_id is not None:
-                session_uuid = parse_connect_session_id(connect_session_id)
-                result = await sources.request_sync_for_connect_session(session_uuid)
+            elif user_id is not None:
+                result = await sources.request_sync_for_user(user_id)
             else:
-                raise ValueError("Provide source_id or connect_session_id")
+                raise ValueError(
+                    "Authentication required (Bearer token) or provide source_id"
+                )
             await db.commit()
+            if deprecated:
+                result = result.model_copy(
+                    update={"message": _with_deprecation(result.message)}
+                )
             return result
 
     @mcp.tool()  # pyright: ignore[reportUnusedFunction]
@@ -153,22 +204,14 @@ def create_mcp_server() -> FastMCP:
         """Search the user's contact graph using a natural-language question."""
         lifespan: McpLifespanState = _require_lifespan(ctx)
         async with lifespan.app_context.session_factory() as db:
+            oauth: OAuthService = build_oauth_service(db, lifespan.app_context)
+            auth_user_id, deprecated = await _resolve_authenticated_user_id(
+                ctx, connect_session_id, oauth
+            )
             sources: SourceService = build_source_service(db)
 
-            if connect_session_id is not None:
-                session_uuid = parse_connect_session_id(connect_session_id)
-                status: SourceStatusResult = (
-                    await sources.get_source_status_for_connect_session(session_uuid)
-                )
-                if status.status != SessionStatus.CONNECTED:
-                    return QueryNetworkResult(
-                        question=question,
-                        message="Connect a source first, then wait for sync to finish.",
-                    )
-                user_id = await sources.resolve_user_id(
-                    connect_session_id=session_uuid
-                )
-            elif source_id is not None:
+            resolved_user_id: UUID | None = auth_user_id
+            if resolved_user_id is None and source_id is not None:
                 source_uuid = parse_source_id(source_id)
                 status = await sources.get_source_status(source_uuid)
                 if status.connection_status != SourceConnectionStatus.CONNECTED:
@@ -176,14 +219,22 @@ def create_mcp_server() -> FastMCP:
                         question=question,
                         message="Source is not connected.",
                     )
-                user_id = await sources.resolve_user_id(source_id=source_uuid)
-            else:
+                resolved_user_id = await sources.resolve_user_id(source_id=source_uuid)
+            elif resolved_user_id is None:
                 return QueryNetworkResult(
                     question=question,
-                    message="Provide connect_session_id or source_id.",
+                    message=(
+                        "Authentication required. Provide a Bearer token or source_id."
+                    ),
                 )
 
-            if not await sources.user_has_queryable_graph(user_id):
+            if resolved_user_id is None:
+                return QueryNetworkResult(
+                    question=question,
+                    message="Unable to resolve user for query.",
+                )
+
+            if not await sources.user_has_queryable_graph(resolved_user_id):
                 return QueryNetworkResult(
                     question=question,
                     message=(
@@ -196,24 +247,63 @@ def create_mcp_server() -> FastMCP:
             plan = await planner.plan(question)
             executor = NetworkQueryService(db)
             matches: list[PersonMatch] = await executor.execute(
-                user_id=user_id,
+                user_id=resolved_user_id,
                 plan=plan,
             )
+            deprecation_note: str = _DEPRECATION_SUFFIX if deprecated else ""
             if not matches:
                 return QueryNetworkResult(
                     question=question,
                     matches=[],
                     applied_plan=plan,
-                    message="No matching contacts found in your graph for that question.",
+                    message=(
+                        "No matching contacts found in your graph for that question."
+                        f"{deprecation_note}"
+                    ),
                 )
             return QueryNetworkResult(
                 question=question,
                 matches=matches,
                 applied_plan=plan,
-                message=f"Found {len(matches)} matching contact(s).",
+                message=f"Found {len(matches)} matching contact(s).{deprecation_note}",
             )
 
     return mcp
+
+
+async def _resolve_authenticated_user_id(
+    ctx: Context[Any, Any, Any] | None,
+    connect_session_id: str | None,
+    oauth: OAuthService,
+) -> tuple[UUID | None, bool]:
+    deprecated: bool = connect_session_id is not None
+    if ctx is not None:
+        user_id: UUID | None = _get_user_id_from_ctx(ctx)
+        if user_id is not None:
+            return user_id, deprecated
+    if connect_session_id is None:
+        return None, False
+    session_uuid: UUID = parse_connect_session_id(connect_session_id)
+    session = await oauth.get_session_by_id(session_uuid)
+    if session is None or session.user_id is None:
+        return None, True
+    return session.user_id, True
+
+
+def _get_user_id_from_ctx(ctx: Context[Any, Any, Any]) -> UUID | None:
+    request: Request | None = ctx.request_context.request  # pyright: ignore[reportUnknownMemberType]
+    if request is None:
+        return None
+    user_id_raw: object | None = getattr(request.state, "user_id", None)
+    if user_id_raw is None:
+        return None
+    return UUID(str(user_id_raw))
+
+
+def _with_deprecation(message: str) -> str:
+    if _DEPRECATION_SUFFIX.strip() in message:
+        return message
+    return f"{message}{_DEPRECATION_SUFFIX}"
 
 
 def _require_lifespan(ctx: Context[Any, Any, Any] | None) -> McpLifespanState:

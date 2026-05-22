@@ -36,6 +36,7 @@ class ContactAccumulator:
     message_count: int = 0
     outbound_count: int = 0
     inbound_count: int = 0
+    pitch_outbound_count: int = 0
 
     def observe(
         self,

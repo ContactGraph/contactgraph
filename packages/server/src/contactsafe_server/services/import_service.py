@@ -22,6 +22,10 @@ from contactsafe_server.services.ingest_enrichment_service import (
 from contactsafe_server.services.interaction_excerpt_service import InteractionExcerptService
 from contactsafe_server.services.org_service import OrgService
 from contactsafe_server.services.gmail_client import GmailClient, GmailMessageMeta
+from contactsafe_server.services.pitch_detection import (
+    is_pitch_outreach_snippet,
+    message_from_user,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -175,6 +179,23 @@ class ImportService:
                 seen_at: datetime | None = parse_internal_date_ms(
                     meta.internal_date_ms or ref.internal_date_ms
                 )
+                if (
+                    meta.snippet
+                    and message_from_user(meta.from_header, user_email)
+                    and is_pitch_outreach_snippet(meta.snippet)
+                ):
+                    self._tag_pitch_recipients(
+                        contacts,
+                        header=meta.to_header,
+                        user_email=user_email,
+                        seen_at=seen_at,
+                    )
+                    self._tag_pitch_recipients(
+                        contacts,
+                        header=meta.cc_header,
+                        user_email=user_email,
+                        seen_at=seen_at,
+                    )
                 self._accumulate_header(
                     contacts,
                     header=meta.from_header,
@@ -225,6 +246,29 @@ class ImportService:
                 )
                 existing = contacts[email]
             existing.observe(display_name=display_name, seen_at=seen_at, from_user=from_user)
+
+    def _tag_pitch_recipients(
+        self,
+        contacts: dict[str, ContactAccumulator],
+        *,
+        header: str | None,
+        user_email: str,
+        seen_at: datetime | None,
+    ) -> None:
+        if not header:
+            return
+        for display_name, email in parse_address_header(header):
+            if email == user_email:
+                continue
+            existing: ContactAccumulator | None = contacts.get(email)
+            if existing is None:
+                contacts[email] = ContactAccumulator(
+                    email=email,
+                    display_name=display_name,
+                    last_seen_at=seen_at,
+                )
+                existing = contacts[email]
+            existing.pitch_outbound_count += 1
 
     async def _upsert_person(
         self,

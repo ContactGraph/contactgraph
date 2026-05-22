@@ -22,6 +22,7 @@ class GmailMessageMeta:
     from_header: str | None
     to_header: str | None
     cc_header: str | None
+    snippet: str | None
 
 
 class GmailClient:
@@ -94,12 +95,15 @@ class GmailClient:
             value: str = str(header.get("value", ""))
             if name in {"from", "to", "cc", "date"}:
                 headers[name] = value
+        snippet_raw: object = data.get("snippet")
+        snippet: str | None = str(snippet_raw) if isinstance(snippet_raw, str) and snippet_raw else None
         return GmailMessageMeta(
             id=str(data.get("id", message_id)),
             internal_date_ms=str(data.get("internalDate")) if data.get("internalDate") else None,
             from_header=headers.get("from"),
             to_header=headers.get("to"),
             cc_header=headers.get("cc"),
+            snippet=snippet,
         )
 
     async def _get(
