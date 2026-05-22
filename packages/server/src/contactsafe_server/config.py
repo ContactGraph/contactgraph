@@ -1,6 +1,8 @@
+import ssl
 from functools import lru_cache
-from typing import Literal
+from typing import Any, Literal
 
+import certifi
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -19,6 +21,10 @@ class Settings(BaseSettings):
     database_url: str = Field(
         default="postgresql+asyncpg://contactsafe:contactsafe@localhost:5432/contactsafe"
     )
+    # Set true for Supabase (or leave unset to auto-detect *.supabase.co in DATABASE_URL)
+    database_ssl: bool | None = Field(default=None)
+    # macOS uv Python often lacks system CA certs; set false for local Supabase dev if needed
+    database_ssl_verify: bool = Field(default=True)
 
     token_encryption_key: str = Field(
         description="Fernet key for encrypting OAuth tokens at rest"
@@ -48,6 +54,23 @@ class Settings(BaseSettings):
         if url.startswith("postgresql://"):
             return url.replace("postgresql://", "postgresql+asyncpg://", 1)
         return url
+
+    @property
+    def database_connect_args(self) -> dict[str, Any]:
+        use_ssl: bool
+        if self.database_ssl is not None:
+            use_ssl = self.database_ssl
+        else:
+            use_ssl = "supabase.co" in self.database_url
+        if not use_ssl:
+            return {}
+        if self.database_ssl_verify:
+            ctx: ssl.SSLContext = ssl.create_default_context(cafile=certifi.where())
+        else:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+        return {"ssl": ctx}
 
     @property
     def oauth_start_url_template(self) -> str:

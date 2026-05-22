@@ -6,7 +6,7 @@ ContactSafe builds a private contact graph from your Gmail and Calendar so your 
 
 ## MCP Server
 
-- **URL:** `http://localhost:8000/mcp` (replace with production URL when deployed)
+- **URL:** `http://localhost:8000/mcp` (use trailing slash if your client redirects: `http://localhost:8000/mcp/`)
 - **Transport:** Streamable HTTP
 
 ## Setup flow

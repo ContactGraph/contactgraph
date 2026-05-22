@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from mcp.server.fastmcp import FastMCP
+from starlette.applications import Starlette
 
 from contactsafe_server.config import Settings, get_settings
 from contactsafe_server.db.connection import init_db, shutdown_db
@@ -14,18 +15,21 @@ from contactsafe_server.mcp.server import create_mcp_server
 from contactsafe_server.oauth.router import router as oauth_router
 
 
-@asynccontextmanager
-async def app_lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
-    settings: Settings = get_settings()
-    build_app_context()
-    await init_db(settings)
-    yield
-    await shutdown_db()
-
-
 def create_app() -> FastAPI:
     settings: Settings = get_settings()
     mcp_server: FastMCP = create_mcp_server()
+    # FastMCP defaults to /mcp; mounting at /mcp would make the real path /mcp/mcp.
+    mcp_server.settings.streamable_http_path = "/"
+    mcp_http_app: Starlette = mcp_server.streamable_http_app()
+
+    @asynccontextmanager
+    async def app_lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+        build_app_context()
+        await init_db(settings)
+        # Mounted Starlette apps do not run their own lifespan under FastAPI; start MCP here.
+        async with mcp_server.session_manager.run():
+            yield
+        await shutdown_db()
 
     app: FastAPI = FastAPI(
         title="ContactSafe",
@@ -43,7 +47,7 @@ def create_app() -> FastAPI:
     )
 
     app.include_router(oauth_router)
-    app.mount(settings.mcp_path, mcp_server.streamable_http_app())
+    app.mount(settings.mcp_path, mcp_http_app)
 
     @app.get("/health")  # pyright: ignore[reportUnusedFunction]
     async def health() -> dict[str, str]:

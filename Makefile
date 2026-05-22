@@ -4,7 +4,7 @@ sync:
 	uv sync
 
 docker-up:
-	docker compose up -d
+	docker compose --profile local-db up -d
 
 docker-down:
 	docker compose down

@@ -1,5 +1,7 @@
+# Postgres is optional when using Supabase. Start it with: docker compose --profile local-db up -d
 services:
   postgres:
+    profiles: ["local-db"]
     image: pgvector/pgvector:pg16
     ports:
       - "5432:5432"
