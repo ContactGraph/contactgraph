@@ -14,14 +14,14 @@ from contactsafe_core.schemas import (
     SourceStatusResult,
     SyncSourceResult,
 )
-from contactsafe_server.db.models import Person
 from contactsafe_server.deps import (
     AppContext,
     build_app_context,
     build_oauth_service,
     build_source_service,
 )
-from contactsafe_server.services.import_service import QueryService
+from contactsafe_server.services.network_query_service import NetworkQueryService
+from contactsafe_server.services.query_planner import QueryPlanner
 from contactsafe_server.services.oauth_service import OAuthService
 from contactsafe_server.services.source_service import SourceService
 from contactsafe_server.utils import parse_connect_session_id, parse_source_id
@@ -192,47 +192,28 @@ def create_mcp_server() -> FastMCP:
                     ),
                 )
 
-            query: QueryService = QueryService(db)
-            people: list[Person] = await query.query_by_user(
+            planner = QueryPlanner(lifespan.app_context.settings)
+            plan = await planner.plan(question)
+            executor = NetworkQueryService(db)
+            matches: list[PersonMatch] = await executor.execute(
                 user_id=user_id,
-                question=question,
+                plan=plan,
             )
-            matches: list[PersonMatch] = [
-                PersonMatch(
-                    person_id=person.id,
-                    name=person.canonical_name,
-                    emails=list(person.email_addresses),
-                    org_name=person.current_org_name,
-                    last_seen_in_email=person.last_seen_in_email,
-                    tie_strength_score=person.edge.tie_strength_score if person.edge else 0.0,
-                    relevance=_relevance_note(person),
-                )
-                for person in people
-            ]
             if not matches:
                 return QueryNetworkResult(
                     question=question,
                     matches=[],
+                    applied_plan=plan,
                     message="No matching contacts found in your graph for that question.",
                 )
             return QueryNetworkResult(
                 question=question,
                 matches=matches,
+                applied_plan=plan,
                 message=f"Found {len(matches)} matching contact(s).",
             )
 
     return mcp
-
-
-def _relevance_note(person: Person) -> str:
-    parts: list[str] = []
-    if person.current_org_name:
-        parts.append(f"org: {person.current_org_name}")
-    if person.last_seen_in_email:
-        parts.append(f"last email: {person.last_seen_in_email.date().isoformat()}")
-    if person.edge and person.edge.tie_strength_score:
-        parts.append(f"tie strength: {person.edge.tie_strength_score:.2f}")
-    return "; ".join(parts) if parts else "contact from Gmail"
 
 
 def _require_lifespan(ctx: Context[Any, Any, Any] | None) -> McpLifespanState:

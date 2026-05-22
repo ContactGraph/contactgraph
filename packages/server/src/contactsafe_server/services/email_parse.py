@@ -87,9 +87,23 @@ def org_name_from_email(email: str) -> str | None:
     if domain in generic_domains:
         return None
     base: str = domain.split(".")[0]
-    if not base:
+    if not base or len(base) < 2:
         return None
     return base.replace("-", " ").title()
+
+
+def is_likely_broadcast_contact(accumulator: ContactAccumulator) -> bool:
+    """Newsletter / one-way marketing style contact."""
+    if accumulator.outbound_count == 0 and accumulator.inbound_count >= 3:
+        return True
+    local: str = accumulator.email.split("@", 1)[0]
+    if local in NO_REPLY_LOCAL_PARTS or "newsletter" in local or "marketing" in local:
+        return True
+    return False
+
+
+def is_human_edge(accumulator: ContactAccumulator) -> bool:
+    return accumulator.outbound_count > 0 and accumulator.inbound_count > 0
 
 
 def _strip_query_fragment(value: str) -> str:

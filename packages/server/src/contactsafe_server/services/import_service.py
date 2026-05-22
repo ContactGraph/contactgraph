@@ -4,8 +4,6 @@ from datetime import UTC, datetime
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
-
 from contactsafe_core.enums import OAuthProvider, SourceConnectionStatus, SourceType, SyncState
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import OAuthCredential, Person, PersonEdge, Source, User
@@ -13,13 +11,16 @@ from contactsafe_server.oauth.google import GoogleTokens
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.email_parse import (
     ContactAccumulator,
-    company_query_from_question,
-    name_query_from_question,
     org_name_from_email,
     parse_address_header,
     parse_internal_date_ms,
-    person_matches_name,
 )
+from contactsafe_server.services.ingest_enrichment_service import (
+    IngestEnrichmentService,
+    edge_flags_from_accumulator,
+)
+from contactsafe_server.services.interaction_excerpt_service import InteractionExcerptService
+from contactsafe_server.services.org_service import OrgService
 from contactsafe_server.services.gmail_client import GmailClient, GmailMessageMeta
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,15 @@ class ImportService:
                 resolved += 1
                 source.contacts_resolved = resolved
                 source.contacts_pending = max(0, source.contacts_found - resolved)
+
+            enricher = IngestEnrichmentService(self._db, self._settings)
+            await enricher.enrich_after_import(
+                user_id=user_id,
+                contact_by_email=contacts,
+            )
+            await self._link_orgs_for_user(user_id)
+            excerpt_service = InteractionExcerptService(self._db, self._settings)
+            await excerpt_service.seed_excerpts_for_user(user_id)
 
             source.sync_state = SyncState.COMPLETE.value
             source.sync_completed_at = datetime.now(tz=UTC)
@@ -223,17 +233,25 @@ class ImportService:
         accumulator: ContactAccumulator,
     ) -> None:
         org_name: str | None = org_name_from_email(accumulator.email)
+        org_service = OrgService(self._db)
+        org = await org_service.resolve_org(
+            user_id=user_id,
+            email=accumulator.email,
+            org_name_hint=org_name,
+        )
         person = Person(
             user_id=user_id,
             canonical_name=accumulator.display_name,
             email_addresses=[accumulator.email],
-            current_org_name=org_name,
+            current_org_name=org.canonical_name if org else org_name,
+            current_org_id=org.id if org else None,
             last_seen_in_email=accumulator.last_seen_at,
             confidence_score=0.85,
         )
         self._db.add(person)
         await self._db.flush()
 
+        is_broadcast, is_human = edge_flags_from_accumulator(accumulator)
         tie_strength: float = min(
             1.0,
             float(accumulator.message_count) / 20.0,
@@ -248,13 +266,35 @@ class ImportService:
             thread_count=accumulator.message_count,
             last_email_at=accumulator.last_seen_at,
             last_genuine_interaction_at=accumulator.last_seen_at
-            if accumulator.outbound_count > 0 and accumulator.inbound_count > 0
+            if is_human
             else None,
             first_contact_date=accumulator.last_seen_at,
             tie_strength_score=tie_strength,
+            is_broadcast=is_broadcast,
+            is_human=is_human,
             notes=f"Imported from Gmail metadata for {user_email}",
         )
         self._db.add(edge)
+
+    async def _link_orgs_for_user(self, user_id: uuid.UUID) -> None:
+        result = await self._db.execute(select(Person).where(Person.user_id == user_id))
+        for person in result.scalars().all():
+            if person.current_org_id is not None or not person.email_addresses:
+                continue
+            org_name: str | None = person.current_org_name or org_name_from_email(
+                person.email_addresses[0]
+            )
+            org_service = OrgService(self._db)
+            org = await org_service.resolve_org(
+                user_id=user_id,
+                email=person.email_addresses[0],
+                org_name_hint=org_name,
+            )
+            if org is not None:
+                person.current_org_id = org.id
+                if not person.current_org_name:
+                    person.current_org_name = org.canonical_name
+        await self._db.flush()
 
     async def _get_credential_for_source(self, source: Source) -> OAuthCredential | None:
         result = await self._db.execute(
@@ -280,64 +320,3 @@ class ImportService:
         cred.token_expires_at = tokens.expires_at
         cred.scopes = tokens.scopes
         await self._db.flush()
-
-
-class QueryService:
-    def __init__(self, db: AsyncSession) -> None:
-        self._db: AsyncSession = db
-
-    async def query_by_user(
-        self,
-        *,
-        user_id: uuid.UUID,
-        question: str,
-        limit: int = 25,
-    ) -> list[Person]:
-        company: str | None = company_query_from_question(question)
-        name_hint: str | None = name_query_from_question(question)
-        needs_filter: bool = company is not None or name_hint is not None
-        fetch_limit: int = 500 if needs_filter else limit
-        stmt = (
-            select(Person)
-            .options(selectinload(Person.edge))
-            .where(Person.user_id == user_id)
-            .order_by(Person.last_seen_in_email.desc().nullslast())
-            .limit(fetch_limit)
-        )
-        result = await self._db.execute(stmt)
-        people: list[Person] = list(result.scalars().all())
-
-        if not needs_filter:
-            return people[:limit]
-
-        filtered: list[Person] = []
-        company_lower: str | None = company.lower() if company else None
-        for person in people:
-            if name_hint is not None and not person_matches_name(
-                person.canonical_name,
-                list(person.email_addresses),
-                name_hint,
-            ):
-                continue
-            if company_lower is not None:
-                org_match: bool = bool(
-                    person.current_org_name
-                    and company_lower in person.current_org_name.lower()
-                )
-                name_match: bool = company_lower in person.canonical_name.lower()
-                email_match: bool = any(
-                    company_lower in email.split("@", 1)[-1]
-                    for email in person.email_addresses
-                )
-                if not (org_match or name_match or email_match):
-                    continue
-            filtered.append(person)
-
-        filtered.sort(
-            key=lambda p: (
-                p.edge.tie_strength_score if p.edge else 0.0,
-                p.last_seen_in_email.timestamp() if p.last_seen_in_email else 0.0,
-            ),
-            reverse=True,
-        )
-        return filtered[:limit]

@@ -9,6 +9,7 @@ from contactsafe_core.enums import (
     SourceType,
     SyncState,
 )
+from contactsafe_core.query_plan import QueryPlan
 
 
 class UserPublic(BaseModel):
@@ -101,8 +102,11 @@ class PersonMatch(BaseModel):
     name: str
     emails: list[str]
     org_name: str | None = None
+    current_role: str | None = None
+    inferred_categories: list[str] = Field(default_factory=list)
     last_seen_in_email: datetime | None = None
     tie_strength_score: float = 0.0
+    match_reason: str = ""
     relevance: str = ""
 
 
@@ -110,3 +114,4 @@ class QueryNetworkResult(BaseModel):
     question: str
     matches: list[PersonMatch] = Field(default_factory=lambda: list[PersonMatch]())
     message: str
+    applied_plan: QueryPlan | None = None

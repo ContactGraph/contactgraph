@@ -1,0 +1,188 @@
+import json
+import logging
+import re
+import uuid
+from typing import cast
+
+import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from contactsafe_server.config import Settings
+from contactsafe_server.db.models import Person, PersonEdge
+from contactsafe_server.services.openai_json import content_from_chat_completion, parse_json_object
+from contactsafe_server.services.email_parse import (
+    ContactAccumulator,
+    is_human_edge,
+    is_likely_broadcast_contact,
+    org_name_from_email,
+)
+
+logger = logging.getLogger(__name__)
+
+_CATEGORY_KEYWORDS: dict[str, list[str]] = {
+    "vc": [r"\bvc\b", r"venture capital", r"investor", r"partner at"],
+    "founder": [r"\bfounder\b", r"\bco-founder\b", r"\bceo\b"],
+    "engineer": [r"\bengineer\b", r"\bdeveloper\b", r"\bsoftware\b"],
+    "sales": [r"\bsales\b", r"\baccount executive\b", r"\bae\b"],
+}
+
+_ROLE_PATTERNS: list[tuple[str, str]] = [
+    (r"\brevops\b", "RevOps"),
+    (r"\brevenue operations\b", "Revenue Operations"),
+    (r"\bproduct manager\b", "Product Manager"),
+    (r"\bchief executive\b", "CEO"),
+]
+
+
+class IngestEnrichmentService:
+    def __init__(self, db: AsyncSession, settings: Settings) -> None:
+        self._db: AsyncSession = db
+        self._settings: Settings = settings
+
+    async def enrich_after_import(
+        self,
+        *,
+        user_id: uuid.UUID,
+        contact_by_email: dict[str, ContactAccumulator],
+    ) -> None:
+        result = await self._db.execute(
+            select(Person)
+            .join(PersonEdge, PersonEdge.person_id == Person.id)
+            .where(Person.user_id == user_id)
+            .order_by(PersonEdge.tie_strength_score.desc())
+            .limit(self._settings.enrichment_contact_limit)
+        )
+        people: list[Person] = list(result.scalars().unique().all())
+        if not people:
+            return
+
+        if self._settings.openai_api_key:
+            await self._llm_enrich_batch(people, contact_by_email)
+        else:
+            for person in people:
+                acc: ContactAccumulator | None = contact_by_email.get(
+                    person.email_addresses[0] if person.email_addresses else ""
+                )
+                self._heuristic_enrich_person(person, acc)
+
+        await self._db.flush()
+
+    def _heuristic_enrich_person(
+        self,
+        person: Person,
+        accumulator: ContactAccumulator | None,
+    ) -> None:
+        blob: str = f"{person.canonical_name} {person.current_role or ''}".lower()
+        if accumulator is not None:
+            blob = f"{blob} {accumulator.display_name} {accumulator.email}"
+
+        categories: list[str] = []
+        for category, patterns in _CATEGORY_KEYWORDS.items():
+            if any(re.search(p, blob) for p in patterns):
+                categories.append(category)
+        if categories:
+            person.inferred_categories = categories
+
+        if not person.current_role:
+            for pattern, role_label in _ROLE_PATTERNS:
+                if re.search(pattern, blob, flags=re.IGNORECASE):
+                    person.current_role = role_label
+                    break
+
+        if not person.current_org_name and person.email_addresses:
+            person.current_org_name = org_name_from_email(person.email_addresses[0])
+
+    async def _llm_enrich_batch(
+        self,
+        people: list[Person],
+        contact_by_email: dict[str, ContactAccumulator],
+    ) -> None:
+        payload_people: list[dict[str, str]] = []
+        for person in people[:50]:
+            email: str = person.email_addresses[0] if person.email_addresses else ""
+            acc: ContactAccumulator | None = contact_by_email.get(email)
+            payload_people.append(
+                {
+                    "person_id": str(person.id),
+                    "name": person.canonical_name,
+                    "email": email,
+                    "org_hint": person.current_org_name or "",
+                    "notes": acc.display_name if acc else "",
+                }
+            )
+
+        prompt: str = (
+            "For each contact, infer categories (vc, founder, engineer, sales, etc.), "
+            "current_role (job title if known), and improved org_name. "
+            "Return JSON: {\"contacts\": [{\"person_id\": \"...\", \"categories\": [], "
+            "\"current_role\": \"\", \"org_name\": \"\"}]}"
+        )
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as http:
+                response = await http.post(
+                    f"{self._settings.openai_base_url.rstrip('/')}/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {self._settings.openai_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self._settings.openai_enrichment_model,
+                        "temperature": 0,
+                        "response_format": {"type": "json_object"},
+                        "messages": [
+                            {"role": "system", "content": prompt},
+                            {
+                                "role": "user",
+                                "content": json.dumps({"contacts": payload_people}),
+                            },
+                        ],
+                    },
+                )
+                response.raise_for_status()
+                data = parse_json_object(
+                    content_from_chat_completion(cast(dict[str, object], response.json()))
+                )
+        except Exception:
+            logger.exception("LLM ingest enrichment failed; using heuristics")
+            for person in people:
+                acc = contact_by_email.get(
+                    person.email_addresses[0] if person.email_addresses else ""
+                )
+                self._heuristic_enrich_person(person, acc)
+            return
+
+        contacts_raw: object = data.get("contacts")
+        if not isinstance(contacts_raw, list):
+            return
+
+        by_id: dict[str, Person] = {str(p.id): p for p in people}
+        items: list[object] = cast(list[object], contacts_raw)
+        for item_raw in items:
+            if not isinstance(item_raw, dict):
+                continue
+            item: dict[str, object] = cast(dict[str, object], item_raw)
+            pid_raw: object = item.get("person_id")
+            if not isinstance(pid_raw, str):
+                continue
+            person: Person | None = by_id.get(pid_raw)
+            if person is None:
+                continue
+            cats_raw: object = item.get("categories")
+            if isinstance(cats_raw, list):
+                cat_items: list[object] = cast(list[object], cats_raw)
+                person.inferred_categories = [
+                    str(c).lower() for c in cat_items if isinstance(c, (str, int))
+                ]
+            role_raw: object = item.get("current_role")
+            if isinstance(role_raw, str) and role_raw.strip():
+                person.current_role = role_raw.strip()
+            org_raw: object = item.get("org_name")
+            if isinstance(org_raw, str) and org_raw.strip():
+                person.current_org_name = org_raw.strip()
+
+
+def edge_flags_from_accumulator(accumulator: ContactAccumulator) -> tuple[bool, bool]:
+    is_broadcast: bool = is_likely_broadcast_contact(accumulator)
+    is_human: bool = is_human_edge(accumulator) and not is_broadcast
+    return is_broadcast, is_human

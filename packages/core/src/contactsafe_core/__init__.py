@@ -5,6 +5,7 @@ from contactsafe_core.enums import (
     SourceType,
     SyncState,
 )
+from contactsafe_core.query_plan import QueryIntent, QueryPlan, QuerySortBy
 from contactsafe_core.schemas import (
     ConnectSourceResult,
     ListSourcesResult,
@@ -24,7 +25,10 @@ __all__ = [
     "OAuthCredentialSummary",
     "OAuthProvider",
     "PersonMatch",
+    "QueryIntent",
     "QueryNetworkResult",
+    "QueryPlan",
+    "QuerySortBy",
     "SessionPublic",
     "SessionStatus",
     "SourceConnectionStatus",

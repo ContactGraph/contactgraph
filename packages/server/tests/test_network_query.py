@@ -1,0 +1,113 @@
+import uuid
+from datetime import UTC, datetime
+
+import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from contactsafe_core.query_plan import QueryPlan
+from contactsafe_server.db.models import Person, PersonEdge, User
+from contactsafe_server.services.network_query_service import NetworkQueryService
+
+
+@pytest.mark.asyncio
+async def test_executor_filters_name_and_excludes_broadcast(
+    db_session: AsyncSession,
+) -> None:
+    user = User(email=f"query-{uuid.uuid4()}@example.com")
+    db_session.add(user)
+    await db_session.flush()
+
+    human = Person(
+        user_id=user.id,
+        canonical_name="Chris Pappas",
+        email_addresses=["chris@aix.com"],
+        current_org_name="AIX",
+        inferred_categories=["founder"],
+        last_seen_in_email=datetime.now(tz=UTC),
+    )
+    newsletter = Person(
+        user_id=user.id,
+        canonical_name="Chris Newsletter",
+        email_addresses=["newsletter@marketing.io"],
+        last_seen_in_email=datetime.now(tz=UTC),
+    )
+    db_session.add_all([human, newsletter])
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            PersonEdge(
+                user_id=user.id,
+                person_id=human.id,
+                tie_strength_score=0.9,
+                is_human=True,
+                is_broadcast=False,
+                outbound_count=5,
+                inbound_count=5,
+            ),
+            PersonEdge(
+                user_id=user.id,
+                person_id=newsletter.id,
+                tie_strength_score=0.8,
+                is_human=False,
+                is_broadcast=True,
+                outbound_count=0,
+                inbound_count=20,
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    executor = NetworkQueryService(db_session)
+    plan = QueryPlan(name_tokens=["chris"], org_names=["aix"], exclude_broadcast=True, limit=10)
+    matches = await executor.execute(user_id=user.id, plan=plan)
+
+    assert len(matches) == 1
+    assert matches[0].name == "Chris Pappas"
+    assert "chris" in matches[0].match_reason.lower()
+
+
+@pytest.mark.asyncio
+async def test_executor_category_filter(db_session: AsyncSession) -> None:
+    user = User(email=f"vc-{uuid.uuid4()}@example.com")
+    db_session.add(user)
+    await db_session.flush()
+
+    vc_person = Person(
+        user_id=user.id,
+        canonical_name="Jane Investor",
+        email_addresses=["jane@vcfund.com"],
+        inferred_categories=["vc"],
+    )
+    other = Person(
+        user_id=user.id,
+        canonical_name="Bob Engineer",
+        email_addresses=["bob@startup.com"],
+        inferred_categories=["engineer"],
+    )
+    db_session.add_all([vc_person, other])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            PersonEdge(
+                user_id=user.id,
+                person_id=vc_person.id,
+                tie_strength_score=0.7,
+                is_broadcast=False,
+            ),
+            PersonEdge(
+                user_id=user.id,
+                person_id=other.id,
+                tie_strength_score=0.6,
+                is_broadcast=False,
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    matches = await NetworkQueryService(db_session).execute(
+        user_id=user.id,
+        plan=QueryPlan(categories_any=["vc"], limit=10),
+    )
+    assert len(matches) == 1
+    assert matches[0].name == "Jane Investor"

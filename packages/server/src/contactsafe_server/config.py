@@ -60,6 +60,16 @@ class Settings(BaseSettings):
         description="Gmail search query for import",
     )
 
+    openai_api_key: str | None = Field(default=None, description="OpenAI API key for query planning")
+    openai_base_url: str = Field(default="https://api.openai.com/v1")
+    openai_query_model: str = Field(default="gpt-4o-mini")
+    openai_enrichment_model: str = Field(default="gpt-4o-mini")
+    openai_embedding_model: str = Field(default="text-embedding-3-small")
+    enrichment_contact_limit: int = Field(
+        default=100,
+        description="Max contacts to LLM-classify per sync",
+    )
+
     @field_validator("database_url", mode="before")
     @classmethod
     def ensure_asyncpg_driver(cls, value: str) -> str:

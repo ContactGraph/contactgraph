@@ -1,6 +1,7 @@
 import uuid
 from datetime import datetime
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     ARRAY,
     Boolean,
@@ -16,6 +17,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+EMBEDDING_DIMENSIONS: int = 1536
 
 
 class Base(DeclarativeBase):
@@ -48,6 +51,10 @@ class User(Base):
     sources: Mapped[list["Source"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     persons: Mapped[list["Person"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     person_edges: Mapped[list["PersonEdge"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    orgs: Mapped[list["Org"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    interaction_excerpts: Mapped[list["InteractionExcerpt"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
 
@@ -155,6 +162,27 @@ class ConnectSession(Base):
     user: Mapped["User | None"] = relationship(back_populates="sessions")
 
 
+class Org(Base):
+    __tablename__ = "orgs"
+    __table_args__ = (UniqueConstraint("user_id", "domain", name="uq_org_user_domain"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
+    domain: Mapped[str] = mapped_column(Text, nullable=False)
+    aliases: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    user: Mapped["User"] = relationship(back_populates="orgs")
+    persons: Mapped[list["Person"]] = relationship(back_populates="current_org")
+
+
 class Person(Base):
     __tablename__ = "persons"
 
@@ -168,6 +196,9 @@ class Person(Base):
     email_addresses: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
     phone_numbers: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
     current_role: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_org_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="SET NULL"), nullable=True
+    )
     current_org_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     location: Mapped[str | None] = mapped_column(Text, nullable=True)
     inferred_categories: Mapped[list[str]] = mapped_column(
@@ -188,6 +219,7 @@ class Person(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="persons")
+    current_org: Mapped["Org | None"] = relationship(back_populates="persons")
     edge: Mapped["PersonEdge | None"] = relationship(
         back_populates="person", uselist=False, cascade="all, delete-orphan"
     )
@@ -219,6 +251,8 @@ class PersonEdge(Base):
         DateTime(timezone=True), nullable=True
     )
     tie_strength_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    is_broadcast: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_human: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -232,3 +266,27 @@ class PersonEdge(Base):
 
     user: Mapped["User"] = relationship(back_populates="person_edges")
     person: Mapped["Person"] = relationship(back_populates="edge")
+
+
+class InteractionExcerpt(Base):
+    __tablename__ = "interaction_excerpts"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False
+    )
+    excerpt_text: Mapped[str] = mapped_column(Text, nullable=False)
+    embedding: Mapped[list[float] | None] = mapped_column(
+        Vector(EMBEDDING_DIMENSIONS), nullable=True
+    )
+    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    user: Mapped["User"] = relationship(back_populates="interaction_excerpts")

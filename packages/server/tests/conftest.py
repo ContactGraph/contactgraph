@@ -64,6 +64,12 @@ async def db_session() -> AsyncIterator[AsyncSession]:
         engine, expire_on_commit=False
     )
     async with engine.begin() as conn:
+        await conn.execute(
+            __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS vector")
+        )
+        await conn.execute(
+            __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+        )
         await conn.run_sync(Base.metadata.create_all)
     async with factory() as session:
         yield session
