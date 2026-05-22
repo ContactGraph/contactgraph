@@ -3,7 +3,7 @@
 Agent-native personal graph. Phase 1: MCP server + Google OAuth for Gmail/Calendar.
 
 ## Quick start
-
+ 
 ```bash
 # Install dependencies
 uv sync
