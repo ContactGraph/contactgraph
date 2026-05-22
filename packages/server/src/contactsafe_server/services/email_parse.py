@@ -92,6 +92,10 @@ def org_name_from_email(email: str) -> str | None:
     return base.replace("-", " ").title()
 
 
+def _strip_query_fragment(value: str) -> str:
+    return value.strip().rstrip("?.!,").strip()
+
+
 def company_query_from_question(question: str) -> str | None:
     patterns: list[str] = [
         r"\bat\s+([A-Za-z0-9][A-Za-z0-9._&\s-]{1,60})",
@@ -101,10 +105,40 @@ def company_query_from_question(question: str) -> str | None:
     for pattern in patterns:
         match: re.Match[str] | None = re.search(pattern, question, flags=re.IGNORECASE)
         if match is not None:
-            company: str = match.group(1).strip().rstrip("?.!,")
+            company: str = _strip_query_fragment(match.group(1))
             if company:
                 return company
     return None
+
+
+def name_query_from_question(question: str) -> str | None:
+    """Extract a person-name hint from questions like 'who do I know named Chris'."""
+    patterns: list[str] = [
+        r"\bnamed\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*)?)",
+        r"\bcalled\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*)?)",
+        r"\bwho\s+(?:is|do\s+I\s+know)\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*)?)",
+        r"\bknow\s+(?:someone|anyone|a\s+person)\s+named\s+([A-Za-z][A-Za-z'.-]*(?:\s+[A-Za-z][A-Za-z'.-]*)?)",
+    ]
+    for pattern in patterns:
+        match: re.Match[str] | None = re.search(pattern, question, flags=re.IGNORECASE)
+        if match is not None:
+            name: str = _strip_query_fragment(match.group(1))
+            if name and name.lower() not in {"who", "anyone", "someone"}:
+                return name
+    return None
+
+
+def person_matches_name(person_name: str, person_emails: list[str], name_query: str) -> bool:
+    tokens: list[str] = [
+        token
+        for token in name_query.lower().split()
+        if len(token) >= 2
+    ]
+    if not tokens:
+        return False
+    name_lower: str = person_name.lower()
+    email_blob: str = " ".join(person_emails).lower()
+    return all(token in name_lower or token in email_blob for token in tokens)
 
 
 def parse_internal_date_ms(raw: str | None) -> datetime | None:

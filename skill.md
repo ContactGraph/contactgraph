@@ -1,6 +1,6 @@
 # ContactSafe
 
-ContactSafe builds a private contact graph from your Gmail and Calendar so your AI agent can answer questions about your network — who you know, where they work, and how strong each relationship is.
+ContactSafe builds a private contact graph from connected data sources (Gmail today; more sources later) so your AI agent can answer questions about your network — who you know, where they work, and how strong each relationship is.
 
 **Free forever for consumers.** We never sell your data. You can delete everything anytime.
 
@@ -11,43 +11,69 @@ ContactSafe builds a private contact graph from your Gmail and Calendar so your 
 
 ## Setup flow
 
-1. Call `connect_gmail` to start OAuth. The tool returns `oauth_url` and `session_id`.
+1. Call `connect_source` with `source_type` `google_mail`. Returns `oauth_url` and `connect_session_id`.
 2. Ask the user to open `oauth_url` in a browser and sign in with Google (Gmail read + Calendar read only).
-3. Poll `get_import_status(session_id)` until `status` is `connected`.
-4. Phase 1 only establishes the Google connection; email import begins in a later release.
+3. Poll `get_source_status(connect_session_id=...)` until `status` is `connected`.
+4. Call `list_sources(connect_session_id=...)` to get `source_id` for the mail source.
+5. If sync never started, call `sync_source(source_id=...)` or `sync_source(connect_session_id=...)` — no browser step.
+6. Poll `get_source_status` until `sync_state` is `partial` or `complete`, then use `query_network`.
 
 ## Tools
 
 ### `query_network`
 
-Search the user's Gmail-derived contact graph.
+Search the user's contact graph.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `question` | string | Yes | e.g. "Who do I know at Stripe?" |
-| `session_id` | string | Yes | UUID from `connect_gmail` (bare UUID or `{"session_id":"..."}`) |
+| `connect_session_id` | string | No* | From `connect_source` |
+| `source_id` | string | No* | From `list_sources` |
 
-Wait until `get_import_status` shows `import_state` of `partial` or `complete` before querying.
+\* Provide `connect_session_id` or `source_id`.
 
-### `connect_gmail`
+Wait until `get_source_status` shows `sync_state` of `partial` or `complete` before querying.
 
-Start or resume Google OAuth.
+### `connect_source`
+
+Connect a data source. Only `google_mail` is implemented today.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
+| `source_type` | string | No | Default `google_mail` |
 | `user_token` | string | No | User email if checking an existing connection |
 
-**Returns:** `session_id`, `oauth_url`, `status`, `message`, `already_connected`, `email`, `scopes`
+**Returns:** `connect_session_id`, `oauth_url`, `status`, `message`, `already_connected`, `email`, `scopes`, `source_id` (when already connected)
 
-### `get_import_status`
+### `list_sources`
 
-Check connection status for a session.
+List connected sources for the user linked to a connect session.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `session_id` | string | Yes | UUID from `connect_gmail` |
+| `connect_session_id` | string | Yes | From `connect_source` |
 
-**Returns:** `status` (`pending` | `connected` | `failed`), `import_state` (`pending` | `importing` | `partial` | `complete`), `contacts_found`, `contacts_resolved`, `email`, `scopes`, `message`
+### `sync_source`
+
+Start or restart ingestion for a connected source.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `source_id` | string | No* | From `list_sources` |
+| `connect_session_id` | string | No* | From `connect_source` |
+
+**Returns:** `scheduled`, `sync_state`, `source_id`, `message` — poll `get_source_status` after `scheduled: true`.
+
+### `get_source_status`
+
+Check OAuth connection and sync progress for a source.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `source_id` | string | No* | From `list_sources` |
+| `connect_session_id` | string | No* | From `connect_source` |
+
+**Returns:** `status`, `connection_status`, `sync_state` (`pending` | `syncing` | `partial` | `complete` | `failed`), contact counts, `email`, `scopes`, `message`
 
 ## Agent pitch (suggested)
 
@@ -56,7 +82,7 @@ Check connection status for a session.
 ## OAuth scopes
 
 - `gmail.readonly` — derive contacts from email metadata (no full body storage)
-- `calendar.readonly` — relationship signals from events (Phase 2+)
+- `calendar.readonly` — relationship signals from events (future)
 - `openid`, `email`, `profile` — identity only
 
 ## Privacy

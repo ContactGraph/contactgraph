@@ -69,12 +69,14 @@ python -c "import secrets; print('SESSION_SECRET=' + secrets.token_urlsafe(32))"
 4. Add redirect URI: `http://localhost:8000/oauth/callback`
 5. Set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` in `.env`.
 
-## MCP tools (Phase 1)
+## MCP tools
 
 | Tool | Description |
 |------|-------------|
-| `connect_gmail` | Returns OAuth URL + session ID |
-| `get_import_status` | Poll OAuth + Gmail import progress |
+| `connect_source` | Connect a data source (`google_mail` today); returns OAuth URL + `connect_session_id` |
+| `list_sources` | List connected sources (`source_id`, sync state) |
+| `sync_source` | Start/restart ingestion without re-OAuth |
+| `get_source_status` | Poll connection + sync progress per source |
 | `query_network` | Search contacts (e.g. "who do I know at Stripe?") |
 
 Test with [MCP Inspector](https://github.com/modelcontextprotocol/inspector): connect to `http://localhost:8000/mcp`.

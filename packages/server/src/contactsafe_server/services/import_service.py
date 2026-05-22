@@ -6,17 +6,19 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from contactsafe_core.enums import ImportState, OAuthProvider
+from contactsafe_core.enums import OAuthProvider, SourceConnectionStatus, SourceType, SyncState
 from contactsafe_server.config import Settings
-from contactsafe_server.db.models import OAuthCredential, Person, PersonEdge, User
+from contactsafe_server.db.models import OAuthCredential, Person, PersonEdge, Source, User
 from contactsafe_server.oauth.google import GoogleTokens
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.email_parse import (
     ContactAccumulator,
     company_query_from_question,
+    name_query_from_question,
     org_name_from_email,
     parse_address_header,
     parse_internal_date_ms,
+    person_matches_name,
 )
 from contactsafe_server.services.gmail_client import GmailClient, GmailMessageMeta
 
@@ -36,23 +38,30 @@ class ImportService:
         self._encryptor: TokenEncryptor = encryptor
         self._gmail: GmailClient = gmail
 
-    async def run_import(self, user_id: uuid.UUID) -> None:
-        user: User | None = await self._db.get(User, user_id)
+    async def run_sync(self, source_id: uuid.UUID) -> None:
+        source: Source | None = await self._db.get(Source, source_id)
+        if source is None:
+            return
+        if source.source_type != SourceType.GOOGLE_MAIL.value:
+            raise ValueError(f"Sync not supported for source type {source.source_type}")
+
+        user: User | None = await self._db.get(User, source.user_id)
         if user is None:
             return
 
-        user.import_state = ImportState.IMPORTING.value
-        user.import_started_at = datetime.now(tz=UTC)
-        user.import_error = None
-        user.contacts_found = 0
-        user.contacts_resolved = 0
-        user.contacts_pending = 0
+        user_id: uuid.UUID = source.user_id
+        source.sync_state = SyncState.SYNCING.value
+        source.sync_started_at = datetime.now(tz=UTC)
+        source.sync_error = None
+        source.contacts_found = 0
+        source.contacts_resolved = 0
+        source.contacts_pending = 0
         await self._db.flush()
 
         try:
-            cred: OAuthCredential | None = await self._get_credential(user_id)
+            cred: OAuthCredential | None = await self._get_credential_for_source(source)
             if cred is None:
-                raise ValueError("No valid Google OAuth credentials for user")
+                raise ValueError("No valid Google OAuth credentials for source")
 
             access_token: str = self._encryptor.decrypt(cred.access_token_encrypted)
             refresh_token: str = self._encryptor.decrypt(cred.refresh_token_encrypted)
@@ -67,8 +76,8 @@ class ImportService:
                 access_token=access_token,
                 user_email=user.email,
             )
-            user.contacts_found = len(contacts)
-            user.contacts_pending = max(
+            source.contacts_found = len(contacts)
+            source.contacts_pending = max(
                 0, len(contacts) - self._settings.import_initial_contact_target
             )
             await self._db.flush()
@@ -90,28 +99,42 @@ class ImportService:
             for accumulator in sorted_contacts:
                 await self._upsert_person(user_id, user.email, accumulator)
                 resolved += 1
-                user.contacts_resolved = resolved
-                user.contacts_pending = max(0, user.contacts_found - resolved)
+                source.contacts_resolved = resolved
+                source.contacts_pending = max(0, source.contacts_found - resolved)
                 if resolved == self._settings.import_initial_contact_target:
-                    user.import_state = ImportState.PARTIAL.value
+                    source.sync_state = SyncState.PARTIAL.value
                     await self._db.flush()
 
             for accumulator in sorted_contacts[self._settings.import_initial_contact_target :]:
                 await self._upsert_person(user_id, user.email, accumulator)
                 resolved += 1
-                user.contacts_resolved = resolved
-                user.contacts_pending = max(0, user.contacts_found - resolved)
+                source.contacts_resolved = resolved
+                source.contacts_pending = max(0, source.contacts_found - resolved)
 
-            user.import_state = ImportState.COMPLETE.value
-            user.import_completed_at = datetime.now(tz=UTC)
-            user.contacts_pending = 0
+            source.sync_state = SyncState.COMPLETE.value
+            source.sync_completed_at = datetime.now(tz=UTC)
+            source.contacts_pending = 0
+            source.connection_status = SourceConnectionStatus.CONNECTED.value
             await self._db.flush()
         except Exception as exc:
-            logger.exception("Import failed for user %s", user_id)
-            user.import_state = ImportState.PENDING.value
-            user.import_error = str(exc)[:500]
+            logger.exception("Sync failed for source %s", source_id)
+            source.sync_state = SyncState.FAILED.value
+            source.sync_error = str(exc)[:500]
             await self._db.flush()
             raise
+
+    async def run_import(self, user_id: uuid.UUID) -> None:
+        """Deprecated: use run_sync with the user's google_mail source_id."""
+        result = await self._db.execute(
+            select(Source).where(
+                Source.user_id == user_id,
+                Source.source_type == SourceType.GOOGLE_MAIL.value,
+            )
+        )
+        source: Source | None = result.scalar_one_or_none()
+        if source is None:
+            return
+        await self.run_sync(source.id)
 
     async def _scan_gmail(
         self,
@@ -233,10 +256,19 @@ class ImportService:
         )
         self._db.add(edge)
 
-    async def _get_credential(self, user_id: uuid.UUID) -> OAuthCredential | None:
+    async def _get_credential_for_source(self, source: Source) -> OAuthCredential | None:
         result = await self._db.execute(
             select(OAuthCredential).where(
-                OAuthCredential.user_id == user_id,
+                OAuthCredential.source_id == source.id,
+                OAuthCredential.is_valid.is_(True),
+            )
+        )
+        cred: OAuthCredential | None = result.scalar_one_or_none()
+        if cred is not None:
+            return cred
+        result = await self._db.execute(
+            select(OAuthCredential).where(
+                OAuthCredential.user_id == source.user_id,
                 OAuthCredential.provider == OAuthProvider.GOOGLE.value,
                 OAuthCredential.is_valid.is_(True),
             )
@@ -254,41 +286,58 @@ class QueryService:
     def __init__(self, db: AsyncSession) -> None:
         self._db: AsyncSession = db
 
-    async def query_by_session(
+    async def query_by_user(
         self,
         *,
-        session_user_id: uuid.UUID,
+        user_id: uuid.UUID,
         question: str,
         limit: int = 25,
     ) -> list[Person]:
         company: str | None = company_query_from_question(question)
-        fetch_limit: int = limit * 10 if company is not None else limit
+        name_hint: str | None = name_query_from_question(question)
+        needs_filter: bool = company is not None or name_hint is not None
+        fetch_limit: int = 500 if needs_filter else limit
         stmt = (
             select(Person)
             .options(selectinload(Person.edge))
-            .where(Person.user_id == session_user_id)
+            .where(Person.user_id == user_id)
             .order_by(Person.last_seen_in_email.desc().nullslast())
             .limit(fetch_limit)
         )
         result = await self._db.execute(stmt)
         people: list[Person] = list(result.scalars().all())
-        if company is None:
+
+        if not needs_filter:
             return people[:limit]
 
-        company_lower: str = company.lower()
         filtered: list[Person] = []
+        company_lower: str | None = company.lower() if company else None
         for person in people:
-            org_match: bool = bool(
-                person.current_org_name
-                and company_lower in person.current_org_name.lower()
-            )
-            name_match: bool = company_lower in person.canonical_name.lower()
-            email_match: bool = any(
-                company_lower in email.split("@", 1)[-1]
-                for email in person.email_addresses
-            )
-            if org_match or name_match or email_match:
-                filtered.append(person)
-            if len(filtered) >= limit:
-                break
-        return filtered
+            if name_hint is not None and not person_matches_name(
+                person.canonical_name,
+                list(person.email_addresses),
+                name_hint,
+            ):
+                continue
+            if company_lower is not None:
+                org_match: bool = bool(
+                    person.current_org_name
+                    and company_lower in person.current_org_name.lower()
+                )
+                name_match: bool = company_lower in person.canonical_name.lower()
+                email_match: bool = any(
+                    company_lower in email.split("@", 1)[-1]
+                    for email in person.email_addresses
+                )
+                if not (org_match or name_match or email_match):
+                    continue
+            filtered.append(person)
+
+        filtered.sort(
+            key=lambda p: (
+                p.edge.tie_strength_score if p.edge else 0.0,
+                p.last_seen_in_email.timestamp() if p.last_seen_in_email else 0.0,
+            ),
+            reverse=True,
+        )
+        return filtered[:limit]

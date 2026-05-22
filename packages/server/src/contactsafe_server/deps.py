@@ -7,6 +7,7 @@ from contactsafe_server.db.connection import get_session_factory
 from contactsafe_server.oauth.google import GoogleOAuthClient
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.oauth_service import OAuthService
+from contactsafe_server.services.source_service import SourceService
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,3 +34,7 @@ def build_oauth_service(db: AsyncSession, ctx: AppContext) -> OAuthService:
         encryptor=ctx.encryptor,
         google=google,
     )
+
+
+def build_source_service(db: AsyncSession) -> SourceService:
+    return SourceService(db)

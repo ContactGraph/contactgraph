@@ -31,17 +31,6 @@ class User(Base):
     email: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     google_profile_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     google_profile_picture: Mapped[str | None] = mapped_column(Text, nullable=True)
-    import_state: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
-    contacts_found: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    contacts_resolved: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    contacts_pending: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    import_started_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    import_completed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    import_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -56,6 +45,7 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     sessions: Mapped[list["ConnectSession"]] = relationship(back_populates="user")
+    sources: Mapped[list["Source"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     persons: Mapped[list["Person"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     person_edges: Mapped[list["PersonEdge"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
@@ -71,6 +61,9 @@ class OAuthCredential(Base):
     )
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    source_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sources.id", ondelete="SET NULL"), nullable=True
     )
     provider: Mapped[str] = mapped_column(String(32), nullable=False, default="google")
     access_token_encrypted: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
@@ -89,6 +82,57 @@ class OAuthCredential(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="oauth_credentials")
+    source: Mapped["Source | None"] = relationship(back_populates="oauth_credential")
+
+
+class Source(Base):
+    __tablename__ = "sources"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "source_type",
+            "external_account_id",
+            name="uq_source_user_type_account",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    source_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    external_account_id: Mapped[str] = mapped_column(Text, nullable=False)
+    connection_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="pending_oauth"
+    )
+    sync_state: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    contacts_found: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    contacts_resolved: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    contacts_pending: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    sync_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sync_completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship(back_populates="sources")
+    oauth_credential: Mapped["OAuthCredential | None"] = relationship(
+        back_populates="source", uselist=False
+    )
 
 
 class ConnectSession(Base):

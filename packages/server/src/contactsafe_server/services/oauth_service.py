@@ -5,12 +5,14 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from contactsafe_core.enums import ImportState, OAuthProvider, SessionStatus
-from contactsafe_core.schemas import ConnectGmailResult, ImportStatus
+from contactsafe_core.enums import OAuthProvider, SessionStatus, SourceType, SyncState
+from contactsafe_core.schemas import ConnectSourceResult
 from contactsafe_server.config import Settings
-from contactsafe_server.db.models import ConnectSession, OAuthCredential, User
+from contactsafe_server.db.models import ConnectSession, OAuthCredential, Source, User
 from contactsafe_server.oauth.google import GoogleOAuthClient, GoogleTokens, GoogleUserInfo
 from contactsafe_server.services.crypto import TokenEncryptor
+from contactsafe_server.services.import_scheduler import schedule_source_sync
+from contactsafe_server.services.source_service import SourceService
 
 
 class OAuthService:
@@ -25,11 +27,21 @@ class OAuthService:
         self._settings: Settings = settings
         self._encryptor: TokenEncryptor = encryptor
         self._google: GoogleOAuthClient = google
+        self._sources: SourceService = SourceService(db)
 
-    async def create_connect_session(self, user_token: str | None = None) -> ConnectGmailResult:
+    async def create_connect_session(
+        self,
+        user_token: str | None = None,
+        source_type: SourceType = SourceType.GOOGLE_MAIL,
+    ) -> ConnectSourceResult:
         """Start OAuth flow or return existing connection for a known user."""
+        if source_type != SourceType.GOOGLE_MAIL:
+            raise ValueError(f"connect_source not implemented for {source_type.value}")
+
         if user_token:
-            existing: ConnectGmailResult | None = await self._check_existing_by_email(user_token)
+            existing: ConnectSourceResult | None = await self._check_existing_by_email(
+                user_token
+            )
             if existing is not None:
                 return existing
 
@@ -42,57 +54,15 @@ class OAuthService:
         self._db.add(session)
         await self._db.flush()
 
-        oauth_url: str = self._settings.oauth_start_url_template.format(session_id=session.id)
-        return ConnectGmailResult(
-            session_id=session.id,
+        oauth_url: str = self._settings.oauth_start_url_template.format(
+            session_id=session.id
+        )
+        return ConnectSourceResult(
+            connect_session_id=session.id,
             oauth_url=oauth_url,
             status=SessionStatus.PENDING,
             message="Open the OAuth URL in a browser to connect Gmail and Calendar.",
             already_connected=False,
-        )
-
-    async def get_import_status(self, session_id: uuid.UUID) -> ImportStatus:
-        session: ConnectSession | None = await self._get_session(session_id)
-        if session is None:
-            raise ValueError(f"Unknown session_id: {session_id}")
-
-        status: SessionStatus = SessionStatus(session.status)
-        email: str | None = None
-        scopes: list[str] = list(session.requested_scopes)
-
-        if session.user_id is not None:
-            user: User | None = await self._db.get(User, session.user_id)
-            if user is not None:
-                email = user.email
-            cred: OAuthCredential | None = await self._get_valid_credential(session.user_id)
-            if cred is not None:
-                scopes = list(cred.scopes)
-
-        import_state: ImportState = ImportState.PENDING
-        contacts_found: int = 0
-        contacts_resolved: int = 0
-        contacts_pending: int = 0
-        message: str = self._status_message(status, ImportState.PENDING)
-
-        if session.user_id is not None:
-            user_row: User | None = await self._db.get(User, session.user_id)
-            if user_row is not None:
-                import_state = ImportState(user_row.import_state)
-                contacts_found = user_row.contacts_found
-                contacts_resolved = user_row.contacts_resolved
-                contacts_pending = user_row.contacts_pending
-                message = self._import_message(status, user_row)
-
-        return ImportStatus(
-            session_id=session.id,
-            status=status,
-            import_state=import_state,
-            email=email,
-            scopes=scopes,
-            contacts_found=contacts_found,
-            contacts_resolved=contacts_resolved,
-            contacts_pending=contacts_pending,
-            message=message,
         )
 
     async def get_session_by_id(self, session_id: uuid.UUID) -> ConnectSession | None:
@@ -107,7 +77,7 @@ class OAuthService:
     def build_google_authorization_url(self, session: ConnectSession) -> str:
         return self._google.build_authorization_url(state=session.state)
 
-    async def complete_oauth(self, session: ConnectSession, code: str) -> User:
+    async def complete_oauth(self, session: ConnectSession, code: str) -> tuple[User, Source]:
         tokens: GoogleTokens = await self._google.exchange_code(code)
         userinfo: GoogleUserInfo = await self._google.fetch_userinfo(tokens.access_token)
         email: str = str(userinfo.get("email", "")).strip().lower()
@@ -115,20 +85,22 @@ class OAuthService:
             raise ValueError("Google account did not return an email address")
 
         user: User = await self._upsert_user(email, userinfo)
-        await self._upsert_credentials(user.id, tokens)
+        cred: OAuthCredential = await self._upsert_credentials(user.id, tokens)
+        source: Source = await self._sources.ensure_google_mail_source(user.id, email)
+        await self._sources.link_credential_to_source(cred, source)
 
         session.user_id = user.id
         session.status = SessionStatus.CONNECTED.value
         session.completed_at = datetime.now(tz=UTC)
         await self._db.flush()
-        return user
+        return user, source
 
     async def mark_session_failed(self, session: ConnectSession) -> None:
         session.status = SessionStatus.FAILED.value
         session.completed_at = datetime.now(tz=UTC)
         await self._db.flush()
 
-    async def _check_existing_by_email(self, email: str) -> ConnectGmailResult | None:
+    async def _check_existing_by_email(self, email: str) -> ConnectSourceResult | None:
         normalized: str = email.strip().lower()
         result = await self._db.execute(select(User).where(User.email == normalized))
         user: User | None = result.scalar_one_or_none()
@@ -138,6 +110,9 @@ class OAuthService:
         cred: OAuthCredential | None = await self._get_valid_credential(user.id)
         if cred is None:
             return None
+
+        source: Source = await self._sources.ensure_google_mail_source(user.id, normalized)
+        await self._sources.link_credential_to_source(cred, source)
 
         session: ConnectSession = ConnectSession(
             state=secrets.token_urlsafe(32),
@@ -149,14 +124,20 @@ class OAuthService:
         self._db.add(session)
         await self._db.flush()
 
-        return ConnectGmailResult(
-            session_id=session.id,
+        if source.sync_state in {SyncState.PENDING.value, SyncState.FAILED.value} or (
+            source.sync_error
+        ):
+            schedule_source_sync(source.id)
+
+        return ConnectSourceResult(
+            connect_session_id=session.id,
             oauth_url="",
             status=SessionStatus.CONNECTED,
             message="Gmail and Calendar are already connected for this account.",
             already_connected=True,
             email=user.email,
             scopes=list(cred.scopes),
+            source_id=source.id,
         )
 
     async def _upsert_user(self, email: str, userinfo: GoogleUserInfo) -> User:
@@ -176,7 +157,9 @@ class OAuthService:
         await self._db.flush()
         return user
 
-    async def _upsert_credentials(self, user_id: uuid.UUID, tokens: GoogleTokens) -> None:
+    async def _upsert_credentials(
+        self, user_id: uuid.UUID, tokens: GoogleTokens
+    ) -> OAuthCredential:
         result = await self._db.execute(
             select(OAuthCredential).where(
                 OAuthCredential.user_id == user_id,
@@ -193,7 +176,7 @@ class OAuthService:
             existing.token_expires_at = tokens.expires_at
             existing.scopes = tokens.scopes
             existing.is_valid = True
-            return
+            return existing
 
         cred = OAuthCredential(
             user_id=user_id,
@@ -206,6 +189,7 @@ class OAuthService:
         )
         self._db.add(cred)
         await self._db.flush()
+        return cred
 
     async def _get_valid_credential(self, user_id: uuid.UUID) -> OAuthCredential | None:
         result = await self._db.execute(
@@ -219,35 +203,3 @@ class OAuthService:
 
     async def _get_session(self, session_id: uuid.UUID) -> ConnectSession | None:
         return await self._db.get(ConnectSession, session_id)
-
-    @staticmethod
-    def _status_message(status: SessionStatus, import_state: ImportState) -> str:
-        if status == SessionStatus.PENDING:
-            return "Waiting for Google OAuth. Open the connect URL and authorize access."
-        if status == SessionStatus.FAILED:
-            return "OAuth failed. Call connect_gmail again to retry."
-        if status == SessionStatus.CONNECTED:
-            return f"Google account connected. Import status: {import_state.value}."
-        return "Unknown status."
-
-    @staticmethod
-    def _import_message(status: SessionStatus, user: User) -> str:
-        if status != SessionStatus.CONNECTED:
-            return OAuthService._status_message(status, ImportState(user.import_state))
-        if user.import_error:
-            return f"Import failed: {user.import_error}"
-        match ImportState(user.import_state):
-            case ImportState.IMPORTING:
-                return (
-                    f"Importing contacts from Gmail ({user.contacts_resolved}/"
-                    f"{user.contacts_found} resolved)..."
-                )
-            case ImportState.PARTIAL:
-                return (
-                    f"Partial graph ready ({user.contacts_resolved} contacts). "
-                    "Import continuing in background."
-                )
-            case ImportState.COMPLETE:
-                return f"Import complete. {user.contacts_resolved} contacts in your graph."
-            case _:
-                return "Google connected. Gmail import starting..."

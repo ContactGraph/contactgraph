@@ -13,7 +13,7 @@ from contactsafe_server.db.connection import get_session_factory
 from contactsafe_server.db.models import ConnectSession, User
 from contactsafe_server.oauth.google import GoogleOAuthClient
 from contactsafe_server.services.crypto import TokenEncryptor
-from contactsafe_server.services.import_scheduler import schedule_gmail_import
+from contactsafe_server.services.import_scheduler import schedule_source_sync
 from contactsafe_server.services.oauth_service import OAuthService
 
 router: APIRouter = APIRouter(prefix="/oauth", tags=["oauth"])
@@ -114,7 +114,7 @@ async def oauth_callback(
         raise HTTPException(status_code=400, detail="Invalid OAuth state")
 
     try:
-        user: User = await service.complete_oauth(connect_session, code)
+        user, source = await service.complete_oauth(connect_session, code)
     except Exception as exc:
         await service.mark_session_failed(connect_session)
         return templates.TemplateResponse(
@@ -124,7 +124,7 @@ async def oauth_callback(
             status_code=500,
         )
 
-    schedule_gmail_import(user.id)
+    schedule_source_sync(source.id)
 
     return templates.TemplateResponse(
         request=request,
