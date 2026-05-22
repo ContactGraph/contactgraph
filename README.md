@@ -74,6 +74,7 @@ python -c "import secrets; print('SESSION_SECRET=' + secrets.token_urlsafe(32))"
 | Tool | Description |
 |------|-------------|
 | `connect_gmail` | Returns OAuth URL + session ID |
-| `get_import_status` | Poll connection status |
+| `get_import_status` | Poll OAuth + Gmail import progress |
+| `query_network` | Search contacts (e.g. "who do I know at Stripe?") |
 
 Test with [MCP Inspector](https://github.com/modelcontextprotocol/inspector): connect to `http://localhost:8000/mcp`.

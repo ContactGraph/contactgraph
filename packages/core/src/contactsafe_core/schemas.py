@@ -47,6 +47,22 @@ class ConnectGmailResult(BaseModel):
     scopes: list[str] = Field(default_factory=list)
 
 
+class PersonMatch(BaseModel):
+    person_id: UUID
+    name: str
+    emails: list[str]
+    org_name: str | None = None
+    last_seen_in_email: datetime | None = None
+    tie_strength_score: float = 0.0
+    relevance: str = ""
+
+
+class QueryNetworkResult(BaseModel):
+    question: str
+    matches: list[PersonMatch] = Field(default_factory=lambda: list[PersonMatch]())
+    message: str
+
+
 class ImportStatus(BaseModel):
     """Response from get_import_status MCP tool."""
 

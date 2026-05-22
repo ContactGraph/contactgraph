@@ -47,6 +47,19 @@ class Settings(BaseSettings):
 
     mcp_path: str = "/mcp"
 
+    import_initial_contact_target: int = Field(
+        default=200,
+        description="Contacts resolved before marking import partial",
+    )
+    import_max_messages: int = Field(
+        default=500,
+        description="Max Gmail messages scanned per import run",
+    )
+    import_gmail_query: str = Field(
+        default="newer_than:1y",
+        description="Gmail search query for import",
+    )
+
     @field_validator("database_url", mode="before")
     @classmethod
     def ensure_asyncpg_driver(cls, value: str) -> str:

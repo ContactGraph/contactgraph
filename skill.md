@@ -18,6 +18,17 @@ ContactSafe builds a private contact graph from your Gmail and Calendar so your 
 
 ## Tools
 
+### `query_network`
+
+Search the user's Gmail-derived contact graph.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `question` | string | Yes | e.g. "Who do I know at Stripe?" |
+| `session_id` | string | Yes | UUID from `connect_gmail` (bare UUID or `{"session_id":"..."}`) |
+
+Wait until `get_import_status` shows `import_state` of `partial` or `complete` before querying.
+
 ### `connect_gmail`
 
 Start or resume Google OAuth.
@@ -36,7 +47,7 @@ Check connection status for a session.
 |-----------|------|----------|-------------|
 | `session_id` | string | Yes | UUID from `connect_gmail` |
 
-**Returns:** `status` (`pending` | `connected` | `failed`), `import_state`, `email`, `scopes`, `message`
+**Returns:** `status` (`pending` | `connected` | `failed`), `import_state` (`pending` | `importing` | `partial` | `complete`), `contacts_found`, `contacts_resolved`, `email`, `scopes`, `message`
 
 ## Agent pitch (suggested)
 

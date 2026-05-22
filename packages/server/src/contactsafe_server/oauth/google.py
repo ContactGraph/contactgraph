@@ -63,6 +63,25 @@ class GoogleOAuthClient:
         token: dict[str, Any] = cast(dict[str, Any], raw_token)
         return self._parse_token_response(token)
 
+    async def refresh_access_token(self, refresh_token: str) -> GoogleTokens:
+        client: AsyncOAuth2Client = self._create_client()
+        raw_token: object = await client.refresh_token(  # pyright: ignore[reportUnknownMemberType, reportUnknownVariableType]
+            self.TOKEN_URL,
+            refresh_token=refresh_token,
+        )
+        token: dict[str, Any] = cast(dict[str, Any], raw_token)
+        access_token: str = str(token["access_token"])
+        expires_in: int = int(token.get("expires_in", 3600))
+        expires_at: datetime = datetime.now(tz=UTC) + timedelta(seconds=expires_in)
+        scope_raw: str = str(token.get("scope", ""))
+        scopes: list[str] = scope_raw.split() if scope_raw else list(self._settings.google_scopes)
+        return GoogleTokens(
+            access_token=access_token,
+            refresh_token=refresh_token,
+            expires_at=expires_at,
+            scopes=scopes,
+        )
+
     async def fetch_userinfo(self, access_token: str) -> GoogleUserInfo:
         async with httpx.AsyncClient() as http:
             response = await http.get(

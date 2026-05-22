@@ -13,6 +13,7 @@ from contactsafe_server.db.connection import get_session_factory
 from contactsafe_server.db.models import ConnectSession, User
 from contactsafe_server.oauth.google import GoogleOAuthClient
 from contactsafe_server.services.crypto import TokenEncryptor
+from contactsafe_server.services.import_scheduler import schedule_gmail_import
 from contactsafe_server.services.oauth_service import OAuthService
 
 router: APIRouter = APIRouter(prefix="/oauth", tags=["oauth"])
@@ -122,6 +123,8 @@ async def oauth_callback(
             context={"message": str(exc)},
             status_code=500,
         )
+
+    schedule_gmail_import(user.id)
 
     return templates.TemplateResponse(
         request=request,

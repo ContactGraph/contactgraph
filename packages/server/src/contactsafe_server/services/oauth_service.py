@@ -68,12 +68,20 @@ class OAuthService:
             if cred is not None:
                 scopes = list(cred.scopes)
 
-        import_state: ImportState = (
-            ImportState.PENDING
-            if status != SessionStatus.CONNECTED
-            else ImportState.PENDING
-        )
-        message: str = self._status_message(status)
+        import_state: ImportState = ImportState.PENDING
+        contacts_found: int = 0
+        contacts_resolved: int = 0
+        contacts_pending: int = 0
+        message: str = self._status_message(status, ImportState.PENDING)
+
+        if session.user_id is not None:
+            user_row: User | None = await self._db.get(User, session.user_id)
+            if user_row is not None:
+                import_state = ImportState(user_row.import_state)
+                contacts_found = user_row.contacts_found
+                contacts_resolved = user_row.contacts_resolved
+                contacts_pending = user_row.contacts_pending
+                message = self._import_message(status, user_row)
 
         return ImportStatus(
             session_id=session.id,
@@ -81,6 +89,9 @@ class OAuthService:
             import_state=import_state,
             email=email,
             scopes=scopes,
+            contacts_found=contacts_found,
+            contacts_resolved=contacts_resolved,
+            contacts_pending=contacts_pending,
             message=message,
         )
 
@@ -210,16 +221,33 @@ class OAuthService:
         return await self._db.get(ConnectSession, session_id)
 
     @staticmethod
-    def _status_message(status: SessionStatus) -> str:
-        match status:
-            case SessionStatus.PENDING:
-                return "Waiting for Google OAuth. Open the connect URL and authorize access."
-            case SessionStatus.CONNECTED:
+    def _status_message(status: SessionStatus, import_state: ImportState) -> str:
+        if status == SessionStatus.PENDING:
+            return "Waiting for Google OAuth. Open the connect URL and authorize access."
+        if status == SessionStatus.FAILED:
+            return "OAuth failed. Call connect_gmail again to retry."
+        if status == SessionStatus.CONNECTED:
+            return f"Google account connected. Import status: {import_state.value}."
+        return "Unknown status."
+
+    @staticmethod
+    def _import_message(status: SessionStatus, user: User) -> str:
+        if status != SessionStatus.CONNECTED:
+            return OAuthService._status_message(status, ImportState(user.import_state))
+        if user.import_error:
+            return f"Import failed: {user.import_error}"
+        match ImportState(user.import_state):
+            case ImportState.IMPORTING:
                 return (
-                    "Google account connected. Email import will begin in a future release; "
-                    "connection is ready."
+                    f"Importing contacts from Gmail ({user.contacts_resolved}/"
+                    f"{user.contacts_found} resolved)..."
                 )
-            case SessionStatus.FAILED:
-                return "OAuth failed. Call connect_gmail again to retry."
+            case ImportState.PARTIAL:
+                return (
+                    f"Partial graph ready ({user.contacts_resolved} contacts). "
+                    "Import continuing in background."
+                )
+            case ImportState.COMPLETE:
+                return f"Import complete. {user.contacts_resolved} contacts in your graph."
             case _:
-                return "Unknown status."
+                return "Google connected. Gmail import starting..."
