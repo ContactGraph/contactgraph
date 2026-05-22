@@ -1,0 +1,77 @@
+from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from mcp.server.fastmcp import FastMCP
+
+from contactsafe_server.config import Settings, get_settings
+from contactsafe_server.db.connection import init_db, shutdown_db
+from contactsafe_server.deps import build_app_context
+from contactsafe_server.mcp.server import create_mcp_server
+from contactsafe_server.oauth.router import router as oauth_router
+
+
+@asynccontextmanager
+async def app_lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
+    settings: Settings = get_settings()
+    build_app_context()
+    await init_db(settings)
+    yield
+    await shutdown_db()
+
+
+def create_app() -> FastAPI:
+    settings: Settings = get_settings()
+    mcp_server: FastMCP = create_mcp_server()
+
+    app: FastAPI = FastAPI(
+        title="ContactSafe",
+        description="Agent-native personal graph — MCP server and OAuth API",
+        version="0.1.0",
+        lifespan=app_lifespan,
+    )
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"] if settings.app_env == "development" else [],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    app.include_router(oauth_router)
+    app.mount(settings.mcp_path, mcp_server.streamable_http_app())
+
+    @app.get("/health")  # pyright: ignore[reportUnusedFunction]
+    async def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/skill.md", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
+    async def serve_skill_md() -> FileResponse:
+        repo_root: Path = Path(__file__).resolve().parents[4]
+        skill_path: Path = repo_root / "skill.md"
+        return FileResponse(skill_path, media_type="text/markdown")
+
+    return app
+
+
+app: FastAPI = create_app()
+
+
+def run() -> None:
+    import uvicorn
+
+    cfg: Settings = get_settings()
+    uvicorn.run(
+        "contactsafe_server.main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=cfg.app_env == "development",
+    )
+
+
+if __name__ == "__main__":
+    run()
