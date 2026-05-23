@@ -8,7 +8,13 @@ from sqlalchemy.sql.elements import ColumnElement
 
 from contactsafe_core.query_plan import QueryIntent, QueryPlan, QuerySortBy
 from contactsafe_core.schemas import PersonMatch
-from contactsafe_server.db.models import InteractionExcerpt, Org, Person, PersonEdge
+from contactsafe_server.db.models import (
+    InteractionExcerpt,
+    Org,
+    Person,
+    PersonEdge,
+    PersonPersonEdge,
+)
 from contactsafe_server.services.org_search import expand_org_search_terms
 
 
@@ -121,9 +127,25 @@ class NetworkQueryService:
 
         if plan.relationship_types_any:
             lowered_rel: list[str] = [r.lower() for r in plan.relationship_types_any]
-            stmt = stmt.where(
-                _pg_text_array_overlaps(PersonEdge.relationship_types, lowered_rel)
-            )
+            if _is_cooccurrence_relationship_query(lowered_rel):
+                stmt = stmt.where(
+                    func.exists(
+                        select(1)
+                        .select_from(PersonPersonEdge)
+                        .where(
+                            PersonPersonEdge.user_id == user_id,
+                            or_(
+                                PersonPersonEdge.left_person_id == Person.id,
+                                PersonPersonEdge.right_person_id == Person.id,
+                            ),
+                        )
+                        .correlate(Person)
+                    )
+                )
+            else:
+                stmt = stmt.where(
+                    _pg_text_array_overlaps(PersonEdge.relationship_types, lowered_rel)
+                )
 
         if plan.sort_by == QuerySortBy.LAST_SEEN:
             stmt = stmt.order_by(
@@ -245,3 +267,19 @@ class NetworkQueryService:
             match_reason="; ".join(reasons) if reasons else "matched graph filters",
             relevance="; ".join(relevance_parts) if relevance_parts else "contact from graph",
         )
+
+
+def _is_cooccurrence_relationship_query(relationship_types: list[str]) -> bool:
+    tokens: set[str] = {x.strip().lower() for x in relationship_types}
+    return any(
+        token in tokens
+        for token in {
+            "cooccurrence",
+            "co-occurrence",
+            "co occurrence",
+            "co-occurred",
+            "cooccurred",
+            "introduced",
+            "connected",
+        }
+    )
