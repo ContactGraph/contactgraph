@@ -10,10 +10,29 @@ async def test_health(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_landing_page(client: AsyncClient) -> None:
+    response = await client.get("/")
+    assert response.status_code == 200
+    assert "ContactSafe" in response.text
+    assert "Intelligence hides in who knows who." in response.text
+
+
+@pytest.mark.asyncio
 async def test_skill_md(client: AsyncClient) -> None:
     response = await client.get("/skill.md")
     assert response.status_code == 200
     assert "connect_source" in response.text
+
+
+@pytest.mark.asyncio
+async def test_mcp_browser_request_redirects_to_marketing_site(client: AsyncClient) -> None:
+    response = await client.get(
+        "/mcp",
+        headers={"Accept": "text/html,application/xhtml+xml"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 307
+    assert response.headers["location"] == "https://www.contactsafe.ai"
 
 
 @pytest.mark.asyncio
