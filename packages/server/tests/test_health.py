@@ -14,7 +14,7 @@ async def test_landing_page(client: AsyncClient) -> None:
     response = await client.get("/")
     assert response.status_code == 200
     assert "ContactSafe" in response.text
-    assert "agent-native" in response.text
+    assert "Intelligence hides in who knows who." in response.text
 
 
 @pytest.mark.asyncio
