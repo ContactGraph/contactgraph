@@ -5,9 +5,11 @@ from typing import Any
 from uuid import UUID
 
 from mcp.server.fastmcp import Context, FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 
 from contactsafe_core.enums import SessionStatus, SourceConnectionStatus, SourceType
+from contactsafe_server.config import Settings
 from contactsafe_core.schemas import (
     ConnectSourceResult,
     ListSourcesResult,
@@ -45,7 +47,8 @@ async def _mcp_lifespan(_server: FastMCP) -> AsyncGenerator[McpLifespanState, No
     yield McpLifespanState(app_context=ctx)
 
 
-def create_mcp_server() -> FastMCP:
+def create_mcp_server(settings: Settings) -> FastMCP:
+    transport_security: TransportSecuritySettings = settings.mcp_transport_security
     mcp: FastMCP = FastMCP(
         "ContactSafe",
         instructions=(
@@ -57,6 +60,8 @@ def create_mcp_server() -> FastMCP:
         ),
         json_response=True,
         stateless_http=True,
+        host="0.0.0.0",
+        transport_security=transport_security,
         lifespan=_mcp_lifespan,
     )
 

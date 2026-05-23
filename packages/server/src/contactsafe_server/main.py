@@ -20,7 +20,7 @@ from contactsafe_server.oauth.well_known import router as well_known_router
 
 def create_app() -> FastAPI:
     settings: Settings = get_settings()
-    mcp_server: FastMCP = create_mcp_server()
+    mcp_server: FastMCP = create_mcp_server(settings)
     # FastMCP defaults to /mcp; mounting at /mcp would make the real path /mcp/mcp.
     mcp_server.settings.streamable_http_path = "/"
     mcp_http_app: Starlette = mcp_server.streamable_http_app()

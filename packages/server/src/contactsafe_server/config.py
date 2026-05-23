@@ -1,10 +1,12 @@
 import ssl
 from functools import lru_cache
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 import certifi
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from mcp.server.transport_security import TransportSecuritySettings
 
 
 class Settings(BaseSettings):
@@ -140,6 +142,26 @@ class Settings(BaseSettings):
     @property
     def mcp_resource_url(self) -> str:
         return self.canonical_mcp_resource
+
+    @property
+    def mcp_transport_security(self) -> TransportSecuritySettings:
+        """DNS rebinding protection for the MCP SDK transport layer."""
+        if self.app_env != "production":
+            return TransportSecuritySettings(enable_dns_rebinding_protection=False)
+
+        hostname: str = (urlparse(self.base_url).hostname or "localhost").lower()
+        allowed_hosts: list[str] = [
+            hostname,
+            f"{hostname}:*",
+            "localhost",
+            "localhost:*",
+            "127.0.0.1",
+            "127.0.0.1:*",
+        ]
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=True,
+            allowed_hosts=allowed_hosts,
+        )
 
 
 @lru_cache
