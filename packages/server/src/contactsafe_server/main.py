@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
 
@@ -62,6 +62,57 @@ def create_app() -> FastAPI:
     @app.get("/health")  # pyright: ignore[reportUnusedFunction]
     async def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
+    async def landing_page() -> HTMLResponse:
+        return HTMLResponse(
+            """<!doctype html>
+<html lang=\"en\">
+<head>
+  <meta charset=\"utf-8\" />
+  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <title>ContactSafe</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+      background: radial-gradient(circle at 20% 15%, #1a2966 0%, #04050d 35%, #020308 100%);
+      color: #e8ecff;
+      display: grid;
+      place-items: center;
+      padding: 2rem;
+    }
+    .wrap { max-width: 920px; width: 100%; }
+    .panel {
+      border: 1px solid rgba(143, 168, 255, 0.35);
+      border-radius: 22px;
+      background: linear-gradient(180deg, rgba(11, 17, 40, 0.86), rgba(6, 10, 24, 0.9));
+      box-shadow: 0 26px 110px rgba(53, 88, 255, 0.24);
+      padding: clamp(1.6rem, 3vw, 3rem);
+      backdrop-filter: blur(8px);
+    }
+    .kicker { color: #8db7ff; font-size: .82rem; letter-spacing: .13em; text-transform: uppercase; }
+    h1 { margin: .8rem 0; font-size: clamp(2rem, 6vw, 4rem); line-height: 1.05; }
+    p { margin: 0; color: #bad0ff; font-size: clamp(1rem, 1.9vw, 1.3rem); max-width: 45ch; }
+  </style>
+</head>
+<body>
+  <main class=\"wrap\">
+    <section class=\"panel\">
+      <div class=\"kicker\">ContactSafe • Private Preview</div>
+      <h1>Your relationship graph, finally agent-native.</h1>
+      <p>
+        ContactSafe turns scattered inboxes, calendars, and chats into a trusted memory layer for AI.
+        Query your network in plain language, surface high-signal context instantly, and ship better decisions.
+      </p>
+    </section>
+  </main>
+</body>
+</html>"""
+        )
 
     @app.get("/skill.md", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
     async def serve_skill_md() -> FileResponse:
