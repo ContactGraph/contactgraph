@@ -27,8 +27,10 @@ async def oauth_authorization_server_metadata(
         "issuer": settings.effective_jwt_issuer,
         "authorization_endpoint": f"{base}/oauth/authorize",
         "token_endpoint": f"{base}/oauth/token",
+        "registration_endpoint": f"{base}/oauth/register",
         "scopes_supported": list(MCP_SCOPES),
         "response_types_supported": ["code"],
         "code_challenge_methods_supported": ["S256"],
         "grant_types_supported": ["authorization_code", "refresh_token"],
+        "token_endpoint_auth_methods_supported": ["none"],
     }

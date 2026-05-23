@@ -215,6 +215,25 @@ class RefreshToken(Base):
     user: Mapped["User"] = relationship(back_populates="refresh_tokens")
 
 
+class OAuthClient(Base):
+    __tablename__ = "oauth_clients"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    client_id: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
+    client_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    redirect_uris: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    token_endpoint_auth_method: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="none"
+    )
+    grant_types: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    response_types: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class Org(Base):
     __tablename__ = "orgs"
     __table_args__ = (UniqueConstraint("user_id", "domain", name="uq_org_user_domain"),)

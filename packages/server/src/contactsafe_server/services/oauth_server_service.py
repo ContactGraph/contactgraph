@@ -6,12 +6,35 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode, urlparse
 
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.config import Settings
-from contactsafe_server.db.models import AuthorizationCode, ConnectSession, RefreshToken
+from contactsafe_server.db.models import AuthorizationCode, ConnectSession, OAuthClient, RefreshToken
 from contactsafe_server.services.jwt_service import DEFAULT_MCP_SCOPES, JWTService
+
+DEFAULT_GRANT_TYPES: tuple[str, ...] = ("authorization_code", "refresh_token")
+DEFAULT_RESPONSE_TYPES: tuple[str, ...] = ("code",)
+
+
+class DynamicClientRegistrationRequest(BaseModel):
+    redirect_uris: list[str] = Field(min_length=1)
+    token_endpoint_auth_method: str = "none"
+    grant_types: list[str] = Field(default_factory=lambda: list(DEFAULT_GRANT_TYPES))
+    response_types: list[str] = Field(default_factory=lambda: list(DEFAULT_RESPONSE_TYPES))
+    client_name: str | None = None
+    scope: str | None = None
+
+
+class DynamicClientRegistrationResponse(BaseModel):
+    client_id: str
+    client_id_issued_at: int
+    redirect_uris: list[str]
+    token_endpoint_auth_method: str
+    grant_types: list[str]
+    response_types: list[str]
+    client_name: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,6 +75,63 @@ class OAuthServerService:
         self._settings: Settings = settings
         self._jwt: JWTService = jwt_service
 
+    async def register_client(
+        self,
+        request: DynamicClientRegistrationRequest,
+    ) -> DynamicClientRegistrationResponse:
+        if request.token_endpoint_auth_method != "none":
+            raise ValueError("Only token_endpoint_auth_method 'none' is supported")
+        for uri in request.redirect_uris:
+            parsed = urlparse(uri)
+            if parsed.scheme not in {"https", "http"}:
+                raise ValueError(f"Invalid redirect_uri scheme: {uri}")
+            if not parsed.netloc:
+                raise ValueError(f"Invalid redirect_uri: {uri}")
+            if self._settings.app_env == "production":
+                host: str = parsed.hostname or ""
+                is_local: bool = host in {"localhost", "127.0.0.1"}
+                if parsed.scheme != "https" and not is_local:
+                    raise ValueError("Production redirect_uris must use https")
+
+        client_id: str = secrets.token_urlsafe(32)
+        client = OAuthClient(
+            client_id=client_id,
+            client_name=request.client_name,
+            redirect_uris=list(request.redirect_uris),
+            token_endpoint_auth_method=request.token_endpoint_auth_method,
+            grant_types=list(request.grant_types),
+            response_types=list(request.response_types),
+        )
+        self._db.add(client)
+        await self._db.flush()
+        issued_at: int = int(datetime.now(tz=UTC).timestamp())
+        return DynamicClientRegistrationResponse(
+            client_id=client.client_id,
+            client_id_issued_at=issued_at,
+            redirect_uris=list(client.redirect_uris),
+            token_endpoint_auth_method=client.token_endpoint_auth_method,
+            grant_types=list(client.grant_types),
+            response_types=list(client.response_types),
+            client_name=client.client_name,
+        )
+
+    async def validate_client_redirect(
+        self,
+        *,
+        client_id: str | None,
+        redirect_uri: str,
+    ) -> None:
+        if client_id is None:
+            return
+        result = await self._db.execute(
+            select(OAuthClient).where(OAuthClient.client_id == client_id)
+        )
+        client: OAuthClient | None = result.scalar_one_or_none()
+        if client is None:
+            raise ValueError("Unknown client_id")
+        if redirect_uri not in client.redirect_uris:
+            raise ValueError("redirect_uri not registered for this client")
+
     async def create_oauth_authorize_session(
         self,
         *,
@@ -60,7 +140,9 @@ class OAuthServerService:
         code_challenge_method: str,
         client_state: str,
         scopes: list[str],
+        client_id: str | None = None,
     ) -> ConnectSession:
+        await self.validate_client_redirect(client_id=client_id, redirect_uri=redirect_uri)
         if code_challenge_method != "S256":
             raise ValueError("Only S256 code_challenge_method is supported")
         if not code_challenge:

@@ -29,29 +29,28 @@ class McpAuthMiddleware:
             await self._app(scope, receive, send)
             return
 
+        if scope.get("method") == "OPTIONS":
+            await self._app(scope, receive, send)
+            return
+
         auth_header: str | None = self._get_authorization_header(scope)
         if auth_header is not None and auth_header.lower().startswith("bearer "):
             token: str = auth_header[7:].strip()
-            if not token:
-                await self._send_unauthorized(send)
-                return
-            try:
-                claims: dict[str, Any] = self._jwt.decode_token(token)
-                if claims.get("typ") == "refresh":
-                    await self._send_unauthorized(send)
-                    return
-                user_id: str = str(claims.get("sub", ""))
-                if not user_id:
-                    await self._send_unauthorized(send)
-                    return
-                state: dict[str, Any] = scope.setdefault("state", {})  # type: ignore[assignment]
-                state["user_id"] = user_id
-                state["jwt_scopes"] = str(claims.get("scope", ""))
-            except ValueError:
-                await self._send_unauthorized(send)
-                return
+            if token:
+                try:
+                    claims: dict[str, Any] = self._jwt.decode_token(token)
+                    if claims.get("typ") != "refresh":
+                        user_id: str = str(claims.get("sub", ""))
+                        if user_id:
+                            state: dict[str, Any] = scope.setdefault("state", {})  # type: ignore[assignment]
+                            state["user_id"] = user_id
+                            state["jwt_scopes"] = str(claims.get("scope", ""))
+                            await self._app(scope, receive, send)
+                            return
+                except ValueError:
+                    pass
 
-        await self._app(scope, receive, send)
+        await self._send_unauthorized(send, error_description="Authentication required")
 
     @staticmethod
     def _get_authorization_header(scope: Scope) -> str | None:
@@ -60,7 +59,12 @@ class McpAuthMiddleware:
                 return value.decode("latin-1")
         return None
 
-    async def _send_unauthorized(self, send: Send) -> None:
+    async def _send_unauthorized(
+        self,
+        send: Send,
+        *,
+        error_description: str = "Invalid or expired Bearer token",
+    ) -> None:
         www_auth: str = (
             f'Bearer resource_metadata="{self._resource_metadata}", '
             'error="invalid_token"'
@@ -68,7 +72,7 @@ class McpAuthMiddleware:
         body: bytes = json.dumps(
             {
                 "error": "invalid_token",
-                "error_description": "Invalid or expired Bearer token",
+                "error_description": error_description,
             }
         ).encode()
         headers: list[tuple[bytes, bytes]] = [

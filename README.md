@@ -56,9 +56,47 @@ Set `TOKEN_ENCRYPTION_KEY` and `SESSION_SECRET` in `.env`.
 
 Set `TOKEN_ENCRYPTION_KEY`, `SESSION_SECRET`, and optionally `JWT_SIGNING_KEY` in `.env`. If `JWT_SIGNING_KEY` is unset, `SESSION_SECRET` is used for MCP JWT signing in development.
 
+## Deploy on Railway
+
+1. Create a Railway project from this repo (uses `Dockerfile` + `railway.toml`).
+2. Add **Postgres** or set `DATABASE_URL` to Supabase.
+3. Set environment variables (see `.env.example`). **Required for production:**
+   - `APP_ENV=production`
+   - `BASE_URL=https://your-app.up.railway.app` (must match public URL exactly)
+   - `GOOGLE_REDIRECT_URI=https://your-app.up.railway.app/oauth/callback`
+   - `JWT_SIGNING_KEY` (separate from `SESSION_SECRET`)
+4. Add the same redirect URI in [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
+5. Deploy — migrations run automatically on container start.
+
+Verify:
+
+```bash
+curl -s https://your-app.up.railway.app/health
+curl -s https://your-app.up.railway.app/.well-known/oauth-authorization-server | jq
+curl -i -X POST https://your-app.up.railway.app/mcp/ \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'
+# Expect 401 + WWW-Authenticate with resource_metadata
+```
+
+## Claude custom connector
+
+1. Deploy to Railway (HTTPS required).
+2. Claude.ai → **Settings → Connectors → Add custom connector**
+3. **URL:** `https://your-app.up.railway.app/mcp`
+4. Leave Client ID / Secret empty (uses Dynamic Client Registration).
+5. Click **Connect** → Google sign-in → return to Claude.
+6. Start a **new chat**, enable the connector, ask e.g. *"List my connected sources"*.
+
+Claude uses redirect URI `https://claude.ai/api/mcp/auth_callback` — handled automatically via DCR.
+
+**Note:** Claude.ai may not refresh tokens reliably after expiry (~15 min default). Disconnect/reconnect if tools stop working, or set `JWT_ACCESS_TOKEN_EXPIRE_MINUTES=1440` for testing.
+
 ## MCP authentication (OAuth 2.1 + JWT)
 
-MCP tools (except `connect_source`) require a Bearer access token. Unauthenticated requests receive `401` with a `WWW-Authenticate` header pointing at the protected-resource metadata.
+MCP tools require a Bearer access token. Unauthenticated MCP requests receive **401** with a `WWW-Authenticate` header pointing at the protected-resource metadata.
+
+Dynamic Client Registration: `POST /oauth/register` (RFC 7591). Advertised in `/.well-known/oauth-authorization-server` as `registration_endpoint`.
 
 1. Discover auth server: `GET /.well-known/oauth-protected-resource` and `GET /.well-known/oauth-authorization-server`
 2. Authorize with PKCE: `GET /oauth/authorize?redirect_uri=...&code_challenge=...&code_challenge_method=S256&state=...`

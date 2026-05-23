@@ -16,6 +16,7 @@ from contactsafe_server.oauth.google import GoogleOAuthClient
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.import_scheduler import schedule_source_sync
 from contactsafe_server.services.oauth_server_service import (
+    DynamicClientRegistrationRequest,
     OAuthServerService,
     parse_scopes_param,
 )
@@ -77,6 +78,7 @@ async def oauth_authorize_pkce(
             code_challenge_method=code_challenge_method,
             client_state=state,
             scopes=parse_scopes_param(scope),
+            client_id=client_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -127,6 +129,20 @@ async def oauth_token(
     if token_response.refresh_token is not None:
         body["refresh_token"] = token_response.refresh_token
     return JSONResponse(body)
+
+
+@router.post("/register", status_code=201)
+async def oauth_register_client(
+    body: DynamicClientRegistrationRequest,
+    db: AsyncSession = Depends(get_db_session),
+    settings: Settings = Depends(get_settings),
+) -> JSONResponse:
+    oauth_server: OAuthServerService = _build_oauth_server_service(db, settings)
+    try:
+        registration = await oauth_server.register_client(body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return JSONResponse(registration.model_dump(), status_code=201)
 
 
 @router.get("/start/{session_id}", response_class=HTMLResponse)
