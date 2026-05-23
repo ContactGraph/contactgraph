@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import Person, PersonEdge
+from contactsafe_server.services.exa_client import ExaClient
+from contactsafe_server.services.exa_enrichment import apply_exa_hints_to_person, extract_hints_from_exa_hits
 from contactsafe_server.services.openai_json import content_from_chat_completion, parse_json_object
 from contactsafe_server.services.category_inference import infer_categories_from_contact
 from contactsafe_server.services.email_parse import (
@@ -57,6 +59,12 @@ class IngestEnrichmentService:
                 person.email_addresses[0] if person.email_addresses else ""
             )
             self._heuristic_enrich_person(person, acc)
+
+        if self._settings.exa_api_key:
+            top_for_exa = await self._load_top_people_by_tie_strength(
+                user_id, limit=self._settings.exa_enrichment_contact_limit
+            )
+            await self._exa_enrich_batch(top_for_exa, contact_by_email)
 
         if self._settings.openai_api_key:
             top_for_llm = await self._load_top_people_by_tie_strength(
@@ -111,6 +119,37 @@ class IngestEnrichmentService:
 
         if not person.current_org_name and person.email_addresses:
             person.current_org_name = org_name_from_email(person.email_addresses[0])
+
+    async def _exa_enrich_batch(
+        self,
+        people: list[Person],
+        contact_by_email: dict[str, ContactAccumulator],
+    ) -> None:
+        client = ExaClient(self._settings)
+        for person in people:
+            email: str = person.email_addresses[0] if person.email_addresses else ""
+            if not email:
+                continue
+            acc: ContactAccumulator | None = contact_by_email.get(email)
+            try:
+                hits = await client.search_person_context(
+                    name=person.canonical_name,
+                    email=email,
+                    org_hint=person.current_org_name,
+                )
+            except Exception:
+                logger.exception("Exa enrichment failed for %s", email)
+                continue
+            if not hits:
+                continue
+            hints = extract_hints_from_exa_hits(
+                hits=hits,
+                email=email,
+                display_name=person.canonical_name,
+                org_hint=person.current_org_name,
+                pitch_outbound_count=acc.pitch_outbound_count if acc else 0,
+            )
+            apply_exa_hints_to_person(person, hints)
 
     async def _llm_enrich_batch(
         self,

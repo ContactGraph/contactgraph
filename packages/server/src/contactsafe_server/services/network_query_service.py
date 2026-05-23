@@ -9,8 +9,51 @@ from sqlalchemy.sql.elements import ColumnElement
 from contactsafe_core.query_plan import QueryIntent, QueryPlan, QuerySortBy
 from contactsafe_core.schemas import PersonMatch
 from contactsafe_server.db.models import InteractionExcerpt, Org, Person, PersonEdge
+from contactsafe_server.services.org_search import expand_org_search_terms
 
 
+def _org_match_conditions(org_query: str, user_id: uuid.UUID) -> ColumnElement[bool]:
+    """Match org query against org names, domains, emails, and excerpt text."""
+    terms: list[str] = expand_org_search_terms(org_query)
+    if not terms:
+        pattern: str = f"%{org_query.lower()}%"
+        terms = [org_query.lower()]
+
+    term_conditions: list[ColumnElement[bool]] = []
+    email_blob = func.lower(func.array_to_string(Person.email_addresses, " "))
+
+    for term in terms:
+        term_pattern: str = f"%{term.lower()}%"
+        term_conditions.extend(
+            [
+                func.lower(Person.current_org_name).like(term_pattern),
+                email_blob.like(term_pattern),
+                func.exists(
+                    select(1)
+                    .select_from(Org)
+                    .where(
+                        Org.id == Person.current_org_id,
+                        or_(
+                            func.lower(Org.canonical_name).like(term_pattern),
+                            func.lower(Org.domain).like(term_pattern),
+                        ),
+                    )
+                    .correlate(Person)
+                ),
+                func.exists(
+                    select(1)
+                    .select_from(InteractionExcerpt)
+                    .where(
+                        InteractionExcerpt.person_id == Person.id,
+                        InteractionExcerpt.user_id == user_id,
+                        func.lower(InteractionExcerpt.excerpt_text).like(term_pattern),
+                    )
+                    .correlate(Person)
+                ),
+            ]
+        )
+
+    return or_(*term_conditions)
 
 def _pg_text_array_overlaps(
     column: InstrumentedAttribute[list[str]],
@@ -63,25 +106,9 @@ class NetworkQueryService:
             )
 
         if plan.org_names:
-            org_conditions: list[ColumnElement[bool]] = []
-            for org_name in plan.org_names:
-                org_pattern: str = f"%{org_name.lower()}%"
-                org_conditions.append(
-                    or_(
-                        func.lower(Person.current_org_name).like(org_pattern),
-                        func.exists(
-                            select(1)
-                            .select_from(Org)
-                            .where(
-                                Org.id == Person.current_org_id,
-                                or_(
-                                    func.lower(Org.canonical_name).like(org_pattern),
-                                    func.lower(Org.domain).like(org_pattern),
-                                ),
-                            )
-                        ),
-                    )
-                )
+            org_conditions: list[ColumnElement[bool]] = [
+                _org_match_conditions(org_name, user_id) for org_name in plan.org_names
+            ]
             stmt = stmt.where(or_(*org_conditions))
 
         if plan.categories_any:

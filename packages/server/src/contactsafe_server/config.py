@@ -88,6 +88,24 @@ class Settings(BaseSettings):
         description="Max contacts to LLM-classify per sync",
     )
 
+    exa_api_key: str | None = Field(
+        default=None,
+        description="Exa API key for web enrichment during ingest",
+    )
+    exa_base_url: str = Field(default="https://api.exa.ai")
+    exa_enrichment_contact_limit: int = Field(
+        default=50,
+        description="Max contacts to Exa-enrich per sync (top tie strength)",
+    )
+    exa_search_num_results: int = Field(
+        default=3,
+        description="Exa search results per contact",
+    )
+    exa_request_timeout_seconds: float = Field(
+        default=30.0,
+        description="HTTP timeout for Exa API requests",
+    )
+
     @field_validator("database_url", mode="before")
     @classmethod
     def ensure_asyncpg_driver(cls, value: str) -> str:

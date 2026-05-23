@@ -18,7 +18,62 @@ make dev
 - **MCP:** http://localhost:8000/mcp (trailing slash OK)  
 - **Skill:** http://localhost:8000/skill.md  
 
-Test MCP with [MCP Inspector](https://github.com/modelcontextprotocol/inspector) → `http://localhost:8000/mcp`.
+## Testing locally
+
+1. Start the server: `make dev`
+2. Health check:
+
+```bash
+curl -s http://localhost:8000/health
+```
+
+3. MCP requires auth (expect **401** without a token):
+
+```bash
+curl -i -X POST http://localhost:8000/mcp/ \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'
+```
+
+4. OAuth metadata:
+
+```bash
+curl -s http://localhost:8000/.well-known/oauth-authorization-server | jq
+```
+
+5. **MCP Inspector** ([github.com/modelcontextprotocol/inspector](https://github.com/modelcontextprotocol/inspector)) → URL `http://localhost:8000/mcp` → complete OAuth or paste a Bearer token from the token exchange.
+
+6. Typical flow in Inspector or curl:
+   - `connect_source` → open `oauth_url` in browser → Google consent
+   - `sync_source` → poll `get_source_status` until sync completes
+   - `query_network` with e.g. `"Who do I know at Sticker VC?"`
+
+7. Run tests: `make test`
+
+## Testing production (`https://www.contactsafe.ai`)
+
+Production is deployed on Railway with custom domain **https://www.contactsafe.ai** (GoDaddy `www` CNAME → Railway).
+
+```bash
+curl -s https://www.contactsafe.ai/health
+curl -s https://www.contactsafe.ai/.well-known/oauth-protected-resource | jq
+curl -s https://www.contactsafe.ai/.well-known/oauth-authorization-server | jq
+curl -i -X POST https://www.contactsafe.ai/mcp/ \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'
+# Expect 401 + WWW-Authenticate with resource_metadata
+```
+
+After connecting Gmail in Claude, run **`sync_source`** once (or again after schema changes), then try queries like *"Who do I know at Sticker VC?"* or *"What VCs do I know?"*.
+
+Railway direct URL (fallback): `https://contactsafe-production.up.railway.app` — use **www.contactsafe.ai** for OAuth and MCP clients so redirect URIs and JWT audience stay consistent.
+
+## MCP Inspector (local or production)
+
+Test MCP with [MCP Inspector](https://github.com/modelcontextprotocol/inspector):
+
+- Local: `http://localhost:8000/mcp`
+- Production: `https://www.contactsafe.ai/mcp`
 
 ## Database
 
@@ -62,18 +117,19 @@ Set `TOKEN_ENCRYPTION_KEY`, `SESSION_SECRET`, and optionally `JWT_SIGNING_KEY` i
 2. Add **Postgres** or set `DATABASE_URL` to Supabase.
 3. Set environment variables (see `.env.example`). **Required for production:**
    - `APP_ENV=production`
-   - `BASE_URL=https://your-app.up.railway.app` (must match public URL exactly)
-   - `GOOGLE_REDIRECT_URI=https://your-app.up.railway.app/oauth/callback`
+   - `BASE_URL=https://www.contactsafe.ai` (must match public URL exactly)
+   - `GOOGLE_REDIRECT_URI=https://www.contactsafe.ai/oauth/callback`
    - `JWT_SIGNING_KEY` (separate from `SESSION_SECRET`)
 4. Add the same redirect URI in [Google Cloud Console](https://console.cloud.google.com/apis/credentials).
-5. Deploy — migrations run automatically on container start.
+5. Point **www.contactsafe.ai** (GoDaddy CNAME) at your Railway service.
+6. Deploy — migrations run automatically on container start.
 
 Verify:
 
 ```bash
-curl -s https://your-app.up.railway.app/health
-curl -s https://your-app.up.railway.app/.well-known/oauth-authorization-server | jq
-curl -i -X POST https://your-app.up.railway.app/mcp/ \
+curl -s https://www.contactsafe.ai/health
+curl -s https://www.contactsafe.ai/.well-known/oauth-authorization-server | jq
+curl -i -X POST https://www.contactsafe.ai/mcp/ \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'
 # Expect 401 + WWW-Authenticate with resource_metadata
@@ -81,14 +137,17 @@ curl -i -X POST https://your-app.up.railway.app/mcp/ \
 
 ## Claude custom connector
 
-1. Deploy to Railway (HTTPS required).
+1. Deploy to Railway with `BASE_URL=https://www.contactsafe.ai` (HTTPS required).
 2. Claude.ai → **Settings → Connectors → Add custom connector**
-3. **URL:** `https://your-app.up.railway.app/mcp`
+3. **URL:** `https://www.contactsafe.ai/mcp`
 4. Leave Client ID / Secret empty (uses Dynamic Client Registration).
 5. Click **Connect** → Google sign-in → return to Claude.
-6. Start a **new chat**, enable the connector, ask e.g. *"List my connected sources"*.
+6. Start a **new chat**, enable the ContactSafe connector.
+7. Ask the agent to **`sync_source`** (first time or after updates), wait for sync to finish, then query e.g. *"Who do I know at Sticker VC?"* or *"List my connected sources"*.
 
 Claude uses redirect URI `https://claude.ai/api/mcp/auth_callback` — handled automatically via DCR.
+
+Google OAuth redirect URI for production: `https://www.contactsafe.ai/oauth/callback`
 
 **Note:** Claude.ai may not refresh tokens reliably after expiry (~15 min default). Disconnect/reconnect if tools stop working, or set `JWT_ACCESS_TOKEN_EXPIRE_MINUTES=1440` for testing.
 
@@ -148,6 +207,7 @@ After code or schema changes, run **`sync_source` again** so contacts get `infer
 
 - **`query_network`** accepts a natural-language `question`; response includes `matches` and `applied_plan`.
 - Without `OPENAI_API_KEY`: heuristic planner + category tags from email domains/names and **Gmail snippets** (e.g. outbound “pitch my startup” → likely `vc`).
+- With `EXA_API_KEY`: web search enrichment on top contacts during sync (role, org, investor/VC tags from LinkedIn and public profiles).
 - With `OPENAI_API_KEY`: LLM query plans and richer ingest enrichment on top contacts; optional excerpt embeddings for semantic questions.
 
 Example questions: “Who do I know named Chris?”, “What VCs do I know?”, “Email for Chris at AIX”, “Who did I talk to about hiring?” (semantic needs OpenAI + excerpts).

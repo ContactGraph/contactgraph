@@ -81,16 +81,9 @@ def parse_address_header(header_value: str) -> list[tuple[str, str]]:
 
 
 def org_name_from_email(email: str) -> str | None:
-    _name, domain = email.rsplit("@", 1)
-    generic_domains: frozenset[str] = frozenset(
-        {"gmail.com", "googlemail.com", "yahoo.com", "hotmail.com", "outlook.com", "icloud.com", "me.com"}
-    )
-    if domain in generic_domains:
-        return None
-    base: str = domain.split(".")[0]
-    if not base or len(base) < 2:
-        return None
-    return base.replace("-", " ").title()
+    from contactsafe_server.services.org_search import org_name_from_email as _infer
+
+    return _infer(email)
 
 
 def is_likely_broadcast_contact(accumulator: ContactAccumulator) -> bool:
