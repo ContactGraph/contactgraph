@@ -59,6 +59,9 @@ class User(Base):
     person_edges: Mapped[list["PersonEdge"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    person_person_edges: Mapped[list["PersonPersonEdge"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
     orgs: Mapped[list["Org"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     interaction_excerpts: Mapped[list["InteractionExcerpt"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
@@ -338,6 +341,44 @@ class PersonEdge(Base):
 
     user: Mapped["User"] = relationship(back_populates="person_edges")
     person: Mapped["Person"] = relationship(back_populates="edge")
+
+
+class PersonPersonEdge(Base):
+    __tablename__ = "person_person_edges"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "left_person_id",
+            "right_person_id",
+            name="uq_person_person_edge_user_pair",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    left_person_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False
+    )
+    right_person_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False
+    )
+    co_occurrence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship(back_populates="person_person_edges")
 
 
 class InteractionExcerpt(Base):
