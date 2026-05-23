@@ -27,7 +27,7 @@ class JWTService:
         payload: dict[str, Any] = {
             "sub": str(user_id),
             "iss": self._settings.effective_jwt_issuer,
-            "aud": self._settings.jwt_audience,
+            "aud": self._settings.effective_jwt_audience,
             "exp": int(expire.timestamp()),
             "iat": int(now.timestamp()),
             "scope": " ".join(scopes),
@@ -46,7 +46,7 @@ class JWTService:
         payload: dict[str, Any] = {
             "sub": str(user_id),
             "iss": self._settings.effective_jwt_issuer,
-            "aud": self._settings.jwt_audience,
+            "aud": self._settings.effective_jwt_audience,
             "exp": int(expire.timestamp()),
             "iat": int(now.timestamp()),
             "scope": " ".join(scopes),
@@ -67,7 +67,7 @@ class JWTService:
                 self._settings.effective_jwt_signing_key,
                 claims_options={
                     "iss": {"essential": True, "value": self._settings.effective_jwt_issuer},
-                    "aud": {"essential": True, "value": self._settings.jwt_audience},
+                    "aud": {"essential": True, "value": self._settings.effective_jwt_audience},
                     "exp": {"essential": True},
                     "sub": {"essential": True},
                 },

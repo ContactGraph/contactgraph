@@ -32,7 +32,7 @@ def test_create_and_decode_access_token(jwt_service: JWTService) -> None:
     token: str = jwt_service.create_access_token(user_id, ["contactsafe:read"])
     claims: dict[str, object] = jwt_service.decode_token(token)
     assert claims["sub"] == str(user_id)
-    assert claims["aud"] == "contactsafe-mcp"
+    assert claims["aud"] == "http://testserver/mcp"
     assert claims["scope"] == "contactsafe:read"
     assert claims.get("typ") is None
 
@@ -43,7 +43,7 @@ def test_decode_rejects_expired_token(jwt_service: JWTService, jwt_settings: Set
     payload: dict[str, object] = {
         "sub": str(user_id),
         "iss": jwt_settings.effective_jwt_issuer,
-        "aud": jwt_settings.jwt_audience,
+        "aud": jwt_settings.effective_jwt_audience,
         "exp": int(past.timestamp()),
         "iat": int(past.timestamp()) - 60,
         "scope": "contactsafe:read",

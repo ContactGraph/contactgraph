@@ -2,6 +2,8 @@ import uuid
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
+import logging
+
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -23,6 +25,7 @@ from contactsafe_server.services.oauth_server_service import (
 from contactsafe_server.services.oauth_service import OAuthService
 
 router: APIRouter = APIRouter(prefix="/oauth", tags=["oauth"])
+logger: logging.Logger = logging.getLogger(__name__)
 _templates_dir: Path = Path(__file__).parent / "templates"
 templates: Jinja2Templates = Jinja2Templates(directory=str(_templates_dir))
 
@@ -95,9 +98,11 @@ async def oauth_token(
     redirect_uri: str | None = Form(default=None),
     code_verifier: str | None = Form(default=None),
     refresh_token: str | None = Form(default=None),
+    resource: str | None = Form(default=None),
     db: AsyncSession = Depends(get_db_session),
     settings: Settings = Depends(get_settings),
 ) -> JSONResponse:
+    _ = resource
     oauth_server: OAuthServerService = _build_oauth_server_service(db, settings)
     try:
         if grant_type == "authorization_code":
@@ -118,6 +123,7 @@ async def oauth_token(
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported grant_type: {grant_type}")
     except ValueError as exc:
+        logger.warning("OAuth token exchange failed: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     body: dict[str, object] = {
@@ -128,6 +134,8 @@ async def oauth_token(
     }
     if token_response.refresh_token is not None:
         body["refresh_token"] = token_response.refresh_token
+    if token_response.resource is not None:
+        body["resource"] = token_response.resource
     return JSONResponse(body)
 
 
@@ -220,6 +228,7 @@ async def oauth_callback(
     try:
         user, source = await service.complete_oauth(connect_session, code)
     except Exception as exc:
+        logger.exception("Google OAuth callback failed")
         await service.mark_session_failed(connect_session)
         if connect_session.oauth_redirect_uri:
             oauth_server: OAuthServerService = _build_oauth_server_service(db, settings)
@@ -252,6 +261,10 @@ async def oauth_callback(
         redirect_url: str = oauth_server.build_client_redirect_url(
             connect_session,
             code=auth_code,
+        )
+        logger.info(
+            "OAuth authorize complete for user %s, redirecting MCP client",
+            user.email,
         )
         return RedirectResponse(url=redirect_url, status_code=302)
 

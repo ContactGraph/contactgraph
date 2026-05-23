@@ -44,6 +44,7 @@ class TokenResponse:
     expires_in: int
     refresh_token: str | None
     scope: str
+    resource: str | None = None
 
 
 def hash_token(value: str) -> str:
@@ -294,6 +295,7 @@ class OAuthServerService:
             expires_in=self._settings.jwt_access_token_expire_minutes * 60,
             refresh_token=refresh_token,
             scope=" ".join(scopes),
+            resource=self._settings.canonical_mcp_resource,
         )
 
     async def mint_tokens_for_user(

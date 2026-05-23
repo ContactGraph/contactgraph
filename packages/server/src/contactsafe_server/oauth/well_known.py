@@ -6,16 +6,27 @@ from contactsafe_server.services.jwt_service import MCP_SCOPES
 router: APIRouter = APIRouter(tags=["oauth-metadata"])
 
 
+def _protected_resource_document(settings: Settings) -> dict[str, object]:
+    base: str = settings.base_url.rstrip("/")
+    return {
+        "resource": settings.canonical_mcp_resource,
+        "authorization_servers": [base],
+        "scopes_supported": list(MCP_SCOPES),
+    }
+
+
 @router.get("/.well-known/oauth-protected-resource")
 async def oauth_protected_resource_metadata(
     settings: Settings = Depends(get_settings),
 ) -> dict[str, object]:
-    base: str = settings.base_url.rstrip("/")
-    return {
-        "resource": settings.mcp_resource_url,
-        "authorization_servers": [base],
-        "scopes_supported": list(MCP_SCOPES),
-    }
+    return _protected_resource_document(settings)
+
+
+@router.get("/mcp/.well-known/oauth-protected-resource")
+async def mcp_oauth_protected_resource_metadata(
+    settings: Settings = Depends(get_settings),
+) -> dict[str, object]:
+    return _protected_resource_document(settings)
 
 
 @router.get("/.well-known/oauth-authorization-server")

@@ -42,7 +42,10 @@ class Settings(BaseSettings):
         default=None,
         description="JWT issuer claim; defaults to BASE_URL",
     )
-    jwt_audience: str = "contactsafe-mcp"
+    jwt_audience: str | None = Field(
+        default=None,
+        description="JWT audience (RFC 8707 resource); defaults to canonical MCP URL",
+    )
 
     google_client_id: str
     google_client_secret: str
@@ -121,8 +124,22 @@ class Settings(BaseSettings):
         return (self.jwt_issuer or self.base_url).rstrip("/")
 
     @property
+    def canonical_mcp_resource(self) -> str:
+        """RFC 8707 canonical resource: lowercase scheme/host, no trailing slash."""
+        parsed_base: str = self.base_url.strip().rstrip("/")
+        if "://" in parsed_base:
+            scheme, rest = parsed_base.split("://", 1)
+            parsed_base = f"{scheme.lower()}://{rest.lower()}"
+        path: str = self.mcp_path.rstrip("/")
+        return f"{parsed_base}{path}"
+
+    @property
+    def effective_jwt_audience(self) -> str:
+        return self.jwt_audience or self.canonical_mcp_resource
+
+    @property
     def mcp_resource_url(self) -> str:
-        return f"{self.base_url.rstrip('/')}{self.mcp_path.rstrip('/')}/"
+        return self.canonical_mcp_resource
 
 
 @lru_cache
