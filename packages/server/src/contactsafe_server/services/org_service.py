@@ -4,6 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.db.models import Org
+from contactsafe_server.services.org_search import is_automation_or_generic_domain
 
 
 class OrgService:
@@ -19,6 +20,8 @@ class OrgService:
     ) -> Org | None:
         _local, domain = email.rsplit("@", 1)
         domain_lower: str = domain.lower()
+        if is_automation_or_generic_domain(domain_lower):
+            return None
         canonical: str = (org_name_hint or domain_lower.split(".")[0]).strip()
         if len(canonical) < 2:
             return None

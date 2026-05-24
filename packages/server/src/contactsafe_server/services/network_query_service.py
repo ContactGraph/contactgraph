@@ -13,6 +13,7 @@ from contactsafe_server.db.models import (
     Org,
     Person,
     PersonEdge,
+    PersonOrgEdge,
     PersonPersonEdge,
 )
 from contactsafe_server.services.org_search import expand_org_search_terms
@@ -34,6 +35,21 @@ def _org_match_conditions(org_query: str, user_id: uuid.UUID) -> ColumnElement[b
             [
                 func.lower(Person.current_org_name).like(term_pattern),
                 email_blob.like(term_pattern),
+                func.exists(
+                    select(1)
+                    .select_from(PersonOrgEdge)
+                    .join(Org, Org.id == PersonOrgEdge.org_id)
+                    .where(
+                        PersonOrgEdge.person_id == Person.id,
+                        PersonOrgEdge.user_id == user_id,
+                        PersonOrgEdge.is_current.is_(True),
+                        or_(
+                            func.lower(Org.canonical_name).like(term_pattern),
+                            func.lower(Org.domain).like(term_pattern),
+                        ),
+                    )
+                    .correlate(Person)
+                ),
                 func.exists(
                     select(1)
                     .select_from(Org)
@@ -97,6 +113,9 @@ class NetworkQueryService:
 
         if plan.exclude_broadcast:
             stmt = stmt.where(PersonEdge.is_broadcast.is_(False))
+
+        if plan.exclude_automated:
+            stmt = stmt.where(PersonEdge.is_automated.is_(False))
 
         if plan.require_genuine_contact:
             stmt = stmt.where(PersonEdge.last_genuine_interaction_at.isnot(None))

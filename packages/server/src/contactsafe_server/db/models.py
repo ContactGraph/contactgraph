@@ -15,7 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 EMBEDDING_DIMENSIONS: int = 1536
@@ -60,6 +60,12 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan"
     )
     person_person_edges: Mapped[list["PersonPersonEdge"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    person_org_edges: Mapped[list["PersonOrgEdge"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    org_edges: Mapped[list["OrgEdge"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
     orgs: Mapped[list["Org"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -250,12 +256,19 @@ class Org(Base):
     canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
     domain: Mapped[str] = mapped_column(Text, nullable=False)
     aliases: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    categories: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    attributes: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    last_enriched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
 
     user: Mapped["User"] = relationship(back_populates="orgs")
     persons: Mapped[list["Person"]] = relationship(back_populates="current_org")
+    person_org_edges: Mapped[list["PersonOrgEdge"]] = relationship(back_populates="org")
+    org_edges: Mapped[list["OrgEdge"]] = relationship(back_populates="org")
 
 
 class Person(Base):
@@ -298,6 +311,9 @@ class Person(Base):
     edge: Mapped["PersonEdge | None"] = relationship(
         back_populates="person", uselist=False, cascade="all, delete-orphan"
     )
+    org_affiliations: Mapped[list["PersonOrgEdge"]] = relationship(
+        back_populates="person", cascade="all, delete-orphan"
+    )
 
 
 class PersonEdge(Base):
@@ -328,6 +344,7 @@ class PersonEdge(Base):
     tie_strength_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     is_broadcast: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_human: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_automated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -367,6 +384,8 @@ class PersonPersonEdge(Base):
         UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False
     )
     co_occurrence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    relationship_hint: Mapped[str] = mapped_column(Text, nullable=False, default="co_thread")
+    tie_strength_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -379,6 +398,90 @@ class PersonPersonEdge(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="person_person_edges")
+
+
+class PersonOrgEdge(Base):
+    __tablename__ = "person_org_edges"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "person_id",
+            "org_id",
+            name="uq_person_org_edge_user_person_org",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="CASCADE"), nullable=False
+    )
+    relationship_type: Mapped[str] = mapped_column(Text, nullable=False, default="employee")
+    role_title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source: Mapped[str] = mapped_column(Text, nullable=False, default="email_domain")
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
+    attributes: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship(back_populates="person_org_edges")
+    person: Mapped["Person"] = relationship(back_populates="org_affiliations")
+    org: Mapped["Org"] = relationship(back_populates="person_org_edges")
+
+
+class OrgEdge(Base):
+    __tablename__ = "org_edges"
+    __table_args__ = (UniqueConstraint("user_id", "org_id", name="uq_org_edge_user_org"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="CASCADE"), nullable=False
+    )
+    relationship_types: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    associated_person_ids: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)), nullable=False, default=list
+    )
+    total_email_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_interaction_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    tie_strength_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    attributes: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    user: Mapped["User"] = relationship(back_populates="org_edges")
+    org: Mapped["Org"] = relationship(back_populates="org_edges")
 
 
 class InteractionExcerpt(Base):

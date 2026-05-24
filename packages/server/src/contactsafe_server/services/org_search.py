@@ -23,13 +23,58 @@ _GENERIC_EMAIL_DOMAINS: frozenset[str] = frozenset(
 )
 
 
+def is_generic_personal_domain(domain: str) -> bool:
+    """Consumer email providers — not a work org."""
+    return domain.lower() in _GENERIC_EMAIL_DOMAINS
+
+
+def is_automation_domain(domain: str) -> bool:
+    """Domains used by bots, notifications, and marketing infrastructure."""
+    domain_lower: str = domain.lower()
+    if "noreply" in domain_lower or "no-reply" in domain_lower:
+        return True
+    if domain_lower.endswith(".ccsend.com") or "ccsend.com" in domain_lower:
+        return True
+
+    labels: list[str] = [label for label in domain_lower.split(".") if label]
+    if labels and labels[0] in {
+        "notify",
+        "notification",
+        "notifications",
+        "email",
+        "mail",
+        "marketing",
+        "communication",
+        "e",
+        "messages",
+        "alerts",
+    }:
+        return True
+
+    automation_markers: tuple[str, ...] = (
+        "notify.",
+        "notification.",
+        "email.",
+        "mail.",
+        "marketing.",
+        "communication.",
+    )
+    return any(domain_lower.startswith(marker) for marker in automation_markers)
+
+
+def is_automation_or_generic_domain(domain: str) -> bool:
+    """Skip org resolution for personal inboxes and automation domains."""
+    domain_lower: str = domain.lower()
+    return is_generic_personal_domain(domain_lower) or is_automation_domain(domain_lower)
+
+
 def org_name_from_email(email: str) -> str | None:
     """Infer a display org name from a work email domain."""
     normalized: str | None = _normalize_email_for_org(email)
     if normalized is None:
         return None
     _local, domain = normalized.rsplit("@", 1)
-    if domain in _GENERIC_EMAIL_DOMAINS:
+    if domain in _GENERIC_EMAIL_DOMAINS or is_automation_domain(domain):
         return None
 
     labels: list[str] = [label for label in domain.split(".") if label]
