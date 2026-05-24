@@ -1,11 +1,18 @@
 import os
+import socket
 from collections.abc import AsyncIterator, Iterator
 from typing import Final
+from urllib.parse import urlparse
 
 import pytest
 from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 os.environ.setdefault("APP_ENV", "development")
 os.environ.setdefault("BASE_URL", "http://testserver")
@@ -20,7 +27,7 @@ os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-client-secret")
 os.environ.setdefault("GOOGLE_REDIRECT_URI", "http://testserver/oauth/callback")
 
 from contactsafe_server.config import get_settings  # noqa: E402
-from contactsafe_server.db.models import Base  # noqa: E402
+from contactsafe_server.db.connection import shutdown_db  # noqa: E402
 from contactsafe_server.main import create_app  # noqa: E402
 
 get_settings.cache_clear()
@@ -28,21 +35,16 @@ get_settings.cache_clear()
 
 @pytest.fixture(scope="session")
 def postgres_available() -> bool:
-    import asyncio
-
-    async def _ping() -> bool:
-        settings = get_settings()
-        engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
-        try:
-            async with engine.connect() as conn:
-                await conn.execute(__import__("sqlalchemy").text("SELECT 1"))
+    settings = get_settings()
+    raw_url: str = str(settings.database_url).replace("+asyncpg", "")
+    parsed = urlparse(raw_url)
+    host: str = parsed.hostname or "localhost"
+    port: int = parsed.port or 5432
+    try:
+        with socket.create_connection((host, port), timeout=2):
             return True
-        except Exception:
-            return False
-        finally:
-            await engine.dispose()
-
-    return asyncio.run(_ping())
+    except OSError:
+        return False
 
 
 @pytest.fixture(scope="session")
@@ -50,33 +52,35 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-@pytest.fixture
-async def db_session() -> AsyncIterator[AsyncSession]:
+@pytest.fixture(scope="session")
+async def db_engine(postgres_available: bool) -> AsyncIterator[AsyncEngine]:
+    if not postgres_available:
+        pytest.skip("Postgres not available")
+
     settings = get_settings()
+    engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
     try:
-        engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
         async with engine.connect() as conn:
             await conn.execute(__import__("sqlalchemy").text("SELECT 1"))
     except Exception as exc:
+        await engine.dispose()
         pytest.skip(f"Postgres not available: {exc}")
-    engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
+
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
+async def db_session(db_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
+    connection = await db_engine.connect()
+    transaction = await connection.begin()
     factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
-        engine, expire_on_commit=False
+        connection, expire_on_commit=False
     )
-    async with engine.begin() as conn:
-        await conn.execute(
-            __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS vector")
-        )
-        await conn.execute(
-            __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-        )
-        await conn.run_sync(Base.metadata.create_all)
     async with factory() as session:
         yield session
-        await session.commit()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
-    await engine.dispose()
+    await transaction.rollback()
+    await connection.close()
 
 
 @pytest.fixture
@@ -92,3 +96,10 @@ def clear_settings_cache() -> Iterator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+async def reset_global_db_engine() -> AsyncIterator[None]:
+    await shutdown_db()
+    yield
+    await shutdown_db()

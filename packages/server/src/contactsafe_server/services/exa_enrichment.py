@@ -63,7 +63,7 @@ def apply_exa_hints_to_person(person: Person, hints: ExaPersonHints) -> None:
         person.inferred_categories = merged
     if hints.current_role and not person.current_role:
         person.current_role = hints.current_role
-    if hints.org_name and not person.current_org_name:
+    if hints.org_name:
         person.current_org_name = hints.org_name
 
 
@@ -86,9 +86,6 @@ def _extract_role(blob: str) -> str | None:
 
 
 def _extract_org_name(blob: str, org_hint: str | None) -> str | None:
-    if org_hint and org_hint.strip():
-        return org_hint.strip()
-
     linkedin_match: re.Match[str] | None = re.search(
         r"[-–|]\s*[^-|]{2,80}\s*[-–|]\s*([A-Z][A-Za-z0-9&.\s'-]{2,60})\s*(?:\||$|·|\n)",
         blob,

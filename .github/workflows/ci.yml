@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: contactsafe
+          POSTGRES_PASSWORD: contactsafe
+          POSTGRES_DB: contactsafe
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U contactsafe -d contactsafe"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      APP_ENV: development
+      BASE_URL: http://testserver
+      DATABASE_URL: postgresql+asyncpg://contactsafe:contactsafe@localhost:5432/contactsafe
+      TOKEN_ENCRYPTION_KEY: 9778OHyv3r55s_4Ic9RbMmqy4kNZopoiWROkezHGqig=
+      SESSION_SECRET: ci-test-session-secret-for-pytest-only
+      GOOGLE_CLIENT_ID: test-client-id
+      GOOGLE_CLIENT_SECRET: test-client-secret
+      GOOGLE_REDIRECT_URI: http://testserver/oauth/callback
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-packages --extra dev
+
+      - name: Run migrations
+        run: uv run --package contactsafe-server alembic -c migrations/alembic.ini upgrade head
+
+      - name: Run tests
+        run: uv run --package contactsafe-server --extra dev pytest packages/server/tests -q

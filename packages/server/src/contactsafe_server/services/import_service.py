@@ -391,7 +391,15 @@ class ImportService:
             await self._db.flush()
         else:
             if accumulator.display_name and (
-                not person.canonical_name or person.canonical_name == accumulator.email
+                not person.canonical_name
+                or person.canonical_name == accumulator.email
+                or (
+                    accumulator.last_seen_at is not None
+                    and (
+                        person.last_seen_in_email is None
+                        or accumulator.last_seen_at > person.last_seen_in_email
+                    )
+                )
             ):
                 person.canonical_name = accumulator.display_name
             if accumulator.last_seen_at is not None and (
