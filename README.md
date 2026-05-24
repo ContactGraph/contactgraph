@@ -6,7 +6,32 @@ Agent-native personal social graph, constructed from email and other messaging p
 - Who do I know who works in RevOps?
 - Where does Jim Smith work now?
 
-## Quick start
+## Quick start for humans
+
+### Claude
+
+In the Claude app, go to Custommize tab at the top of the left sidebar, and click on Connectors. Then click on the '+' button and select "Add Custom Connector". Then type in "ContactSafe" as the name and "https://www.contactsafe.ai/mcp" as the "Remote MCP Server URL".
+
+### OpenClaw
+
+TBD...
+
+## Quick start for agents
+
+Request MCP server endpoint and read skills at
+
+```bash
+https://www.contactsafe.ai/mcp
+https://localhost:8000/skill.md
+```
+Then ask your human to authenticate.
+
+Then call the following tools:
+   - `connect_source` → open `oauth_url` in browser → Google consent
+   - `sync_source` → poll `get_source_status` until sync completes
+   - `query_network` with e.g. `"Who do I know at Sticker VC?"`
+
+## Quick start (for developers)
 
 ```bash
 uv sync --package contactsafe-server --extra dev
