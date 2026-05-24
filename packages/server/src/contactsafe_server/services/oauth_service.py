@@ -11,7 +11,6 @@ from contactsafe_server.config import Settings
 from contactsafe_server.db.models import ConnectSession, OAuthCredential, Source, User
 from contactsafe_server.oauth.google import GoogleOAuthClient, GoogleTokens, GoogleUserInfo
 from contactsafe_server.services.crypto import TokenEncryptor
-from contactsafe_server.services.import_scheduler import schedule_source_sync
 from contactsafe_server.services.source_service import SourceService
 
 
@@ -127,7 +126,7 @@ class OAuthService:
         if source.sync_state in {SyncState.PENDING.value, SyncState.FAILED.value} or (
             source.sync_error
         ):
-            schedule_source_sync(source.id)
+            await self._sources.request_sync(source.id)
 
         return ConnectSourceResult(
             connect_session_id=session.id,
