@@ -41,7 +41,7 @@ def create_app() -> FastAPI:
         await shutdown_db()
 
     app: FastAPI = FastAPI(
-        title="ContactSafe",
+        title="ContactGraph",
         description="Agent-native personal graph — MCP server and OAuth API",
         version="0.1.0",
         lifespan=app_lifespan,
@@ -54,7 +54,11 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-    app.add_middleware(NormalizeMcpPathMiddleware, mcp_path=settings.mcp_path)
+    app.add_middleware(
+        NormalizeMcpPathMiddleware,
+        mcp_path=settings.mcp_path,
+        browser_redirect_target=settings.base_url,
+    )
 
     app.include_router(oauth_router)
     app.include_router(well_known_router)

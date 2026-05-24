@@ -1,4 +1,4 @@
-# The ContactSafe Manifesto
+# The ContactGraph Manifesto
 
 ## We gave away our relationships. It's time to take them back.
 
@@ -6,7 +6,7 @@ For twenty years, LinkedIn, Facebook, and Instagram asked us to manually maintai
 
 Your email and calendar already know who you actually talk to, where people work, and how strong each tie really is. An AI agent can read that signal and build a richer graph than you ever would by hand — but only if *you* own the result.
 
-**ContactSafe is that graph.** Private by default. Populated from your own data sources. Queried by your agent, on your behalf.
+**ContactGraph is that graph.** Private by default. Populated from your own data sources. Queried by your agent, on your behalf.
 
 ## What we believe
 
@@ -14,17 +14,17 @@ Your email and calendar already know who you actually talk to, where people work
 
 2. **Free forever for consumers.** The graph stays free because trust is the product. We never sell your data. You can export or delete everything anytime.
 
-3. **Agents, not apps.** You shouldn't need another destination social network. Your agent installs ContactSafe when you need it, connects your Gmail, and answers your question — then gets out of the way.
+3. **Agents, not apps.** You shouldn't need another destination social network. Your agent installs ContactGraph when you need it, connects your Gmail, and answers your question — then gets out of the way.
 
 4. **Truth beats profiles.** Self-reported titles are stale. Relationship strength from real correspondence is current. We build from signal, not vanity.
 
 5. **Privacy first, sharing by choice.** Your graph is private until you decide otherwise. Cross-user queries — when we ship them — will require explicit consent, query by query.
 
-6. **Open ecosystem.** MCP means any agent can use ContactSafe: Claude, ChatGPT, Gemini, OpenClaw, whatever comes next. No lock-in.
+6. **Open ecosystem.** MCP means any agent can use ContactGraph: Claude, ChatGPT, Gemini, OpenClaw, whatever comes next. No lock-in.
 
 ## What we're building
 
-ContactSafe distills your inboxes, calendars, and messages into a living relationship graph. Ask your agent one question — *Who do I know at Stripe? What VCs have I talked to? Who should I ask about hiring?* — and the right people surface before the meeting, before the pitch, before the moment is gone.
+ContactGraph distills your inboxes, calendars, and messages into a living relationship graph. Ask your agent one question — *Who do I know at Stripe? What VCs have I talked to? Who should I ask about hiring?* — and the right people surface before the meeting, before the pitch, before the moment is gone.
 
 We're not trying to be a better LinkedIn. We're making the destination network structurally unnecessary for the things people actually need: finding people, getting introductions, hiring, building community.
 
@@ -37,4 +37,4 @@ We're not trying to be a better LinkedIn. We're making the destination network s
 
 ---
 
-*ContactSafe is in private preview. The graph is opening soon.*
+*ContactGraph is in private preview. The graph is opening soon.*

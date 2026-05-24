@@ -293,11 +293,10 @@ def _header_html(*, mcp_path: str) -> str:
     <header>
       <div class="masthead">
         <div class="brand-block">
-          <a href="/">CONTACTSAFE</a>
-          <div class="brand-meta">CONTACT GRAPH</div>
+          <a href="/">CONTACTGRAPH</a>
           <div class="brand-meta">{html.escape(_SITE_YEAR)}</div>
         </div>
-        <nav class="nav-block" aria-label="ContactSafe links">
+        <nav class="nav-block" aria-label="ContactGraph links">
           {nav}
         </nav>
       </div>
@@ -307,7 +306,7 @@ def _header_html(*, mcp_path: str) -> str:
 def _footer_html() -> str:
     return """
     <footer class="site-footer">
-      <div>~*~ © ContactSafe ~*~</div>
+      <div>~*~ © ContactGraph ~*~</div>
       <div class="rule">–––</div>
       <div class="links">
         <a href="/skill.md">Skill</a> |
@@ -343,7 +342,7 @@ def render_landing_page(*, mcp_path: str) -> str:
     <main class="content">
       <h1>Intelligence hides in who knows who.</h1>
       <p class="lead">
-        ContactSafe distills your inboxes, calendars, and messages into a living relationship graph for AI.
+        ContactGraph distills your inboxes, calendars, and messages into a living relationship graph for AI.
         Ask one question, and the right context appears before the meeting, before the pitch, before the moment is gone.
       </p>
       <p class="lead">
@@ -351,7 +350,7 @@ def render_landing_page(*, mcp_path: str) -> str:
       </p>
       <p class="status">Private preview opening soon</p>
     </main>"""
-    return _page_shell(title="ContactSafe", header=header, content=content)
+    return _page_shell(title="ContactGraph", header=header, content=content)
 
 
 def render_manifesto_page(*, mcp_path: str) -> str:
@@ -367,4 +366,4 @@ def render_manifesto_page(*, mcp_path: str) -> str:
         {prose_html}
       </article>
     </main>"""
-    return _page_shell(title=f"{page_title} — ContactSafe", header=header, content=content)
+    return _page_shell(title=f"{page_title} — ContactGraph", header=header, content=content)
