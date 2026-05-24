@@ -21,4 +21,4 @@ ENV PATH="/app/.venv/bin:$PATH"
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "uv run --package contactsafe-server alembic -c migrations/alembic.ini upgrade head && uv run --package contactsafe-server uvicorn contactsafe_server.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uv run --package contactsafe-server uvicorn contactsafe_server.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
