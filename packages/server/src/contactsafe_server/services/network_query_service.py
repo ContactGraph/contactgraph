@@ -1,9 +1,10 @@
 import uuid
 
-from sqlalchemy import Text, cast, func, literal, or_, select
+from sqlalchemy import Text, cast, func, literal, or_, select, true
 from sqlalchemy.dialects.postgresql import ARRAY, array as pg_array
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, selectinload
+from sqlalchemy.sql import lateral
 from sqlalchemy.sql.elements import ColumnElement
 
 from contactsafe_core.query_plan import QueryIntent, QueryPlan, QuerySortBy
@@ -114,12 +115,14 @@ def _category_match_condition(categories: list[str]) -> ColumnElement[bool]:
     """Case-insensitive match against inferred_categories."""
     lowered: list[str] = _normalize_category_tokens(categories)
     if not lowered:
-        return cast(literal(True), ColumnElement[bool])
-    category = func.unnest(Person.inferred_categories).table_valued("category")
+        return true()
+    category_row = lateral(func.unnest(Person.inferred_categories, type_=Text)).alias(
+        "inferred_category"
+    )
     return (
         select(literal(1))
-        .select_from(category)
-        .where(func.lower(category.c.category).in_(lowered))
+        .select_from(category_row)
+        .where(func.lower(category_row.c.unnest).in_(lowered))
         .correlate(Person)
         .exists()
     )

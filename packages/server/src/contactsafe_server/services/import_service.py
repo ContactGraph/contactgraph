@@ -192,7 +192,10 @@ class ImportService:
         contacts: dict[str, ContactAccumulator] = {}
         pair_stats: dict[tuple[str, str], tuple[int, datetime | None]] = {}
         upserted_emails: set[str] = set()
-        user_emails, user_local_parts = await self._load_user_identity(user, source)
+        user_emails, user_local_parts = await self._load_user_identity(
+            user_email=user_email,
+            source=source,
+        )
         page_token: str | None = None
         messages_scanned: int = 0
         messages_since_commit: int = 0
@@ -558,10 +561,11 @@ class ImportService:
 
     async def _load_user_identity(
         self,
-        user: User,
+        *,
+        user_email: str,
         source: Source,
     ) -> tuple[set[str], set[str]]:
-        emails: set[str] = {user.email.strip().lower()}
+        emails: set[str] = {user_email.strip().lower()}
         if source.external_account_id:
             emails.add(source.external_account_id.strip().lower())
         local_parts: set[str] = {email_local_part(email) for email in emails}

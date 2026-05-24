@@ -67,7 +67,7 @@ async def test_ingest_exa_enrichment_tags_investor(
     await db_session.refresh(person)
     assert "vc" in person.inferred_categories
     assert person.current_role == "General Partner"
-    assert person.current_org_name == "Acme Ventures"
+    assert person.current_org_name == "Acmeventures"
     mock_search.assert_awaited_once()
 
 

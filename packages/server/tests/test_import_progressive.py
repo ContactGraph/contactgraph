@@ -113,6 +113,9 @@ async def test_scan_and_ingest_commits_during_scan() -> None:
         gmail=gmail,
     )
     service._upsert_person = AsyncMock()  # type: ignore[method-assign]
+    service._load_user_identity = AsyncMock(  # type: ignore[method-assign]
+        return_value=({"owner@example.com"}, {"owner"})
+    )
 
     source = MagicMock()
     source.id = uuid.uuid4()
