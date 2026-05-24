@@ -23,6 +23,7 @@ from contactsafe_server.services.email_parse import (
     org_name_from_email,
     parse_address_header,
     parse_internal_date_ms,
+    sanitize_display_name,
 )
 from contactsafe_server.services.contact_classifier import (
     classify_contact,
@@ -284,15 +285,16 @@ class ImportService:
         for display_name, email in parse_address_header(header):
             if email == user_email:
                 continue
+            cleaned_name: str = sanitize_display_name(display_name, email)
             existing: ContactAccumulator | None = contacts.get(email)
             if existing is None:
                 contacts[email] = ContactAccumulator(
                     email=email,
-                    display_name=display_name,
+                    display_name=cleaned_name,
                     last_seen_at=seen_at,
                 )
                 existing = contacts[email]
-            existing.observe(display_name=display_name, seen_at=seen_at, from_user=from_user)
+            existing.observe(display_name=cleaned_name, seen_at=seen_at, from_user=from_user)
 
     def _accumulate_pair_stats(
         self,
@@ -377,10 +379,13 @@ class ImportService:
             )
 
         person: Person | None = await self._find_person_by_email(user_id, accumulator.email)
+        display_name: str = sanitize_display_name(
+            accumulator.display_name, accumulator.email
+        )
         if person is None:
             person = Person(
                 user_id=user_id,
-                canonical_name=accumulator.display_name,
+                canonical_name=display_name,
                 email_addresses=[accumulator.email],
                 current_org_name=org.canonical_name if org else None,
                 current_org_id=org.id if org else None,
@@ -390,7 +395,7 @@ class ImportService:
             self._db.add(person)
             await self._db.flush()
         else:
-            if accumulator.display_name and (
+            if display_name and (
                 not person.canonical_name
                 or person.canonical_name == accumulator.email
                 or (
@@ -401,7 +406,7 @@ class ImportService:
                     )
                 )
             ):
-                person.canonical_name = accumulator.display_name
+                person.canonical_name = display_name
             if accumulator.last_seen_at is not None and (
                 person.last_seen_in_email is None
                 or accumulator.last_seen_at > person.last_seen_in_email

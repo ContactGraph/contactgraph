@@ -16,6 +16,7 @@ from contactsafe_server.services.exa_enrichment import apply_exa_hints_to_person
 from contactsafe_server.services.openai_json import content_from_chat_completion, parse_json_object
 from contactsafe_server.services.category_inference import infer_categories_from_contact
 from contactsafe_server.services.email_parse import (
+    BROADCAST_LOCAL_PARTS,
     ContactAccumulator,
     org_name_from_email,
 )
@@ -113,11 +114,17 @@ class IngestEnrichmentService:
         person: Person,
         accumulator: ContactAccumulator | None,
     ) -> None:
+        email: str = person.email_addresses[0] if person.email_addresses else ""
+        if email:
+            local_part: str = email.rsplit("@", 1)[0].lower()
+            if local_part in BROADCAST_LOCAL_PARTS:
+                person.current_role = None
+                return
+
         blob: str = f"{person.canonical_name} {person.current_role or ''}".lower()
         if accumulator is not None:
             blob = f"{blob} {accumulator.display_name} {accumulator.email}"
 
-        email: str = person.email_addresses[0] if person.email_addresses else ""
         pitch_hits: int = accumulator.pitch_outbound_count if accumulator is not None else 0
         categories: list[str] = infer_categories_from_contact(
             email=email,

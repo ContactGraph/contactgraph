@@ -132,6 +132,41 @@ async def test_executor_category_filter(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_executor_category_filter_aliases_investor_to_vc(
+    db_session: AsyncSession,
+) -> None:
+    user = User(email=f"investor-{uuid.uuid4()}@example.com")
+    db_session.add(user)
+    await db_session.flush()
+
+    vc_person = Person(
+        user_id=user.id,
+        canonical_name="Jane Investor",
+        email_addresses=["jane@vcfund.com"],
+        inferred_categories=["vc"],
+    )
+    db_session.add(vc_person)
+    await db_session.flush()
+    db_session.add(
+        PersonEdge(
+            user_id=user.id,
+            person_id=vc_person.id,
+            tie_strength_score=0.7,
+            is_broadcast=False,
+            is_automated=False,
+        )
+    )
+    await db_session.flush()
+
+    matches = await NetworkQueryService(db_session).execute(
+        user_id=user.id,
+        plan=QueryPlan(categories_any=["investor"], limit=10),
+    )
+    assert len(matches) == 1
+    assert matches[0].name == "Jane Investor"
+
+
+@pytest.mark.asyncio
 async def test_executor_org_matches_email_domain(db_session: AsyncSession) -> None:
     user = User(email=f"sticker-{uuid.uuid4()}@example.com")
     db_session.add(user)

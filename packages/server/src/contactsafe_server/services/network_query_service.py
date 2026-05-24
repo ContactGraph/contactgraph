@@ -18,6 +18,30 @@ from contactsafe_server.db.models import (
 )
 from contactsafe_server.services.org_search import expand_org_search_terms
 
+_CATEGORY_ALIASES: dict[str, str] = {
+    "investor": "vc",
+    "investors": "vc",
+    "venture_capital": "vc",
+    "venture capital": "vc",
+    "founders": "founder",
+    "engineers": "engineer",
+}
+
+
+def _normalize_category_tokens(categories: list[str]) -> list[str]:
+    normalized: list[str] = []
+    seen: set[str] = set()
+    for category in categories:
+        lowered: str = category.strip().lower()
+        if not lowered:
+            continue
+        canonical: str = _CATEGORY_ALIASES.get(lowered, lowered)
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        normalized.append(canonical)
+    return normalized
+
 
 def _org_match_conditions(org_query: str, user_id: uuid.UUID) -> ColumnElement[bool]:
     """Match org query against org names, domains, emails, and excerpt text."""
@@ -137,7 +161,7 @@ class NetworkQueryService:
             stmt = stmt.where(or_(*org_conditions))
 
         if plan.categories_any:
-            lowered: list[str] = [c.lower() for c in plan.categories_any]
+            lowered: list[str] = _normalize_category_tokens(plan.categories_any)
             stmt = stmt.where(_pg_text_array_overlaps(Person.inferred_categories, lowered))
 
         for role_kw in plan.role_keywords:

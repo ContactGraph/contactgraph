@@ -2,6 +2,8 @@
 
 import re
 
+from contactsafe_server.services.email_parse import BROADCAST_LOCAL_PARTS, NO_REPLY_LOCAL_PARTS
+
 # TLDs that often appear as a separate word in company names (e.g. "Sticker VC").
 _COMPANY_TLD_SUFFIXES: frozenset[str] = frozenset(
     {"vc", "ai", "io", "co", "tv", "hq", "labs", "capital", "ventures", "partners"}
@@ -16,11 +18,41 @@ _GENERIC_EMAIL_DOMAINS: frozenset[str] = frozenset(
         "outlook.com",
         "icloud.com",
         "me.com",
+        "mac.com",
         "live.com",
         "protonmail.com",
         "fastmail.com",
+        "aol.com",
+        "comcast.net",
+        "att.net",
+        "sbcglobal.net",
+        "msn.com",
+        "ymail.com",
+        "mail.com",
     }
 )
+
+_KNOWN_DOMAIN_BRANDS: dict[str, str] = {
+    "theinformation.com": "The Information",
+    "nytimes.com": "The New York Times",
+    "wsj.com": "The Wall Street Journal",
+    "techcrunch.com": "TechCrunch",
+    "bloomberg.com": "Bloomberg",
+    "substack.com": "Substack",
+    "linkedin.com": "LinkedIn",
+    "github.com": "GitHub",
+    "stripe.com": "Stripe",
+    "openai.com": "OpenAI",
+    "anthropic.com": "Anthropic",
+    "sequoiacap.com": "Sequoia Capital",
+    "a16z.com": "Andreessen Horowitz",
+    "ycombinator.com": "Y Combinator",
+    "basebase.com": "Basebase",
+    "sparkcapital.com": "Spark Capital",
+    "patagonia.com": "Patagonia",
+    "wayfair.com": "Wayfair",
+    "statefarm.com": "State Farm",
+}
 
 
 def is_generic_personal_domain(domain: str) -> bool:
@@ -73,9 +105,16 @@ def org_name_from_email(email: str) -> str | None:
     normalized: str | None = _normalize_email_for_org(email)
     if normalized is None:
         return None
-    _local, domain = normalized.rsplit("@", 1)
+    local, domain = normalized.rsplit("@", 1)
+    local_lower: str = local.lower()
+    if local_lower in NO_REPLY_LOCAL_PARTS or local_lower in BROADCAST_LOCAL_PARTS:
+        return None
     if domain in _GENERIC_EMAIL_DOMAINS or is_automation_domain(domain):
         return None
+
+    known_brand: str | None = _KNOWN_DOMAIN_BRANDS.get(domain)
+    if known_brand is not None:
+        return known_brand
 
     labels: list[str] = [label for label in domain.split(".") if label]
     if len(labels) < 2:

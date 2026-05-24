@@ -1,9 +1,11 @@
 from contactsafe_server.services.email_parse import (
     company_query_from_question,
+    is_valid_person_name,
     name_query_from_question,
     normalize_email,
     parse_address_header,
     person_matches_name,
+    sanitize_display_name,
 )
 from contactsafe_server.utils import parse_connect_session_id
 
@@ -43,3 +45,15 @@ def test_parse_connect_session_id_json_wrapper() -> None:
         == sid
     )
     assert parse_connect_session_id("f2116602-d39b-4372-83e8-389f4c23bb73") == sid
+
+
+def test_is_valid_person_name_rejects_header_artifacts() -> None:
+    assert is_valid_person_name("Customer_Service") is False
+    assert is_valid_person_name("Subscribed") is False
+    assert is_valid_person_name("Ci activity") is False
+    assert is_valid_person_name("Reed Grenager") is True
+
+
+def test_sanitize_display_name_falls_back_to_email() -> None:
+    assert sanitize_display_name("Push", "push@noreply.github.com") == "push@noreply.github.com"
+    assert sanitize_display_name("Jane Doe", "jane@example.com") == "Jane Doe"
