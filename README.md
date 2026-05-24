@@ -375,7 +375,13 @@ Requested scopes include `gmail.readonly` (used today) and `calendar.readonly` (
    - Optional: `OPENAI_API_KEY`, `EXA_API_KEY` (see `.env.example`)
 4. Google Cloud redirect URI must match production callback.
 5. CNAME **www.contactgraph.ai** → Railway.
-6. Deploy — `alembic upgrade head` runs on container start.
+6. **Before deploying** schema changes, run migrations manually against production:
+
+```bash
+DATABASE_URL='postgresql+asyncpg://...' DATABASE_SSL=true make migrate
+```
+
+7. Deploy — the container starts uvicorn only; it does **not** run Alembic automatically.
 
 ---
 
