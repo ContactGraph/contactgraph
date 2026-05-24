@@ -24,3 +24,8 @@ def test_heuristic_semantic_intent() -> None:
     plan = plan_from_heuristics("Who did I talk to about hiring?")
     assert plan.intent == QueryIntent.SEMANTIC_SEARCH
     assert plan.semantic_query is not None
+
+
+def test_heuristic_proper_noun_name_tokens() -> None:
+    plan = plan_from_heuristics("Cynthia Johanson")
+    assert plan.name_tokens == ["cynthia", "johanson"]

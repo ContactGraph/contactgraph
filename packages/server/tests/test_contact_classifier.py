@@ -30,7 +30,33 @@ def test_bidirectional_human_contact() -> None:
     classification = classify_contact(acc)
     assert classification.is_automated is False
     assert classification.is_human is True
-    assert compute_tie_strength(acc, classification) > 0.3
+    score: float = compute_tie_strength(acc, classification)
+    assert 0.3 < score < 1.0
+
+
+def test_high_volume_human_does_not_saturate_to_one() -> None:
+    acc = ContactAccumulator(
+        email="friend@company.com",
+        display_name="Friend",
+        message_count=50,
+        outbound_count=25,
+        inbound_count=25,
+    )
+    classification = classify_contact(acc)
+    score: float = compute_tie_strength(acc, classification)
+    assert score < 1.0
+
+
+def test_customer_service_mailbox_capped() -> None:
+    acc = ContactAccumulator(
+        email="customer_service@company.com",
+        display_name="Customer Service",
+        message_count=20,
+        outbound_count=0,
+        inbound_count=20,
+    )
+    classification = classify_contact(acc)
+    assert compute_tie_strength(acc, classification) <= 0.15
 
 
 def test_newsletter_is_broadcast() -> None:

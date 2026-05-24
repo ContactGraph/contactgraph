@@ -105,6 +105,58 @@ def normalize_email(value: str) -> str | None:
     return email
 
 
+_DOMAIN_EQUIVALENTS: dict[str, str] = {
+    "me.com": "icloud.com",
+    "mac.com": "icloud.com",
+    "googlemail.com": "gmail.com",
+}
+
+
+def canonical_email_domain(domain: str) -> str:
+    lowered: str = domain.strip().lower()
+    return _DOMAIN_EQUIVALENTS.get(lowered, lowered)
+
+
+def email_lookup_variants(email: str) -> list[str]:
+    """Return equivalent email addresses for entity resolution lookups."""
+    normalized: str | None = normalize_email(email)
+    if normalized is None:
+        return []
+    local, domain = normalized.rsplit("@", 1)
+    canonical_domain: str = canonical_email_domain(domain)
+    variants: set[str] = {normalized}
+    if canonical_domain != domain:
+        variants.add(f"{local}@{canonical_domain}")
+    for alias_domain, canonical in _DOMAIN_EQUIVALENTS.items():
+        if canonical == canonical_domain and alias_domain != domain:
+            variants.add(f"{local}@{alias_domain}")
+    return sorted(variants)
+
+
+def email_local_part(email: str) -> str:
+    normalized: str | None = normalize_email(email)
+    if normalized is None:
+        return email.split("@", 1)[0].lower()
+    return normalized.rsplit("@", 1)[0]
+
+
+def is_likely_self_contact(
+    contact_email: str,
+    *,
+    user_emails: set[str],
+    user_local_parts: set[str],
+) -> bool:
+    normalized: str | None = normalize_email(contact_email)
+    if normalized is None:
+        return False
+    if normalized in user_emails:
+        return True
+    local, domain = normalized.rsplit("@", 1)
+    if local in user_local_parts and domain not in {"gmail.com", "googlemail.com", "yahoo.com", "hotmail.com", "outlook.com"}:
+        return True
+    return False
+
+
 def parse_address_header(header_value: str) -> list[tuple[str, str]]:
     pairs: list[tuple[str, str]] = getaddresses([header_value])
     result: list[tuple[str, str]] = []
@@ -197,6 +249,55 @@ def name_query_from_question(question: str) -> str | None:
             if name and name.lower() not in {"who", "anyone", "someone"}:
                 return name
     return None
+
+
+_NAME_STOP_WORDS: frozenset[str] = frozenset(
+    {
+        "who",
+        "what",
+        "where",
+        "when",
+        "find",
+        "show",
+        "list",
+        "tell",
+        "give",
+        "know",
+        "email",
+        "address",
+        "contact",
+        "contacts",
+        "people",
+        "person",
+        "someone",
+        "anyone",
+        "investors",
+        "investor",
+        "founders",
+        "founder",
+        "engineers",
+        "engineer",
+    }
+)
+
+
+def name_tokens_from_proper_nouns(question: str) -> list[str]:
+    """Extract likely person-name tokens from capitalized words in a question."""
+    if re.search(r"\b(vcs?|investors?|founders?|engineers?)\b", question, flags=re.IGNORECASE):
+        return []
+    matches: list[str] = re.findall(
+        r"\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})\b",
+        question,
+    )
+    if not matches:
+        return []
+    candidate: str = max(matches, key=len)
+    tokens: list[str] = [
+        token.lower()
+        for token in candidate.split()
+        if len(token) >= 2 and token.lower() not in _NAME_STOP_WORDS
+    ]
+    return tokens
 
 
 def person_matches_name(person_name: str, person_emails: list[str], name_query: str) -> bool:

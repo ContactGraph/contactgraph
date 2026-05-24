@@ -20,6 +20,9 @@ from contactsafe_server.oauth.google import GoogleTokens
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.email_parse import (
     ContactAccumulator,
+    email_local_part,
+    email_lookup_variants,
+    is_likely_self_contact,
     org_name_from_email,
     parse_address_header,
     parse_internal_date_ms,
@@ -189,6 +192,10 @@ class ImportService:
         contacts: dict[str, ContactAccumulator] = {}
         pair_stats: dict[tuple[str, str], tuple[int, datetime | None]] = {}
         upserted_emails: set[str] = set()
+        user_emails, user_local_parts = await self._load_user_identity(
+            user_email=user_email,
+            source=source,
+        )
         page_token: str | None = None
         messages_scanned: int = 0
         messages_since_commit: int = 0
@@ -216,6 +223,8 @@ class ImportService:
                     meta=meta,
                     ref=ref,
                     user_email=user_email,
+                    user_emails=user_emails,
+                    user_local_parts=user_local_parts,
                 )
                 messages_scanned += 1
                 messages_since_commit += 1
@@ -323,7 +332,11 @@ class ImportService:
         meta: GmailMessageMeta,
         ref: GmailMessageRef,
         user_email: str,
+        user_emails: set[str] | None = None,
+        user_local_parts: set[str] | None = None,
     ) -> None:
+        owned_emails: set[str] = user_emails or {user_email.strip().lower()}
+        owned_locals: set[str] = user_local_parts or {email_local_part(user_email)}
         seen_at: datetime | None = parse_internal_date_ms(
             meta.internal_date_ms or ref.internal_date_ms
         )
@@ -335,38 +348,44 @@ class ImportService:
             self._tag_pitch_recipients(
                 contacts,
                 header=meta.to_header,
-                user_email=user_email,
+                user_emails=owned_emails,
+                user_local_parts=owned_locals,
                 seen_at=seen_at,
             )
             self._tag_pitch_recipients(
                 contacts,
                 header=meta.cc_header,
-                user_email=user_email,
+                user_emails=owned_emails,
+                user_local_parts=owned_locals,
                 seen_at=seen_at,
             )
         self._accumulate_header(
             contacts,
             header=meta.from_header,
-            user_email=user_email,
+            user_emails=owned_emails,
+            user_local_parts=owned_locals,
             seen_at=seen_at,
             from_user=False,
         )
         self._accumulate_header(
             contacts,
             header=meta.to_header,
-            user_email=user_email,
+            user_emails=owned_emails,
+            user_local_parts=owned_locals,
             seen_at=seen_at,
             from_user=True,
         )
         self._accumulate_header(
             contacts,
             header=meta.cc_header,
-            user_email=user_email,
+            user_emails=owned_emails,
+            user_local_parts=owned_locals,
             seen_at=seen_at,
             from_user=True,
         )
         participants = self._collect_participants(
-            user_email=user_email,
+            user_emails=owned_emails,
+            user_local_parts=owned_locals,
             headers=(meta.from_header, meta.to_header, meta.cc_header),
         )
         self._accumulate_pair_stats(
@@ -429,14 +448,19 @@ class ImportService:
         contacts: dict[str, ContactAccumulator],
         *,
         header: str | None,
-        user_email: str,
+        user_emails: set[str],
+        user_local_parts: set[str],
         seen_at: datetime | None,
         from_user: bool,
     ) -> None:
         if not header:
             return
         for display_name, email in parse_address_header(header):
-            if email == user_email:
+            if is_likely_self_contact(
+                email,
+                user_emails=user_emails,
+                user_local_parts=user_local_parts,
+            ):
                 continue
             cleaned_name: str = sanitize_display_name(display_name, email)
             existing: ContactAccumulator | None = contacts.get(email)
@@ -467,14 +491,22 @@ class ImportService:
             pair_stats[(left, right)] = (count + 1, max_seen)
 
     def _collect_participants(
-        self, *, user_email: str, headers: Iterable[str | None]
+        self,
+        *,
+        user_emails: set[str],
+        user_local_parts: set[str],
+        headers: Iterable[str | None],
     ) -> list[str]:
         participants: set[str] = set()
         for header in headers:
             if not header:
                 continue
             for _, email in parse_address_header(header):
-                if email != user_email:
+                if not is_likely_self_contact(
+                    email,
+                    user_emails=user_emails,
+                    user_local_parts=user_local_parts,
+                ):
                     participants.add(email)
         return sorted(participants)
 
@@ -483,13 +515,18 @@ class ImportService:
         contacts: dict[str, ContactAccumulator],
         *,
         header: str | None,
-        user_email: str,
+        user_emails: set[str],
+        user_local_parts: set[str],
         seen_at: datetime | None,
     ) -> None:
         if not header:
             return
         for display_name, email in parse_address_header(header):
-            if email == user_email:
+            if is_likely_self_contact(
+                email,
+                user_emails=user_emails,
+                user_local_parts=user_local_parts,
+            ):
                 continue
             existing: ContactAccumulator | None = contacts.get(email)
             if existing is None:
@@ -504,13 +541,35 @@ class ImportService:
     async def _find_person_by_email(
         self, user_id: uuid.UUID, email: str
     ) -> Person | None:
-        result = await self._db.execute(
-            select(Person).where(
-                Person.user_id == user_id,
-                Person.email_addresses.any(email),
+        for variant in email_lookup_variants(email):
+            result = await self._db.execute(
+                select(Person).where(
+                    Person.user_id == user_id,
+                    Person.email_addresses.any(variant),
+                )
             )
-        )
-        return result.scalar_one_or_none()
+            person: Person | None = result.scalar_one_or_none()
+            if person is None:
+                continue
+            normalized: str | None = email.strip().lower() if "@" in email else None
+            if normalized is not None and normalized not in person.email_addresses:
+                person.email_addresses = list(
+                    dict.fromkeys([*person.email_addresses, normalized])
+                )
+            return person
+        return None
+
+    async def _load_user_identity(
+        self,
+        *,
+        user_email: str,
+        source: Source,
+    ) -> tuple[set[str], set[str]]:
+        emails: set[str] = {user_email.strip().lower()}
+        if source.external_account_id:
+            emails.add(source.external_account_id.strip().lower())
+        local_parts: set[str] = {email_local_part(email) for email in emails}
+        return emails, local_parts
 
     async def _upsert_person(
         self,
@@ -627,9 +686,16 @@ class ImportService:
             )
 
     async def _link_orgs_for_user(self, user_id: uuid.UUID) -> None:
+        from contactsafe_server.db.models import Org
+
         result = await self._db.execute(select(Person).where(Person.user_id == user_id))
         for person in result.scalars().all():
-            if person.current_org_id is not None or not person.email_addresses:
+            if person.current_org_id is not None:
+                org: Org | None = await self._db.get(Org, person.current_org_id)
+                if org is not None:
+                    person.current_org_name = org.canonical_name
+                continue
+            if not person.email_addresses:
                 continue
             org_name: str | None = person.current_org_name or org_name_from_email(
                 person.email_addresses[0]
@@ -642,8 +708,7 @@ class ImportService:
             )
             if org is not None:
                 person.current_org_id = org.id
-                if not person.current_org_name:
-                    person.current_org_name = org.canonical_name
+                person.current_org_name = org.canonical_name
         await self._db.flush()
 
     async def _upsert_person_person_edges(

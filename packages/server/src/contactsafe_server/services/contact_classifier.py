@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import math
 import re
 
 from contactsafe_server.services.email_parse import (
@@ -39,6 +40,11 @@ _BROADCAST_DOMAIN_PREFIXES: tuple[str, ...] = (
     "service.",
 )
 
+_SERVICE_LOCAL_PART_RE: re.Pattern[str] = re.compile(
+    r"(customer|support|help|service|csrep|cs[-_]|noreply|no[-_]?reply)",
+    flags=re.IGNORECASE,
+)
+
 _RECENCY_WINDOW_DAYS: int = 90
 
 
@@ -68,7 +74,7 @@ def compute_tie_strength(
     classification: ContactClassification,
 ) -> float:
     """Score relationship strength; penalize automated and broadcast contacts."""
-    base: float = min(1.0, float(accumulator.message_count) / 10.0)
+    base: float = min(0.6, math.log2(float(accumulator.message_count) + 1.0) / 10.0)
     if classification.is_automated:
         base *= 0.05
     elif classification.is_broadcast:
@@ -76,13 +82,17 @@ def compute_tie_strength(
 
     if classification.is_human:
         mutual: int = min(accumulator.outbound_count, accumulator.inbound_count)
-        base = min(1.0, base + min(0.4, float(mutual) / 8.0))
+        base = min(1.0, base + min(0.3, float(mutual) / 15.0))
         if accumulator.last_seen_at is not None:
             cutoff: datetime = datetime.now(tz=UTC) - timedelta(days=_RECENCY_WINDOW_DAYS)
             if accumulator.last_seen_at >= cutoff:
                 base = min(1.0, base + 0.15)
 
-    return round(base, 4)
+    local_part: str = accumulator.email.rsplit("@", 1)[0]
+    if _SERVICE_LOCAL_PART_RE.search(local_part):
+        base = min(base, 0.15)
+
+    return round(min(1.0, base), 4)
 
 
 def _is_automated_contact(accumulator: ContactAccumulator) -> bool:

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 from contactsafe_server.db.models import Person
 from contactsafe_server.services.category_inference import infer_categories_from_contact
+from contactsafe_server.services.org_enrichment import should_apply_enrichment_org
 from contactsafe_server.services.exa_client import ExaSearchHit
 
 _ROLE_PATTERNS: list[tuple[str, str]] = [
@@ -61,9 +62,15 @@ def apply_exa_hints_to_person(person: Person, hints: ExaPersonHints) -> None:
     if hints.categories:
         merged: list[str] = list(dict.fromkeys([*person.inferred_categories, *hints.categories]))
         person.inferred_categories = merged
-    if hints.current_role and not person.current_role:
-        person.current_role = hints.current_role
-    if hints.org_name:
+    primary_email: str = person.email_addresses[0] if person.email_addresses else ""
+    if hints.current_role and not person.current_role and primary_email:
+        local_part: str = primary_email.rsplit("@", 1)[0].lower()
+        if local_part not in {"info", "team", "hello", "support", "contact", "customer_service"}:
+            person.current_role = hints.current_role
+    if hints.org_name and should_apply_enrichment_org(
+        primary_email=primary_email,
+        proposed_org=hints.org_name,
+    ):
         person.current_org_name = hints.org_name
 
 

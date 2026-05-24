@@ -1,5 +1,9 @@
+from contactsafe_server.db.models import Person
 from contactsafe_server.services.exa_client import ExaSearchHit, _build_person_query, _parse_results
-from contactsafe_server.services.exa_enrichment import extract_hints_from_exa_hits
+from contactsafe_server.services.exa_enrichment import (
+    apply_exa_hints_to_person,
+    extract_hints_from_exa_hits,
+)
 
 
 def test_build_person_query_includes_domain() -> None:
@@ -44,3 +48,30 @@ def test_extract_vc_hints_from_exa_hits() -> None:
     assert "vc" in hints.categories
     assert hints.current_role == "General Partner"
     assert hints.org_name == "Acme Ventures"
+
+
+def test_apply_exa_hints_respects_domain_derived_org() -> None:
+    person = Person(
+        user_id=__import__("uuid").uuid4(),
+        canonical_name="Santo",
+        email_addresses=["santo@sparkcapital.com"],
+        current_org_name="Spark Capital",
+        inferred_categories=[],
+    )
+    apply_exa_hints_to_person(
+        person,
+        extract_hints_from_exa_hits(
+            hits=[
+                ExaSearchHit(
+                    title="Santo - Partner - Bloomberg Markets",
+                    url="https://example.com",
+                    text="Santo at Bloomberg Markets",
+                    highlights=[],
+                )
+            ],
+            email="santo@sparkcapital.com",
+            display_name="Santo",
+            org_hint="Spark Capital",
+        ),
+    )
+    assert person.current_org_name == "Spark Capital"
