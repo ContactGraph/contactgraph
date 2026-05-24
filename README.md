@@ -37,7 +37,7 @@ ContactSafe is built as an **extensible source framework**. Every connector uses
 4. Leave Client ID / Secret empty (Dynamic Client Registration).
 5. Click **Connect** → sign in with Google → return to Claude.
 6. Start a **new chat**, enable the ContactSafe connector.
-7. Ask the agent to run **`sync_source`**, wait until layout to finish, then try *"What VCs do I know?"* or *"Who do I know at Sticker VC?"*
+7. Ask the agent to run **`sync_source`**, wait until sync finishes, then try *"What VCs do I know?"* or *"Who do I know at Sticker VC?"*
 
 Claude uses redirect URI `https://claude.ai/api/mcp/auth_callback` — handled automatically.
 
@@ -45,7 +45,181 @@ Claude uses redirect URI `https://claude.ai/api/mcp/auth_callback` — handled a
 
 ### OpenClaw
 
-TBD.
+[OpenClaw](https://docs.openclaw.ai) is a self-hosted AI agent gateway (WhatsApp, Telegram, Control UI, etc.). ContactSafe is a **remote Streamable HTTP MCP server** at `https://www.contactsafe.ai/mcp` with **OAuth 2.1** (same flow as Claude — dynamic client registration, Google sign-in).
+
+You need two things: **MCP tools** (ContactSafe server + auth) and **agent instructions** (the skill file).
+
+#### 1. Install the ContactSafe skill
+
+OpenClaw loads skills from `~/.openclaw/skills`. Copy the published skill so your agent knows the `connect_source` → `sync_source` → `query_network` workflow:
+
+```bash
+mkdir -p ~/.openclaw/skills/contactsafe
+curl -s https://www.contactsafe.ai/skill.md -o ~/.openclaw/skills/contactsafe/SKILL.md
+```
+
+Alternatively, add `https://www.contactsafe.ai/skill.md` to the agent system prompt.
+
+#### 2. Connect ContactSafe (pick one auth method)
+
+**Option A — OAuth plugin (recommended)**
+
+Native OpenClaw MCP config only supports static `Authorization: Bearer …` headers today; ContactSafe expects a full OAuth flow. The [openclaw-mcp-bridge](https://github.com/fsaint/openclaw-mcp-bridge) plugin handles PKCE, dynamic client registration, and token refresh for you.
+
+```bash
+npm install openclaw-mcp-bridge
+```
+
+Add to `~/.openclaw/openclaw.json`:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "plugin-mcp-client": {
+        "enabled": true,
+        "config": {
+          "servers": {
+            "contactsafe": {
+              "url": "https://www.contactsafe.ai/mcp",
+              "auth": {
+                "scopes": ["contactsafe:read", "contactsafe:write"]
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Restart the gateway (`openclaw gateway restart` — plugin changes require a restart). In chat, run **`/mcp auth contactsafe`**. Your browser opens → sign in with Google → return to OpenClaw.
+
+Tools appear namespaced, e.g. `contactsafe__sync_source`, `contactsafe__query_network`. Use `/mcp tools` to verify.
+
+**Option B — Built-in MCP config (manual Bearer token)**
+
+If you already have a ContactSafe access token (from any MCP client that completed OAuth), register the server via CLI. OpenClaw substitutes `${CONTACTSAFE_MCP_TOKEN}` from your environment at runtime:
+
+```bash
+openclaw mcp set contactsafe '{"url":"https://www.contactsafe.ai/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${CONTACTSAFE_MCP_TOKEN}"}}'
+export CONTACTSAFE_MCP_TOKEN="your-access-token"
+openclaw mcp list
+```
+
+Changes under `mcp.*` hot-apply without a gateway restart. Tokens expire (~15 minutes by default); reconnect or use Option A for automatic refresh. For longer-lived testing tokens, raise `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` on the ContactSafe deployment.
+
+#### 3. Use it
+
+In whatever channel your OpenClaw agent runs on:
+
+> Connect my Gmail through ContactSafe, run sync, then tell me what investors I know.
+
+The agent should call `connect_source` (you open the Google consent URL once if Gmail is not connected yet), then `sync_source`, poll `get_source_status` until sync completes, and answer via `query_network`.
+
+**Docs:** [OpenClaw MCP CLI](https://docs.openclaw.ai/cli/mcp) · [Configuration reference](https://docs.openclaw.ai/gateway/configuration-reference)
+
+### Gemini (CLI agent)
+
+The [Gemini CLI](https://github.com/google-gemini/gemini-cli) is Google's open-source terminal agent. It supports remote **Streamable HTTP** MCP servers with automatic OAuth discovery — ContactSafe uses the same OAuth 2.1 + DCR flow as Claude.
+
+#### 1. Add ContactSafe as an MCP server
+
+**Via CLI** (writes to `~/.gemini/settings.json`):
+
+```bash
+gemini mcp add -s user --transport http contactsafe https://www.contactsafe.ai/mcp
+```
+
+**Or edit `~/.gemini/settings.json` directly:**
+
+```json
+{
+  "mcpServers": {
+    "contactsafe": {
+      "httpUrl": "https://www.contactsafe.ai/mcp"
+    }
+  }
+}
+```
+
+OAuth endpoints are discovered from `/.well-known/oauth-protected-resource` — no Client ID or Secret needed.
+
+#### 2. Authenticate
+
+Start the Gemini CLI, then run:
+
+```
+/mcp auth contactsafe
+```
+
+Your browser opens → sign in with Google (ContactSafe OAuth) → return to the terminal. Tokens are stored in `~/.gemini/mcp-oauth-tokens.json` and refreshed automatically.
+
+Verify with `/mcp` — you should see ContactSafe tools listed (namespaced as `mcp_contactsafe_*`).
+
+**Headless environments:** OAuth requires a local browser and redirect to `http://localhost:7777/oauth/callback`. It will not work over plain SSH without port forwarding.
+
+#### 3. Teach the agent
+
+Paste `https://www.contactsafe.ai/skill.md` into your first message, or save it locally and `@`-reference it:
+
+> Read https://www.contactsafe.ai/skill.md, then connect my Gmail via ContactSafe, sync, and tell me what investors I know.
+
+#### Gemini Enterprise (org admins)
+
+If you use [Gemini Enterprise](https://cloud.google.com/gemini-enterprise) Agent Designer instead of the CLI, add ContactSafe as a **Custom MCP Server** data store in the Google Cloud console ([docs](https://docs.cloud.google.com/gemini/enterprise/docs/connectors/custom-mcp-server/set-up-custom-mcp-server)):
+
+| Field | Value |
+|-------|-------|
+| MCP Server URL | `https://www.contactsafe.ai/mcp` |
+| Authorization URL | `https://www.contactsafe.ai/oauth/authorize` |
+| Token URL | `https://www.contactsafe.ai/oauth/token` |
+| Scopes | `contactsafe:read contactsafe:write` |
+
+Gemini Enterprise requires a **pre-registered OAuth client** (not DCR). Register one via `POST https://www.contactsafe.ai/oauth/register` with redirect URI `https://vertexaisearch.cloud.google.com/oauth-redirect`, then enter the returned `client_id` (and `client_secret` if applicable) in the data store config. Enable actions on the data store, connect it to your agent, and authorize Gemini Enterprise when prompted.
+
+**Docs:** [Gemini CLI MCP servers](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md)
+
+### ChatGPT (Developer Mode apps)
+
+ChatGPT supports remote MCP servers as **custom apps** via [Developer Mode](https://developers.openai.com/api/docs/guides/developer-mode) (Plus, Pro, Business, Enterprise, and Education on the web). ContactSafe uses Streamable HTTP + OAuth 2.1 with dynamic client registration — same pattern as Claude.
+
+#### 1. Enable Developer Mode
+
+1. Go to [ChatGPT Settings → Apps](https://chatgpt.com/#settings/Connectors)
+2. Open **Advanced settings → Developer mode** and turn it **ON**
+
+Business/Enterprise admins may need to enable **Create custom MCP connectors** under workspace permissions first.
+
+#### 2. Create a ContactSafe app
+
+1. In Apps settings, click **Create app** (visible only in Developer Mode)
+2. Fill in:
+   - **Name:** `ContactSafe`
+   - **MCP server URL:** `https://www.contactsafe.ai/mcp`
+   - **Authentication:** **OAuth**
+   - Leave Client ID / Client Secret empty — ChatGPT registers via DCR automatically
+3. Check **I trust this application**
+4. Click **Create** → complete the OAuth sign-in (Google) when redirected
+
+The app appears under **Drafts**. Use the app details page to toggle individual tools on/off and **Refresh** after ContactSafe deploys new tools.
+
+ChatGPT redirect URIs (`https://chatgpt.com/connector_platform_oauth_redirect` or per-app `https://chatgpt.com/connector/oauth/{callback_id}`) are registered automatically through DCR.
+
+#### 3. Use it in a chat
+
+1. Start a **new chat**
+2. From the **+** menu, choose **Developer mode** and select your ContactSafe app
+3. Prompt explicitly so ChatGPT picks the right tools:
+
+> Using ContactSafe only: read https://www.contactsafe.ai/skill.md, connect my Gmail if needed, run sync_source, wait for sync to complete, then tell me what VCs I know.
+
+Write actions (`sync_source`, `connect_source`) require confirmation by default — review each tool call before approving.
+
+**Tips:** Developer Mode does not work in Agent mode (only Deep Research can use custom apps, read-only). For workspace-wide rollout, admins publish the app from **Workspace Settings → Apps → Drafts**.
+
+**Docs:** [ChatGPT Developer mode](https://developers.openai.com/api/docs/guides/developer-mode) · [Apps SDK authentication](https://developers.openai.com/apps-sdk/build/auth)
 
 ---
 
