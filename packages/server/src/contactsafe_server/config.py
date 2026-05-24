@@ -69,6 +69,14 @@ class Settings(BaseSettings):
         default=200,
         description="Contacts resolved before marking import partial",
     )
+    import_partial_contact_target: int = Field(
+        default=50,
+        description="Contacts resolved before the graph becomes queryable (partial)",
+    )
+    import_progress_commit_messages: int = Field(
+        default=25,
+        description="Commit scan/upsert progress to the DB every N Gmail messages",
+    )
     import_max_messages: int = Field(
         default=2000,
         description="Max Gmail messages scanned per import run",
