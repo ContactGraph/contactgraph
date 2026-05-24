@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -10,6 +11,24 @@ _MANIFESTO_PATH: Path = _REPO_ROOT / "manifesto.md"
 
 _GITHUB_REPO_URL: str = "https://github.com/contactsafe/contactsafe"
 _SITE_YEAR: str = str(datetime.now(tz=UTC).year)
+_SITE_NAME: str = "ContactGraph"
+_TAGLINE: str = "Turn your contacts into a superpower."
+_LANDING_DESCRIPTION: str = (
+    f"{_TAGLINE} Connect Gmail via MCP, sync your network, and query it in "
+    "natural language."
+)
+_MANIFESTO_DESCRIPTION: str = (
+    f"{_TAGLINE} We gave away our relationships — ContactGraph builds a private "
+    "graph from your email so your agent can answer who you know."
+)
+
+
+@dataclass(frozen=True, slots=True)
+class PageMeta:
+    title: str
+    description: str
+    path: str
+    og_type: str = "website"
 
 _MONO: str = (
     'ui-monospace, "SFMono-Regular", "Berkeley Mono", Menlo, Consolas, '
@@ -316,14 +335,43 @@ def _footer_html() -> str:
     </footer>"""
 
 
-def _page_shell(*, title: str, header: str, content: str) -> str:
+def _canonical_url(base_url: str, path: str) -> str:
+    normalized_base: str = base_url.rstrip("/")
+    if path == "/":
+        return normalized_base + "/"
+    return f"{normalized_base}{path}"
+
+
+def _head_meta_html(*, meta: PageMeta, base_url: str) -> str:
+    canonical_url: str = _canonical_url(base_url, meta.path)
+    title: str = html.escape(meta.title)
+    description: str = html.escape(meta.description)
+    url: str = html.escape(canonical_url, quote=True)
+    site_name: str = html.escape(_SITE_NAME)
+    og_type: str = html.escape(meta.og_type)
+    return f"""
+  <meta name="description" content="{description}" />
+  <link rel="canonical" href="{url}" />
+  <meta property="og:site_name" content="{site_name}" />
+  <meta property="og:title" content="{title}" />
+  <meta property="og:description" content="{description}" />
+  <meta property="og:url" content="{url}" />
+  <meta property="og:type" content="{og_type}" />
+  <meta property="og:locale" content="en_US" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="{title}" />
+  <meta name="twitter:description" content="{description}" />"""
+
+
+def _page_shell(*, meta: PageMeta, base_url: str, header: str, content: str) -> str:
     footer: str = _footer_html()
+    head_meta: str = _head_meta_html(meta=meta, base_url=base_url)
     return f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{html.escape(title)}</title>
+  <title>{html.escape(meta.title)}</title>{head_meta}
   <style>{_BASE_STYLES}</style>
 </head>
 <body>
@@ -336,11 +384,11 @@ def _page_shell(*, title: str, header: str, content: str) -> str:
 </html>"""
 
 
-def render_landing_page(*, mcp_path: str) -> str:
+def render_landing_page(*, mcp_path: str, base_url: str) -> str:
     header: str = _header_html(mcp_path=mcp_path)
-    content: str = """
+    content: str = f"""
     <main class="content">
-      <h1>Intelligence hides in who knows who.</h1>
+      <h1>{html.escape(_TAGLINE)}</h1>
       <p class="lead">
         ContactGraph distills your inboxes, calendars, and messages into a living relationship graph for AI.
         Ask one question, and the right context appears before the meeting, before the pitch, before the moment is gone.
@@ -350,10 +398,15 @@ def render_landing_page(*, mcp_path: str) -> str:
       </p>
       <p class="status">Private preview opening soon</p>
     </main>"""
-    return _page_shell(title="ContactGraph", header=header, content=content)
+    meta = PageMeta(
+        title=f"{_SITE_NAME} — {_TAGLINE}",
+        description=_LANDING_DESCRIPTION,
+        path="/",
+    )
+    return _page_shell(meta=meta, base_url=base_url, header=header, content=content)
 
 
-def render_manifesto_page(*, mcp_path: str) -> str:
+def render_manifesto_page(*, mcp_path: str, base_url: str) -> str:
     markdown: str = _MANIFESTO_PATH.read_text(encoding="utf-8")
     title_match: re.Match[str] | None = re.search(r"^# (.+)$", markdown, re.MULTILINE)
     page_title: str = title_match.group(1) if title_match else "Manifesto"
@@ -366,4 +419,10 @@ def render_manifesto_page(*, mcp_path: str) -> str:
         {prose_html}
       </article>
     </main>"""
-    return _page_shell(title=f"{page_title} — ContactGraph", header=header, content=content)
+    meta = PageMeta(
+        title=f"{page_title} — {_SITE_NAME}",
+        description=_MANIFESTO_DESCRIPTION,
+        path="/manifesto",
+        og_type="article",
+    )
+    return _page_shell(meta=meta, base_url=base_url, header=header, content=content)
