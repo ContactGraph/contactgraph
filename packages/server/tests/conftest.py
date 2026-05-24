@@ -7,7 +7,12 @@ from urllib.parse import urlparse
 import pytest
 from cryptography.fernet import Fernet
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 os.environ.setdefault("APP_ENV", "development")
 os.environ.setdefault("BASE_URL", "http://testserver")
@@ -47,8 +52,11 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-@pytest.fixture
-async def db_session() -> AsyncIterator[AsyncSession]:
+@pytest.fixture(scope="session")
+async def db_engine(postgres_available: bool) -> AsyncIterator[AsyncEngine]:
+    if not postgres_available:
+        pytest.skip("Postgres not available")
+
     settings = get_settings()
     engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
     try:
@@ -58,7 +66,13 @@ async def db_session() -> AsyncIterator[AsyncSession]:
         await engine.dispose()
         pytest.skip(f"Postgres not available: {exc}")
 
-    connection = await engine.connect()
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
+async def db_session(db_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
+    connection = await db_engine.connect()
     transaction = await connection.begin()
     factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
         connection, expire_on_commit=False
@@ -67,7 +81,6 @@ async def db_session() -> AsyncIterator[AsyncSession]:
         yield session
     await transaction.rollback()
     await connection.close()
-    await engine.dispose()
 
 
 @pytest.fixture
@@ -87,5 +100,6 @@ def clear_settings_cache() -> Iterator[None]:
 
 @pytest.fixture(autouse=True)
 async def reset_global_db_engine() -> AsyncIterator[None]:
+    await shutdown_db()
     yield
     await shutdown_db()
