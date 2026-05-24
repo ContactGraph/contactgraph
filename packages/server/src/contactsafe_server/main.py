@@ -16,6 +16,7 @@ from contactsafe_server.mcp.path_middleware import NormalizeMcpPathMiddleware
 from contactsafe_server.mcp.server import create_mcp_server
 from contactsafe_server.oauth.router import router as oauth_router
 from contactsafe_server.oauth.well_known import router as well_known_router
+from contactsafe_server.web.site import render_landing_page, render_manifesto_page
 
 
 def create_app() -> FastAPI:
@@ -65,141 +66,11 @@ def create_app() -> FastAPI:
 
     @app.get("/", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
     async def landing_page() -> HTMLResponse:
-        return HTMLResponse(
-            """<!doctype html>
-<html lang=\"en\">
-<head>
-  <meta charset=\"utf-8\" />
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-  <title>ContactSafe</title>
-  <style>
-    :root { color-scheme: dark; }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
-      color: #ebeeff;
-      background:
-        radial-gradient(1200px 600px at 12% -8%, rgba(102, 132, 255, 0.34), transparent 58%),
-        radial-gradient(900px 500px at 88% 8%, rgba(115, 61, 255, 0.28), transparent 62%),
-        radial-gradient(500px 300px at 50% 100%, rgba(29, 131, 255, 0.20), transparent 65%),
-        linear-gradient(165deg, #02030a 0%, #040814 45%, #03040b 100%);
-      display: grid;
-      place-items: center;
-      padding: clamp(1rem, 2vw, 2.5rem);
-      overflow-x: hidden;
-    }
-    .veil::before {
-      content: \"\";
-      position: fixed;
-      inset: 0;
-      pointer-events: none;
-      background: repeating-linear-gradient(
-        180deg,
-        rgba(180, 205, 255, 0.045) 0,
-        rgba(180, 205, 255, 0.045) 1px,
-        transparent 2px,
-        transparent 4px
-      );
-      opacity: .35;
-      mix-blend-mode: screen;
-    }
-    .wrap {
-      position: relative;
-      max-width: 980px;
-      width: 100%;
-    }
-    .orb {
-      position: absolute;
-      filter: blur(24px);
-      opacity: .85;
-      pointer-events: none;
-      z-index: 0;
-    }
-    .orb.one {
-      width: 220px;
-      height: 220px;
-      border-radius: 999px;
-      background: rgba(85, 126, 255, 0.55);
-      top: -30px;
-      left: -48px;
-    }
-    .orb.two {
-      width: 260px;
-      height: 260px;
-      border-radius: 999px;
-      background: rgba(145, 91, 255, 0.42);
-      right: -70px;
-      bottom: -40px;
-    }
-    .panel {
-      position: relative;
-      z-index: 1;
-      border: 1px solid rgba(148, 173, 255, 0.30);
-      border-radius: 24px;
-      padding: clamp(1.4rem, 3vw, 3rem);
-      background:
-        linear-gradient(180deg, rgba(11, 16, 37, 0.86), rgba(6, 10, 24, 0.90)),
-        radial-gradient(circle at top, rgba(124, 155, 255, 0.12), transparent 60%);
-      box-shadow:
-        0 28px 120px rgba(53, 88, 255, 0.25),
-        inset 0 1px 0 rgba(255, 255, 255, 0.08);
-      backdrop-filter: blur(10px);
-    }
-    .kicker {
-      display: inline-block;
-      color: #8db7ff;
-      font-size: .76rem;
-      letter-spacing: .18em;
-      text-transform: uppercase;
-      padding: .38rem .66rem;
-      border: 1px solid rgba(141, 183, 255, 0.34);
-      border-radius: 999px;
-      background: rgba(38, 62, 125, 0.24);
-    }
-    h1 {
-      margin: 1rem 0 .9rem;
-      font-size: clamp(2.2rem, 6.3vw, 4.6rem);
-      line-height: 1.03;
-      letter-spacing: -0.03em;
-      max-width: 12ch;
-      text-wrap: balance;
-    }
-    .lead {
-      margin: 0;
-      color: #bdd2ff;
-      font-size: clamp(1rem, 2vw, 1.22rem);
-      line-height: 1.58;
-      max-width: 52ch;
-    }
-    .signal {
-      margin-top: 1.3rem;
-      font-size: .86rem;
-      letter-spacing: .15em;
-      text-transform: uppercase;
-      color: #89aefe;
-      opacity: .88;
-    }
-  </style>
-</head>
-<body class=\"veil\">
-  <main class=\"wrap\">
-    <div class=\"orb one\" aria-hidden=\"true\"></div>
-    <div class=\"orb two\" aria-hidden=\"true\"></div>
-    <section class=\"panel\">
-      <div class=\"kicker\">ContactSafe • Signal Layer</div>
-      <h1>Intelligence hides in who knows who.</h1>
-      <p class=\"lead\">
-        ContactSafe distills your inboxes, calendars, and messages into a living relationship graph for AI.
-        Ask one question, and the right context appears before the meeting, before the pitch, before the moment is gone.
-      </p>
-      <div class=\"signal\">Private preview opening soon</div>
-    </section>
-  </main>
-</body>
-</html>"""
-        )
+        return HTMLResponse(render_landing_page(mcp_path=settings.mcp_path))
+
+    @app.get("/manifesto", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
+    async def manifesto_page() -> HTMLResponse:
+        return HTMLResponse(render_manifesto_page(mcp_path=settings.mcp_path))
 
     @app.get("/skill.md", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
     async def serve_skill_md() -> FileResponse:

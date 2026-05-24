@@ -12,6 +12,7 @@ COPY packages/core/pyproject.toml packages/core/pyproject.toml
 COPY packages/core/src packages/core/src
 COPY packages/server/pyproject.toml packages/server/pyproject.toml
 COPY packages/server/src packages/server/src
+COPY skill.md manifesto.md ./
 COPY migrations migrations
 
 RUN uv sync --package contactsafe-server --frozen --no-dev
