@@ -11,5 +11,7 @@ node_modules
 .cursor
 *.md
 !README.md
+!skill.md
+!manifesto.md
 docker-compose.yml
 Makefile
