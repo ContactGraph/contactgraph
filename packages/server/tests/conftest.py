@@ -1,6 +1,8 @@
 import os
+import socket
 from collections.abc import AsyncIterator, Iterator
 from typing import Final
+from urllib.parse import urlparse
 
 import pytest
 from cryptography.fernet import Fernet
@@ -28,21 +30,16 @@ get_settings.cache_clear()
 
 @pytest.fixture(scope="session")
 def postgres_available() -> bool:
-    import asyncio
-
-    async def _ping() -> bool:
-        settings = get_settings()
-        engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
-        try:
-            async with engine.connect() as conn:
-                await conn.execute(__import__("sqlalchemy").text("SELECT 1"))
+    settings = get_settings()
+    raw_url: str = str(settings.database_url).replace("+asyncpg", "")
+    parsed = urlparse(raw_url)
+    host: str = parsed.hostname or "localhost"
+    port: int = parsed.port or 5432
+    try:
+        with socket.create_connection((host, port), timeout=2):
             return True
-        except Exception:
-            return False
-        finally:
-            await engine.dispose()
-
-    return asyncio.run(_ping())
+    except OSError:
+        return False
 
 
 @pytest.fixture(scope="session")

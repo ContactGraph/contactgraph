@@ -63,7 +63,7 @@ def apply_exa_hints_to_person(person: Person, hints: ExaPersonHints) -> None:
         person.inferred_categories = merged
     if hints.current_role and not person.current_role:
         person.current_role = hints.current_role
-    if hints.org_name and not person.current_org_name:
+    if hints.org_name:
         person.current_org_name = hints.org_name
 
 

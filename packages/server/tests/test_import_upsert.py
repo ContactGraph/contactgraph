@@ -46,7 +46,7 @@ async def test_upsert_person_updates_existing_contact_by_email(
     service = ImportService(
         db=db_session,
         settings=settings,
-        encryptor=TokenEncryptor(settings),
+        encryptor=TokenEncryptor(settings.token_encryption_key),
         gmail=MagicMock(),
     )
     accumulator = ContactAccumulator(
@@ -120,7 +120,7 @@ async def test_upsert_person_leaves_unrelated_contacts_untouched(
     service = ImportService(
         db=db_session,
         settings=settings,
-        encryptor=TokenEncryptor(settings),
+        encryptor=TokenEncryptor(settings.token_encryption_key),
         gmail=MagicMock(),
     )
     accumulator = ContactAccumulator(
