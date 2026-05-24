@@ -112,6 +112,30 @@ class PersonMatch(BaseModel):
     relevance: str = ""
 
 
+class CategoryCount(BaseModel):
+    category: str
+    count: int
+
+
+class OrgCount(BaseModel):
+    org_name: str
+    count: int
+
+
+class DescribeGraphResult(BaseModel):
+    """High-level summary of the user's contact graph."""
+
+    total_contacts: int = 0
+    human_contacts: int = 0
+    broadcast_contacts: int = 0
+    automated_contacts: int = 0
+    queryable_contacts: int = 0
+    top_categories: list[CategoryCount] = Field(default_factory=lambda: list[CategoryCount]())
+    top_orgs: list[OrgCount] = Field(default_factory=lambda: list[OrgCount]())
+    strongest_ties: list[PersonMatch] = Field(default_factory=lambda: list[PersonMatch]())
+    message: str
+
+
 class QueryNetworkResult(BaseModel):
     question: str
     matches: list[PersonMatch] = Field(default_factory=lambda: list[PersonMatch]())
