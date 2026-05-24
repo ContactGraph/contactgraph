@@ -4,16 +4,14 @@ from collections.abc import Iterable
 from datetime import UTC, datetime
 from itertools import combinations
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from contactsafe_core.enums import OAuthProvider, SourceConnectionStatus, SourceType, SyncState
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import (
     OAuthCredential,
-    OrgEdge,
     Person,
     PersonEdge,
-    PersonOrgEdge,
     PersonPersonEdge,
     Source,
     User,
@@ -101,17 +99,6 @@ class ImportService:
             )
             await self._db.flush()
 
-            await self._db.execute(delete(PersonEdge).where(PersonEdge.user_id == user_id))
-            await self._db.execute(
-                delete(PersonPersonEdge).where(PersonPersonEdge.user_id == user_id)
-            )
-            await self._db.execute(
-                delete(PersonOrgEdge).where(PersonOrgEdge.user_id == user_id)
-            )
-            await self._db.execute(delete(OrgEdge).where(OrgEdge.user_id == user_id))
-            await self._db.execute(delete(Person).where(Person.user_id == user_id))
-            await self._db.flush()
-
             sorted_contacts: list[ContactAccumulator] = sorted(
                 contacts.values(),
                 key=lambda c: (
@@ -123,7 +110,12 @@ class ImportService:
 
             resolved: int = 0
             for accumulator in sorted_contacts:
-                await self._upsert_person(user_id, user.email, accumulator)
+                await self._upsert_person(
+                    user_id,
+                    user.email,
+                    accumulator,
+                    source_id=source.id,
+                )
                 resolved += 1
                 source.contacts_resolved = resolved
                 source.contacts_pending = max(0, source.contacts_found - resolved)
@@ -132,13 +124,19 @@ class ImportService:
                     await self._db.flush()
 
             for accumulator in sorted_contacts[self._settings.import_initial_contact_target :]:
-                await self._upsert_person(user_id, user.email, accumulator)
+                await self._upsert_person(
+                    user_id,
+                    user.email,
+                    accumulator,
+                    source_id=source.id,
+                )
                 resolved += 1
                 source.contacts_resolved = resolved
                 source.contacts_pending = max(0, source.contacts_found - resolved)
 
             await self._upsert_person_person_edges(
                 user_id=user_id,
+                source_id=source.id,
                 person_pair_counts=person_pair_counts,
             )
 
@@ -348,11 +346,24 @@ class ImportService:
                 existing = contacts[email]
             existing.pitch_outbound_count += 1
 
+    async def _find_person_by_email(
+        self, user_id: uuid.UUID, email: str
+    ) -> Person | None:
+        result = await self._db.execute(
+            select(Person).where(
+                Person.user_id == user_id,
+                Person.email_addresses.any(email),
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def _upsert_person(
         self,
         user_id: uuid.UUID,
         user_email: str,
         accumulator: ContactAccumulator,
+        *,
+        source_id: uuid.UUID,
     ) -> None:
         classification = classify_contact(accumulator)
         org_name: str | None = org_name_from_email(accumulator.email)
@@ -364,39 +375,81 @@ class ImportService:
                 email=accumulator.email,
                 org_name_hint=org_name,
             )
-        person = Person(
-            user_id=user_id,
-            canonical_name=accumulator.display_name,
-            email_addresses=[accumulator.email],
-            current_org_name=org.canonical_name if org else None,
-            current_org_id=org.id if org else None,
-            last_seen_in_email=accumulator.last_seen_at,
-            confidence_score=0.85,
-        )
-        self._db.add(person)
-        await self._db.flush()
+
+        person: Person | None = await self._find_person_by_email(user_id, accumulator.email)
+        if person is None:
+            person = Person(
+                user_id=user_id,
+                canonical_name=accumulator.display_name,
+                email_addresses=[accumulator.email],
+                current_org_name=org.canonical_name if org else None,
+                current_org_id=org.id if org else None,
+                last_seen_in_email=accumulator.last_seen_at,
+                confidence_score=0.85,
+            )
+            self._db.add(person)
+            await self._db.flush()
+        else:
+            if accumulator.display_name and (
+                not person.canonical_name or person.canonical_name == accumulator.email
+            ):
+                person.canonical_name = accumulator.display_name
+            if accumulator.last_seen_at is not None and (
+                person.last_seen_in_email is None
+                or accumulator.last_seen_at > person.last_seen_in_email
+            ):
+                person.last_seen_in_email = accumulator.last_seen_at
+            if org is not None:
+                person.current_org_id = org.id
+                person.current_org_name = org.canonical_name
 
         tie_strength: float = compute_tie_strength(accumulator, classification)
-        edge = PersonEdge(
-            user_id=user_id,
-            person_id=person.id,
-            relationship_types=["contact"],
-            email_count=accumulator.message_count,
-            outbound_count=accumulator.outbound_count,
-            inbound_count=accumulator.inbound_count,
-            thread_count=accumulator.message_count,
-            last_email_at=accumulator.last_seen_at,
-            last_genuine_interaction_at=accumulator.last_seen_at
-            if classification.is_human
-            else None,
-            first_contact_date=accumulator.last_seen_at,
-            tie_strength_score=tie_strength,
-            is_broadcast=classification.is_broadcast,
-            is_human=classification.is_human,
-            is_automated=classification.is_automated,
-            notes=f"Imported from Gmail metadata for {user_email}",
+        edge_result = await self._db.execute(
+            select(PersonEdge).where(
+                PersonEdge.user_id == user_id,
+                PersonEdge.person_id == person.id,
+            )
         )
-        self._db.add(edge)
+        edge: PersonEdge | None = edge_result.scalar_one_or_none()
+        if edge is None:
+            edge = PersonEdge(
+                user_id=user_id,
+                person_id=person.id,
+                relationship_types=["contact"],
+                email_count=accumulator.message_count,
+                outbound_count=accumulator.outbound_count,
+                inbound_count=accumulator.inbound_count,
+                thread_count=accumulator.message_count,
+                last_email_at=accumulator.last_seen_at,
+                last_genuine_interaction_at=accumulator.last_seen_at
+                if classification.is_human
+                else None,
+                first_contact_date=accumulator.last_seen_at,
+                tie_strength_score=tie_strength,
+                is_broadcast=classification.is_broadcast,
+                is_human=classification.is_human,
+                is_automated=classification.is_automated,
+                notes=f"Imported from Gmail metadata for {user_email}",
+                source_id=source_id,
+            )
+            self._db.add(edge)
+        else:
+            edge.email_count = accumulator.message_count
+            edge.outbound_count = accumulator.outbound_count
+            edge.inbound_count = accumulator.inbound_count
+            edge.thread_count = accumulator.message_count
+            edge.last_email_at = accumulator.last_seen_at
+            edge.last_genuine_interaction_at = (
+                accumulator.last_seen_at if classification.is_human else None
+            )
+            if edge.first_contact_date is None:
+                edge.first_contact_date = accumulator.last_seen_at
+            edge.tie_strength_score = tie_strength
+            edge.is_broadcast = classification.is_broadcast
+            edge.is_human = classification.is_human
+            edge.is_automated = classification.is_automated
+            edge.notes = f"Imported from Gmail metadata for {user_email}"
+            edge.source_id = source_id
 
         if org is not None and not classification.is_automated:
             employment_service = EmploymentService(self._db)
@@ -431,8 +484,19 @@ class ImportService:
         self,
         *,
         user_id: uuid.UUID,
+        source_id: uuid.UUID,
         person_pair_counts: dict[tuple[str, str], tuple[int, datetime | None]],
     ) -> None:
+        await self._db.execute(
+            delete(PersonPersonEdge).where(
+                PersonPersonEdge.user_id == user_id,
+                or_(
+                    PersonPersonEdge.source_id == source_id,
+                    PersonPersonEdge.source_id.is_(None),
+                ),
+            )
+        )
+
         if not person_pair_counts:
             return
         result = await self._db.execute(select(Person).where(Person.user_id == user_id))
@@ -454,6 +518,7 @@ class ImportService:
                 relationship_hint="co_thread",
                 tie_strength_score=min(1.0, float(count) / 10.0),
                 last_seen_at=last_seen,
+                source_id=source_id,
             )
             self._db.add(edge)
         await self._db.flush()

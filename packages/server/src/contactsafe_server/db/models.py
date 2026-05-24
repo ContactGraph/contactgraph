@@ -346,6 +346,9 @@ class PersonEdge(Base):
     is_human: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_automated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sources.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -358,6 +361,7 @@ class PersonEdge(Base):
 
     user: Mapped["User"] = relationship(back_populates="person_edges")
     person: Mapped["Person"] = relationship(back_populates="edge")
+    source: Mapped["Source | None"] = relationship()
 
 
 class PersonPersonEdge(Base):
@@ -387,6 +391,9 @@ class PersonPersonEdge(Base):
     relationship_hint: Mapped[str] = mapped_column(Text, nullable=False, default="co_thread")
     tie_strength_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    source_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("sources.id", ondelete="CASCADE"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -398,6 +405,7 @@ class PersonPersonEdge(Base):
     )
 
     user: Mapped["User"] = relationship(back_populates="person_person_edges")
+    source: Mapped["Source | None"] = relationship()
 
 
 class PersonOrgEdge(Base):

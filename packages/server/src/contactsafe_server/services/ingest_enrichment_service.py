@@ -77,19 +77,17 @@ class IngestEnrichmentService:
         await self._db.flush()
 
     async def _should_skip_enrichment(self, person: Person) -> bool:
-        if person.edge is None:
-            result = await self._db.execute(
-                select(PersonEdge).where(
-                    PersonEdge.person_id == person.id,
-                    PersonEdge.user_id == person.user_id,
-                )
+        result = await self._db.execute(
+            select(PersonEdge.is_automated, PersonEdge.is_broadcast).where(
+                PersonEdge.person_id == person.id,
+                PersonEdge.user_id == person.user_id,
             )
-            edge: PersonEdge | None = result.scalar_one_or_none()
-        else:
-            edge = person.edge
-        if edge is None:
+        )
+        row: tuple[bool, bool] | None = result.one_or_none()
+        if row is None:
             return False
-        return edge.is_automated or edge.is_broadcast
+        is_automated, is_broadcast = row
+        return is_automated or is_broadcast
 
     async def _load_top_people_by_tie_strength(
         self, user_id: uuid.UUID, *, limit: int
