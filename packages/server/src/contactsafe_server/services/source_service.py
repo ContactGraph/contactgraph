@@ -1,6 +1,7 @@
 import uuid
+from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import exists, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.enums import (
@@ -19,6 +20,8 @@ from contactsafe_core.schemas import (
 from contactsafe_server.db.models import ConnectSession, OAuthCredential, Source, User
 from contactsafe_server.services.import_scheduler import (
     is_source_sync_running,
+    is_user_sync_running,
+    release_sync_lock,
     schedule_source_sync,
 )
 
@@ -267,31 +270,43 @@ class SourceService:
 
         user: User | None = await self._db.get(User, source.user_id)
         email: str | None = user.email if user is not None else None
-        sync_state: SyncState = SyncState(source.sync_state)
+        user_id: uuid.UUID = source.user_id
 
-        if is_source_sync_running(source.id):
+        if self._sync_in_progress(source, user_id):
+            await self._db.refresh(source)
             return SyncSourceResult(
                 source_id=source.id,
                 scheduled=False,
-                sync_state=sync_state,
+                sync_state=SyncState(source.sync_state),
                 email=email,
-                message="Sync is already running. Poll get_source_status.",
+                message="Sync is already running for this user. Poll get_source_status.",
             )
 
-        scheduled: bool = schedule_source_sync(source.id)
-        if not scheduled:
+        if not schedule_source_sync(source.id, user_id):
             return SyncSourceResult(
                 source_id=source.id,
                 scheduled=False,
-                sync_state=sync_state,
+                sync_state=SyncState(source.sync_state),
                 email=email,
-                message="Sync is already running. Poll get_source_status.",
+                message="Sync is already running for this user. Poll get_source_status.",
+            )
+
+        claimed: bool = await self._try_claim_sync(source)
+        if not claimed:
+            release_sync_lock(source.id, user_id)
+            await self._db.refresh(source)
+            return SyncSourceResult(
+                source_id=source.id,
+                scheduled=False,
+                sync_state=SyncState(source.sync_state),
+                email=email,
+                message="Sync is already running for this user. Poll get_source_status.",
             )
 
         return SyncSourceResult(
             source_id=source.id,
             scheduled=True,
-            sync_state=sync_state,
+            sync_state=SyncState.SYNCING,
             email=email,
             message=(
                 "Sync started in the background. "
@@ -348,6 +363,42 @@ class SourceService:
             )
         )
         return result.scalar_one_or_none()
+
+    @staticmethod
+    def _sync_in_progress(source: Source, user_id: uuid.UUID) -> bool:
+        if is_user_sync_running(user_id) or is_source_sync_running(source.id):
+            return True
+        return source.sync_state == SyncState.SYNCING.value
+
+    async def _try_claim_sync(self, source: Source) -> bool:
+        """Atomically mark a source syncing; only one sync per user at a time."""
+        user_syncing = (
+            select(Source.id)
+            .where(
+                Source.user_id == source.user_id,
+                Source.sync_state == SyncState.SYNCING.value,
+            )
+            .exists()
+        )
+        result = await self._db.execute(
+            update(Source)
+            .where(
+                Source.id == source.id,
+                Source.sync_state != SyncState.SYNCING.value,
+                ~user_syncing,
+            )
+            .values(
+                sync_state=SyncState.SYNCING.value,
+                sync_started_at=datetime.now(tz=UTC),
+                sync_error=None,
+            )
+            .returning(Source.id)
+        )
+        claimed_id: uuid.UUID | None = result.scalar_one_or_none()
+        if claimed_id is None:
+            return False
+        await self._db.refresh(source)
+        return True
 
     async def _get_credential_for_source(self, source: Source) -> OAuthCredential | None:
         result = await self._db.execute(

@@ -11,20 +11,31 @@ from contactsafe_server.services.import_service import ImportService
 logger = logging.getLogger(__name__)
 
 _active_sync_source_ids: set[uuid.UUID] = set()
+_active_sync_user_ids: set[uuid.UUID] = set()
 _scheduling_lock: threading.Lock = threading.Lock()
 
 
-def schedule_source_sync(source_id: uuid.UUID) -> bool:
+def schedule_source_sync(source_id: uuid.UUID, user_id: uuid.UUID) -> bool:
     """Fire-and-forget background sync. Returns False if one is already running."""
     with _scheduling_lock:
-        if source_id in _active_sync_source_ids:
+        if (
+            source_id in _active_sync_source_ids
+            or user_id in _active_sync_user_ids
+        ):
             return False
         _active_sync_source_ids.add(source_id)
+        _active_sync_user_ids.add(user_id)
     asyncio.create_task(
-        _run_sync_task(source_id),
+        _run_sync_task(source_id, user_id),
         name=f"source-sync-{source_id}",
     )
     return True
+
+
+def release_sync_lock(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    with _scheduling_lock:
+        _active_sync_source_ids.discard(source_id)
+        _active_sync_user_ids.discard(user_id)
 
 
 def is_source_sync_running(source_id: uuid.UUID) -> bool:
@@ -32,7 +43,12 @@ def is_source_sync_running(source_id: uuid.UUID) -> bool:
         return source_id in _active_sync_source_ids
 
 
-async def _run_sync_task(source_id: uuid.UUID) -> None:
+def is_user_sync_running(user_id: uuid.UUID) -> bool:
+    with _scheduling_lock:
+        return user_id in _active_sync_user_ids
+
+
+async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
     from contactsafe_server.deps import build_app_context
 
     ctx = build_app_context()
@@ -51,8 +67,7 @@ async def _run_sync_task(source_id: uuid.UUID) -> None:
                 await db.commit()
                 logger.info("Source sync completed for source %s", source_id)
             except Exception:
-                await db.rollback()
+                await db.commit()
                 logger.exception("Source sync failed for source %s", source_id)
     finally:
-        with _scheduling_lock:
-            _active_sync_source_ids.discard(source_id)
+        release_sync_lock(source_id, user_id)

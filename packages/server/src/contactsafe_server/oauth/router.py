@@ -16,7 +16,7 @@ from contactsafe_server.db.models import ConnectSession, User
 from contactsafe_server.deps import build_jwt_service
 from contactsafe_server.oauth.google import GoogleOAuthClient
 from contactsafe_server.services.crypto import TokenEncryptor
-from contactsafe_server.services.import_scheduler import schedule_source_sync
+from contactsafe_server.deps import build_source_service
 from contactsafe_server.services.oauth_server_service import (
     DynamicClientRegistrationRequest,
     OAuthServerService,
@@ -244,7 +244,9 @@ async def oauth_callback(
             status_code=500,
         )
 
-    schedule_source_sync(source.id)
+    sources = build_source_service(db)
+    await sources.request_sync(source.id)
+    await db.commit()
 
     if connect_session.oauth_redirect_uri:
         oauth_server = _build_oauth_server_service(db, settings)
