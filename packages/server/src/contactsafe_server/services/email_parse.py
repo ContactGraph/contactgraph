@@ -17,6 +17,43 @@ NO_REPLY_LOCAL_PARTS: frozenset[str] = frozenset(
     }
 )
 
+BROADCAST_LOCAL_PARTS: frozenset[str] = frozenset(
+    {
+        "info",
+        "team",
+        "hello",
+        "support",
+        "contact",
+        "outreach",
+        "webmaster",
+        "editor",
+        "admin",
+        "news",
+        "updates",
+        "invitations",
+        "members",
+        "community",
+        "events",
+    }
+)
+
+_INVALID_PERSON_NAMES: frozenset[str] = frozenset(
+    {
+        "customer_service",
+        "subscribed",
+        "push",
+        "ci activity",
+        "unsubscribe",
+        "subscribe",
+        "billing",
+        "support",
+        "automated",
+        "system",
+        "admin",
+        "root",
+    }
+)
+
 
 @dataclass(slots=True)
 class ParsedContact:
@@ -90,14 +127,40 @@ def is_likely_broadcast_contact(accumulator: ContactAccumulator) -> bool:
     """Newsletter / one-way marketing style contact."""
     if accumulator.outbound_count == 0 and accumulator.inbound_count >= 3:
         return True
-    local: str = accumulator.email.split("@", 1)[0]
-    if local in NO_REPLY_LOCAL_PARTS or "newsletter" in local or "marketing" in local:
+    local: str = accumulator.email.split("@", 1)[0].lower()
+    if local in NO_REPLY_LOCAL_PARTS or local in BROADCAST_LOCAL_PARTS:
+        return True
+    if "newsletter" in local or "marketing" in local:
         return True
     return False
 
 
+def is_valid_person_name(name: str) -> bool:
+    lowered: str = name.strip().lower()
+    if not lowered or len(lowered) < 2:
+        return False
+    if lowered in _INVALID_PERSON_NAMES:
+        return False
+    if "_" in lowered and " " not in lowered:
+        return False
+    return True
+
+
+def sanitize_display_name(name: str, email: str) -> str:
+    cleaned: str = name.strip()
+    if is_valid_person_name(cleaned):
+        return cleaned
+    return email
+
+
 def is_human_edge(accumulator: ContactAccumulator) -> bool:
-    return accumulator.outbound_count > 0 and accumulator.inbound_count > 0
+    if accumulator.outbound_count > 0 and accumulator.inbound_count > 0:
+        return True
+    if accumulator.outbound_count >= 2:
+        return True
+    if accumulator.inbound_count >= 1 and accumulator.message_count <= 5:
+        return True
+    return False
 
 
 def _strip_query_fragment(value: str) -> str:

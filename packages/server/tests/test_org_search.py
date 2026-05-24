@@ -31,3 +31,18 @@ def test_automation_domain_skips_org_name() -> None:
     assert is_automation_domain("noreply.github.com") is True
     assert org_name_from_email("ci@noreply.github.com") is None
     assert org_name_from_email("vincent@basebase.com") == "Basebase"
+
+
+def test_generic_consumer_domains_skip_org_name() -> None:
+    assert org_name_from_email("reed@gmail.com") is None
+    assert org_name_from_email("heather@mac.com") is None
+
+
+def test_known_brand_domain_overrides_label_guess() -> None:
+    assert org_name_from_email("hello@theinformation.com") is None
+    assert org_name_from_email("editor@theinformation.com") is None
+    assert org_name_from_email("jessica@theinformation.com") == "The Information"
+
+
+def test_broadcast_local_part_skips_org_name() -> None:
+    assert org_name_from_email("info@wayfair.com") is None

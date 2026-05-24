@@ -70,11 +70,11 @@ class Settings(BaseSettings):
         description="Contacts resolved before marking import partial",
     )
     import_max_messages: int = Field(
-        default=500,
+        default=2000,
         description="Max Gmail messages scanned per import run",
     )
     import_gmail_query: str = Field(
-        default="newer_than:1y",
+        default="newer_than:2y",
         description="Gmail search query for import",
     )
 

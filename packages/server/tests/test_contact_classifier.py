@@ -56,3 +56,30 @@ def test_capital_one_is_automated_or_broadcast() -> None:
     )
     classification = classify_contact(acc)
     assert classification.is_human is False
+
+
+def test_outbound_only_contact_is_human() -> None:
+    acc = ContactAccumulator(
+        email="cynthia@basebase.com",
+        display_name="Cynthia Johanson",
+        message_count=3,
+        outbound_count=3,
+        inbound_count=0,
+    )
+    classification = classify_contact(acc)
+    assert classification.is_automated is False
+    assert classification.is_broadcast is False
+    assert classification.is_human is True
+
+
+def test_info_mailbox_is_broadcast() -> None:
+    acc = ContactAccumulator(
+        email="info@wayfair.com",
+        display_name="Wayfair",
+        message_count=2,
+        outbound_count=0,
+        inbound_count=2,
+    )
+    classification = classify_contact(acc)
+    assert classification.is_broadcast is True
+    assert classification.is_human is False
