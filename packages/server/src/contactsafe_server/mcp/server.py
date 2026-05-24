@@ -50,9 +50,9 @@ async def _mcp_lifespan(_server: FastMCP) -> AsyncGenerator[McpLifespanState, No
 def create_mcp_server(settings: Settings) -> FastMCP:
     transport_security: TransportSecuritySettings = settings.mcp_transport_security
     mcp: FastMCP = FastMCP(
-        "ContactSafe",
+        "ContactGraph",
         instructions=(
-            "ContactSafe builds a private contact graph from connected data sources. "
+            "ContactGraph builds a private contact graph from connected data sources. "
             "Authenticate with OAuth 2.1 Bearer tokens (see /.well-known/oauth-protected-resource). "
             "Use connect_source to start OAuth, list_sources to see connections, "
             "sync_source to (re)start ingestion, get_source_status for progress, "

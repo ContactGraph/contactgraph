@@ -1,3 +1,3 @@
-"""ContactSafe MCP server and OAuth API."""
+"""ContactGraph MCP server and OAuth API."""
 
 __version__ = "0.1.0"

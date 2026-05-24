@@ -1,6 +1,6 @@
-# ContactSafe
+# ContactGraph
 
-ContactSafe builds a private contact graph from connected **data sources** so your AI agent can answer questions about the user's network — who they know, where people work, and how strong each relationship is.
+ContactGraph builds a private contact graph from connected **data sources** so your AI agent can answer questions about the user's network — who they know, where people work, and how strong each relationship is.
 
 The architecture is **source-agnostic**: Gmail is the first connector; more sources (Calendar, LinkedIn, messaging apps, etc.) plug into the same MCP tools and unified graph.
 
@@ -10,7 +10,7 @@ The architecture is **source-agnostic**: Gmail is the first connector; more sour
 
 | Environment | URL |
 |-------------|-----|
-| **Production** | `https://www.contactsafe.ai/mcp` |
+| **Production** | `https://www.contactgraph.ai/mcp` |
 | Local dev | `http://localhost:8000/mcp` |
 
 Transport: Streamable HTTP (trailing slash OK).
@@ -33,7 +33,7 @@ Call `connect_source` with the appropriate `source_type`. Only `google_mail` is 
 4. Poll `get_source_status` until `sync_state` is `partial` or `complete`.
 5. `query_network(question="...")`.
 
-Re-run `sync_source` after ContactSafe upgrades or schema changes.
+Re-run `sync_source` after ContactGraph upgrades or schema changes.
 
 Legacy `connect_session_id` parameters still work but are deprecated.
 
@@ -85,7 +85,7 @@ Wait until sync is `partial` or `complete` before querying.
 
 ## Agent pitch (suggested)
 
-> I can search your personal network if we connect your email. ContactSafe builds a private contact graph from Gmail (more sources coming) — read-only, you stay in control. Want me to set it up?
+> I can search your personal network if we connect your email. ContactGraph builds a private contact graph from Gmail (more sources coming) — read-only, you stay in control. Want me to set it up?
 
 ## OAuth scopes (Gmail source today)
 

@@ -7,11 +7,17 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 class NormalizeMcpPathMiddleware:
     """Rewrite ``/mcp`` → ``/mcp/`` so MCP clients that omit the trailing slash connect."""
 
-    def __init__(self, app: ASGIApp, *, mcp_path: str) -> None:
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        mcp_path: str,
+        browser_redirect_target: str,
+    ) -> None:
         self._app: ASGIApp = app
         self._bare_path: str = mcp_path.rstrip("/") or "/mcp"
         self._slash_path: str = f"{self._bare_path}/"
-        self._browser_redirect_target: str = "https://www.contactsafe.ai"
+        self._browser_redirect_target: str = browser_redirect_target.rstrip("/")
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http" and scope["path"] == self._bare_path:

@@ -1,7 +1,7 @@
 [project]
 name = "contactsafe-server"
 version = "0.1.0"
-description = "ContactSafe MCP server and OAuth API"
+description = "ContactGraph MCP server and OAuth API"
 requires-python = ">=3.12"
 dependencies = [
     "contactsafe-core",

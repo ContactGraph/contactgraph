@@ -1,10 +1,10 @@
-# ContactSafe
+# ContactGraph
 
-Agent-native personal contact graph built from messaging, email, and calendar data. ContactSafe exposes **MCP tools** for connecting sources, syncing, and natural-language search.
+Agent-native personal contact graph built from messaging, email, and calendar data. ContactGraph exposes **MCP tools** for connecting sources, syncing, and natural-language search.
 
-**Production:** [https://www.contactsafe.ai](https://www.contactsafe.ai)  
-**MCP endpoint:** `https://www.contactsafe.ai/mcp`  
-**Agent skill file:** `https://www.contactsafe.ai/skill.md`
+**Production:** [https://www.contactgraph.ai](https://www.contactgraph.ai)  
+**MCP endpoint:** `https://www.contactgraph.ai/mcp`  
+**Agent skill file:** `https://www.contactgraph.ai/skill.md`
 
 Example questions your agent will be able to answer once connected and synced:
 
@@ -18,11 +18,11 @@ Example questions your agent will be able to answer once connected and synced:
 ### Claude
 
 1. Claude.ai → **Customize** (top of left sidebar) → **Connectors** → **+** → **Add custom connector**
-2. **Name:** `ContactSafe`
-3. **Remote MCP server URL:** `https://www.contactsafe.ai/mcp`
+2. **Name:** `ContactGraph`
+3. **Remote MCP server URL:** `https://www.contactgraph.ai/mcp`
 4. Leave Client ID / Secret empty (Dynamic Client Registration).
 5. Click **Connect** → sign in with Google → return to Claude.
-6. Start a **new chat**, enable the ContactSafe connector.
+6. Start a **new chat**, enable the ContactGraph connector.
 7. Ask the agent to run **`sync_source`**, wait until sync finishes, then try *"What VCs do I know?"* or *"Who do I know at Sticker VC?"*
 
 Claude uses redirect URI `https://claude.ai/api/mcp/auth_callback` — handled automatically.
@@ -31,26 +31,26 @@ Claude uses redirect URI `https://claude.ai/api/mcp/auth_callback` — handled a
 
 ### OpenClaw
 
-[OpenClaw](https://docs.openclaw.ai) is a self-hosted AI agent gateway (WhatsApp, Telegram, Control UI, etc.). ContactSafe is a **remote Streamable HTTP MCP server** at `https://www.contactsafe.ai/mcp` with **OAuth 2.1** (same flow as Claude — dynamic client registration, Google sign-in).
+[OpenClaw](https://docs.openclaw.ai) is a self-hosted AI agent gateway (WhatsApp, Telegram, Control UI, etc.). ContactGraph is a **remote Streamable HTTP MCP server** at `https://www.contactgraph.ai/mcp` with **OAuth 2.1** (same flow as Claude — dynamic client registration, Google sign-in).
 
-You need two things: **MCP tools** (ContactSafe server + auth) and **agent instructions** (the skill file).
+You need two things: **MCP tools** (ContactGraph server + auth) and **agent instructions** (the skill file).
 
-#### 1. Install the ContactSafe skill
+#### 1. Install the ContactGraph skill
 
 OpenClaw loads skills from `~/.openclaw/skills`. Copy the published skill so your agent knows the `connect_source` → `sync_source` → `query_network` workflow:
 
 ```bash
-mkdir -p ~/.openclaw/skills/contactsafe
-curl -s https://www.contactsafe.ai/skill.md -o ~/.openclaw/skills/contactsafe/SKILL.md
+mkdir -p ~/.openclaw/skills/contactgraph
+curl -s https://www.contactgraph.ai/skill.md -o ~/.openclaw/skills/contactgraph/SKILL.md
 ```
 
-Alternatively, add `https://www.contactsafe.ai/skill.md` to the agent system prompt.
+Alternatively, add `https://www.contactgraph.ai/skill.md` to the agent system prompt.
 
-#### 2. Connect ContactSafe (pick one auth method)
+#### 2. Connect ContactGraph (pick one auth method)
 
 **Option A — OAuth plugin (recommended)**
 
-Native OpenClaw MCP config only supports static `Authorization: Bearer …` headers today; ContactSafe expects a full OAuth flow. The [openclaw-mcp-bridge](https://github.com/fsaint/openclaw-mcp-bridge) plugin handles PKCE, dynamic client registration, and token refresh for you.
+Native OpenClaw MCP config only supports static `Authorization: Bearer …` headers today; ContactGraph expects a full OAuth flow. The [openclaw-mcp-bridge](https://github.com/fsaint/openclaw-mcp-bridge) plugin handles PKCE, dynamic client registration, and token refresh for you.
 
 ```bash
 npm install openclaw-mcp-bridge
@@ -66,8 +66,8 @@ Add to `~/.openclaw/openclaw.json`:
         "enabled": true,
         "config": {
           "servers": {
-            "contactsafe": {
-              "url": "https://www.contactsafe.ai/mcp",
+            "contactgraph": {
+              "url": "https://www.contactgraph.ai/mcp",
               "auth": {
                 "scopes": ["contactsafe:read", "contactsafe:write"]
               }
@@ -80,27 +80,27 @@ Add to `~/.openclaw/openclaw.json`:
 }
 ```
 
-Restart the gateway (`openclaw gateway restart` — plugin changes require a restart). In chat, run **`/mcp auth contactsafe`**. Your browser opens → sign in with Google → return to OpenClaw.
+Restart the gateway (`openclaw gateway restart` — plugin changes require a restart). In chat, run **`/mcp auth contactgraph`**. Your browser opens → sign in with Google → return to OpenClaw.
 
-Tools appear namespaced, e.g. `contactsafe__sync_source`, `contactsafe__query_network`. Use `/mcp tools` to verify.
+Tools appear namespaced, e.g. `contactgraph__sync_source`, `contactgraph__query_network`. Use `/mcp tools` to verify.
 
 **Option B — Built-in MCP config (manual Bearer token)**
 
-If you already have a ContactSafe access token (from any MCP client that completed OAuth), register the server via CLI. OpenClaw substitutes `${CONTACTSAFE_MCP_TOKEN}` from your environment at runtime:
+If you already have a ContactGraph access token (from any MCP client that completed OAuth), register the server via CLI. OpenClaw substitutes `${CONTACTGRAPH_MCP_TOKEN}` from your environment at runtime:
 
 ```bash
-openclaw mcp set contactsafe '{"url":"https://www.contactsafe.ai/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${CONTACTSAFE_MCP_TOKEN}"}}'
-export CONTACTSAFE_MCP_TOKEN="your-access-token"
+openclaw mcp set contactgraph '{"url":"https://www.contactgraph.ai/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${CONTACTGRAPH_MCP_TOKEN}"}}'
+export CONTACTGRAPH_MCP_TOKEN="your-access-token"
 openclaw mcp list
 ```
 
-Changes under `mcp.*` hot-apply without a gateway restart. Tokens expire (~15 minutes by default); reconnect or use Option A for automatic refresh. For longer-lived testing tokens, raise `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` on the ContactSafe deployment.
+Changes under `mcp.*` hot-apply without a gateway restart. Tokens expire (~15 minutes by default); reconnect or use Option A for automatic refresh. For longer-lived testing tokens, raise `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` on the ContactGraph deployment.
 
 #### 3. Use it
 
 In whatever channel your OpenClaw agent runs on:
 
-> Connect my Gmail through ContactSafe, run sync, then tell me what investors I know.
+> Connect my Gmail through ContactGraph, run sync, then tell me what investors I know.
 
 The agent should call `connect_source` (you open the Google consent URL once if Gmail is not connected yet), then `sync_source`, poll `get_source_status` until sync completes, and answer via `query_network`.
 
@@ -108,14 +108,14 @@ The agent should call `connect_source` (you open the Google consent URL once if 
 
 ### Gemini (CLI agent)
 
-The [Gemini CLI](https://github.com/google-gemini/gemini-cli) is Google's open-source terminal agent. It supports remote **Streamable HTTP** MCP servers with automatic OAuth discovery — ContactSafe uses the same OAuth 2.1 + DCR flow as Claude.
+The [Gemini CLI](https://github.com/google-gemini/gemini-cli) is Google's open-source terminal agent. It supports remote **Streamable HTTP** MCP servers with automatic OAuth discovery — ContactGraph uses the same OAuth 2.1 + DCR flow as Claude.
 
-#### 1. Add ContactSafe as an MCP server
+#### 1. Add ContactGraph as an MCP server
 
 **Via CLI** (writes to `~/.gemini/settings.json`):
 
 ```bash
-gemini mcp add -s user --transport http contactsafe https://www.contactsafe.ai/mcp
+gemini mcp add -s user --transport http contactgraph https://www.contactgraph.ai/mcp
 ```
 
 **Or edit `~/.gemini/settings.json` directly:**
@@ -123,8 +123,8 @@ gemini mcp add -s user --transport http contactsafe https://www.contactsafe.ai/m
 ```json
 {
   "mcpServers": {
-    "contactsafe": {
-      "httpUrl": "https://www.contactsafe.ai/mcp"
+    "contactgraph": {
+      "httpUrl": "https://www.contactgraph.ai/mcp"
     }
   }
 }
@@ -137,39 +137,39 @@ OAuth endpoints are discovered from `/.well-known/oauth-protected-resource` — 
 Start the Gemini CLI, then run:
 
 ```
-/mcp auth contactsafe
+/mcp auth contactgraph
 ```
 
-Your browser opens → sign in with Google (ContactSafe OAuth) → return to the terminal. Tokens are stored in `~/.gemini/mcp-oauth-tokens.json` and refreshed automatically.
+Your browser opens → sign in with Google (ContactGraph OAuth) → return to the terminal. Tokens are stored in `~/.gemini/mcp-oauth-tokens.json` and refreshed automatically.
 
-Verify with `/mcp` — you should see ContactSafe tools listed (namespaced as `mcp_contactsafe_*`).
+Verify with `/mcp` — you should see ContactGraph tools listed (namespaced as `mcp_contactgraph_*`).
 
 **Headless environments:** OAuth requires a local browser and redirect to `http://localhost:7777/oauth/callback`. It will not work over plain SSH without port forwarding.
 
 #### 3. Teach the agent
 
-Paste `https://www.contactsafe.ai/skill.md` into your first message, or save it locally and `@`-reference it:
+Paste `https://www.contactgraph.ai/skill.md` into your first message, or save it locally and `@`-reference it:
 
-> Read https://www.contactsafe.ai/skill.md, then connect my Gmail via ContactSafe, sync, and tell me what investors I know.
+> Read https://www.contactgraph.ai/skill.md, then connect my Gmail via ContactGraph, sync, and tell me what investors I know.
 
 #### Gemini Enterprise (org admins)
 
-If you use [Gemini Enterprise](https://cloud.google.com/gemini-enterprise) Agent Designer instead of the CLI, add ContactSafe as a **Custom MCP Server** data store in the Google Cloud console ([docs](https://docs.cloud.google.com/gemini/enterprise/docs/connectors/custom-mcp-server/set-up-custom-mcp-server)):
+If you use [Gemini Enterprise](https://cloud.google.com/gemini-enterprise) Agent Designer instead of the CLI, add ContactGraph as a **Custom MCP Server** data store in the Google Cloud console ([docs](https://docs.cloud.google.com/gemini/enterprise/docs/connectors/custom-mcp-server/set-up-custom-mcp-server)):
 
 | Field | Value |
 |-------|-------|
-| MCP Server URL | `https://www.contactsafe.ai/mcp` |
-| Authorization URL | `https://www.contactsafe.ai/oauth/authorize` |
-| Token URL | `https://www.contactsafe.ai/oauth/token` |
+| MCP Server URL | `https://www.contactgraph.ai/mcp` |
+| Authorization URL | `https://www.contactgraph.ai/oauth/authorize` |
+| Token URL | `https://www.contactgraph.ai/oauth/token` |
 | Scopes | `contactsafe:read contactsafe:write` |
 
-Gemini Enterprise requires a **pre-registered OAuth client** (not DCR). Register one via `POST https://www.contactsafe.ai/oauth/register` with redirect URI `https://vertexaisearch.cloud.google.com/oauth-redirect`, then enter the returned `client_id` (and `client_secret` if applicable) in the data store config. Enable actions on the data store, connect it to your agent, and authorize Gemini Enterprise when prompted.
+Gemini Enterprise requires a **pre-registered OAuth client** (not DCR). Register one via `POST https://www.contactgraph.ai/oauth/register` with redirect URI `https://vertexaisearch.cloud.google.com/oauth-redirect`, then enter the returned `client_id` (and `client_secret` if applicable) in the data store config. Enable actions on the data store, connect it to your agent, and authorize Gemini Enterprise when prompted.
 
 **Docs:** [Gemini CLI MCP servers](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md)
 
 ### ChatGPT (Developer Mode apps)
 
-ChatGPT supports remote MCP servers as **custom apps** via [Developer Mode](https://developers.openai.com/api/docs/guides/developer-mode) (Plus, Pro, Business, Enterprise, and Education on the web). ContactSafe uses Streamable HTTP + OAuth 2.1 with dynamic client registration — same pattern as Claude.
+ChatGPT supports remote MCP servers as **custom apps** via [Developer Mode](https://developers.openai.com/api/docs/guides/developer-mode) (Plus, Pro, Business, Enterprise, and Education on the web). ContactGraph uses Streamable HTTP + OAuth 2.1 with dynamic client registration — same pattern as Claude.
 
 #### 1. Enable Developer Mode
 
@@ -178,28 +178,28 @@ ChatGPT supports remote MCP servers as **custom apps** via [Developer Mode](http
 
 Business/Enterprise admins may need to enable **Create custom MCP connectors** under workspace permissions first.
 
-#### 2. Create a ContactSafe app
+#### 2. Create a ContactGraph app
 
 1. In Apps settings, click **Create app** (visible only in Developer Mode)
 2. Fill in:
-   - **Name:** `ContactSafe`
-   - **MCP server URL:** `https://www.contactsafe.ai/mcp`
+   - **Name:** `ContactGraph`
+   - **MCP server URL:** `https://www.contactgraph.ai/mcp`
    - **Authentication:** **OAuth**
    - Leave Client ID / Client Secret empty — ChatGPT registers via DCR automatically
 3. Check **I trust this application**
 4. Click **Create** → complete the OAuth sign-in (Google) when redirected
 
-The app appears under **Drafts**. Use the app details page to toggle individual tools on/off and **Refresh** after ContactSafe deploys new tools.
+The app appears under **Drafts**. Use the app details page to toggle individual tools on/off and **Refresh** after ContactGraph deploys new tools.
 
 ChatGPT redirect URIs (`https://chatgpt.com/connector_platform_oauth_redirect` or per-app `https://chatgpt.com/connector/oauth/{callback_id}`) are registered automatically through DCR.
 
 #### 3. Use it in a chat
 
 1. Start a **new chat**
-2. From the **+** menu, choose **Developer mode** and select your ContactSafe app
+2. From the **+** menu, choose **Developer mode** and select your ContactGraph app
 3. Prompt explicitly so ChatGPT picks the right tools:
 
-> Using ContactSafe only: read https://www.contactsafe.ai/skill.md, connect my Gmail if needed, run sync_source, wait for sync to complete, then tell me what VCs I know.
+> Using ContactGraph only: read https://www.contactgraph.ai/skill.md, connect my Gmail if needed, run sync_source, wait for sync to complete, then tell me what VCs I know.
 
 Write actions (`sync_source`, `connect_source`) require confirmation by default — review each tool call before approving.
 
@@ -211,8 +211,8 @@ Write actions (`sync_source`, `connect_source`) require confirmation by default 
 
 ## Quick start for agents
 
-1. Read the skill file: **`https://www.contactsafe.ai/skill.md`**
-2. MCP server: **`https://www.contactsafe.ai/mcp`** (Streamable HTTP; trailing slash OK)
+1. Read the skill file: **`https://www.contactgraph.ai/skill.md`**
+2. MCP server: **`https://www.contactgraph.ai/mcp`** (Streamable HTTP; trailing slash OK)
 3. Authenticate via OAuth 2.1 Bearer token (see **MCP authentication** below). `connect_source` can start Google OAuth without a token; other tools require `Authorization: Bearer …` unless using deprecated `connect_session_id`.
 4. Typical flow:
    - `connect_source` (`source_type`: `google_mail`) → user opens `oauth_url` → Google consent
@@ -248,7 +248,7 @@ make dev
 
 ## Data sources (extensible framework)
 
-ContactSafe is built as an **extensible source framework**. Every connector uses the same MCP workflow (`connect_source` → `sync_source` → `query_network`) and writes into one unified graph (people, orgs, employment edges, relationship strength).
+ContactGraph is built as an **extensible source framework**. Every connector uses the same MCP workflow (`connect_source` → `sync_source` → `query_network`) and writes into one unified graph (people, orgs, employment edges, relationship strength).
 
 | Source | `source_type` | Status |
 |--------|---------------|--------|
@@ -280,13 +280,13 @@ curl -i -X POST http://localhost:8000/mcp/ \
 
 ## Testing production
 
-Production runs on **Railway** at **https://www.contactsafe.ai** (`www` CNAME → Railway). Always use this URL for OAuth, MCP, and JWT audience — not the raw Railway hostname.
+Production runs on **Railway** at **https://www.contactgraph.ai** (`www` CNAME → Railway). Always use this URL for OAuth, MCP, and JWT audience — not the raw Railway hostname.
 
 ```bash
-curl -s https://www.contactsafe.ai/health
-curl -s https://www.contactsafe.ai/.well-known/oauth-protected-resource | jq
-curl -s https://www.contactsafe.ai/.well-known/oauth-authorization-server | jq
-curl -i -X POST https://www.contactsafe.ai/mcp/ \
+curl -s https://www.contactgraph.ai/health
+curl -s https://www.contactgraph.ai/.well-known/oauth-protected-resource | jq
+curl -s https://www.contactgraph.ai/.well-known/oauth-authorization-server | jq
+curl -i -X POST https://www.contactgraph.ai/mcp/ \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'
 # Expect 401 + WWW-Authenticate
@@ -294,9 +294,9 @@ curl -i -X POST https://www.contactsafe.ai/mcp/ \
 
 After connecting Gmail, run **`sync_source`** once (or again after upgrades), then query e.g. *"What VCs do I know?"*
 
-Railway fallback hostname: `https://contactsafe-production.up.railway.app` — avoid for OAuth/MCP clients.
+Railway fallback hostname: `https://contactgraph-production.up.railway.app` — avoid for OAuth/MCP clients.
 
-MCP Inspector production URL: `https://www.contactsafe.ai/mcp`
+MCP Inspector production URL: `https://www.contactgraph.ai/mcp`
 
 ---
 
@@ -356,7 +356,7 @@ Example questions: *"Who do I know named Chris?"*, *"What VCs do I know?"*, *"Wh
 1. [Google Cloud Console](https://console.cloud.google.com/) → enable **Gmail API** (Calendar API optional; calendar ingest not shipped yet)
 2. OAuth client (Web) → redirect URIs:
    - Local: `http://localhost:8000/oauth/callback`
-   - Production: `https://www.contactsafe.ai/oauth/callback`
+   - Production: `https://www.contactgraph.ai/oauth/callback`
 3. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` in `.env` / Railway
 
 Requested scopes include `gmail.readonly` (used today) and `calendar.readonly` (reserved for the calendar connector).
@@ -369,12 +369,12 @@ Requested scopes include `gmail.readonly` (used today) and `calendar.readonly` (
 2. Postgres or Supabase `DATABASE_URL`.
 3. **Required env vars:**
    - `APP_ENV=production`
-   - `BASE_URL=https://www.contactsafe.ai`
-   - `GOOGLE_REDIRECT_URI=https://www.contactsafe.ai/oauth/callback`
+   - `BASE_URL=https://www.contactgraph.ai`
+   - `GOOGLE_REDIRECT_URI=https://www.contactgraph.ai/oauth/callback`
    - `JWT_SIGNING_KEY` (separate from `SESSION_SECRET`)
    - Optional: `OPENAI_API_KEY`, `EXA_API_KEY` (see `.env.example`)
 4. Google Cloud redirect URI must match production callback.
-5. CNAME **www.contactsafe.ai** → Railway.
+5. CNAME **www.contactgraph.ai** → Railway.
 6. Deploy — `alembic upgrade head` runs on container start.
 
 ---
