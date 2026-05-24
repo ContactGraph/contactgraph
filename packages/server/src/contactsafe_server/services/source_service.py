@@ -450,10 +450,16 @@ class SourceService:
             return f"Sync failed: {source.sync_error}"
         match sync_state:
             case SyncState.SYNCING:
-                return (
-                    f"Syncing contacts ({source.contacts_resolved}/"
-                    f"{source.contacts_found} resolved)..."
-                )
+                if source.contacts_resolved > 0:
+                    return (
+                        f"Syncing Gmail ({source.contacts_resolved}/"
+                        f"{source.contacts_found} contacts in your graph so far)..."
+                    )
+                if source.contacts_found > 0:
+                    return (
+                        f"Scanning Gmail ({source.contacts_found} contacts found so far)..."
+                    )
+                return "Scanning Gmail..."
             case SyncState.PARTIAL:
                 return (
                     f"Partial graph ready ({source.contacts_resolved} contacts). "

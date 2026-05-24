@@ -30,7 +30,7 @@ Call `connect_source` with the appropriate `source_type`. Only `google_mail` is 
 1. Obtain a Bearer token via OAuth 2.1 PKCE (`/.well-known/oauth-protected-resource`).
 2. `connect_source(source_type="google_mail")` — returns `oauth_url` if the user has not connected Google yet. Ask the user to open it and consent.
 3. `sync_source` — starts Gmail import (no browser step).
-4. Poll `get_source_status` until `sync_state` is `partial` or `complete`.
+4. Poll `get_source_status` until `sync_state` is `partial` or `complete`. During sync, counts update every few seconds; `partial` usually arrives within ~30s.
 5. `describe_graph` for a high-level overview, or `query_network(question="...")` for filtered search.
 
 Re-run `sync_source` after ContactGraph upgrades or schema changes.

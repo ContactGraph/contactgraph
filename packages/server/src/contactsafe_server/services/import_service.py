@@ -34,7 +34,11 @@ from contactsafe_server.services.ingest_enrichment_service import IngestEnrichme
 from contactsafe_server.services.interaction_excerpt_service import InteractionExcerptService
 from contactsafe_server.services.org_edge_service import OrgEdgeService
 from contactsafe_server.services.org_service import OrgService
-from contactsafe_server.services.gmail_client import GmailClient, GmailMessageMeta
+from contactsafe_server.services.gmail_client import (
+    GmailClient,
+    GmailMessageMeta,
+    GmailMessageRef,
+)
 from contactsafe_server.services.pitch_detection import (
     is_pitch_outreach_snippet,
     message_from_user,
@@ -90,15 +94,12 @@ class ImportService:
                 await self._persist_tokens(cred, refreshed)
                 access_token = refreshed.access_token
 
-            contacts, person_pair_counts = await self._scan_gmail(
+            contacts, person_pair_counts, upserted_emails = await self._scan_and_ingest_gmail(
                 access_token=access_token,
                 user_email=user.email,
+                user_id=user_id,
+                source=source,
             )
-            source.contacts_found = len(contacts)
-            source.contacts_pending = max(
-                0, len(contacts) - self._settings.import_initial_contact_target
-            )
-            await self._db.flush()
 
             sorted_contacts: list[ContactAccumulator] = sorted(
                 contacts.values(),
@@ -109,31 +110,21 @@ class ImportService:
                 reverse=True,
             )
 
-            resolved: int = 0
             for accumulator in sorted_contacts:
+                if accumulator.email in upserted_emails:
+                    continue
                 await self._upsert_person(
                     user_id,
                     user.email,
                     accumulator,
                     source_id=source.id,
                 )
-                resolved += 1
-                source.contacts_resolved = resolved
-                source.contacts_pending = max(0, source.contacts_found - resolved)
-                if resolved == self._settings.import_initial_contact_target:
-                    source.sync_state = SyncState.PARTIAL.value
-                    await self._db.flush()
+                upserted_emails.add(accumulator.email)
+                source.contacts_resolved = len(upserted_emails)
+                source.contacts_pending = max(0, source.contacts_found - source.contacts_resolved)
+                await self._db.flush()
 
-            for accumulator in sorted_contacts[self._settings.import_initial_contact_target :]:
-                await self._upsert_person(
-                    user_id,
-                    user.email,
-                    accumulator,
-                    source_id=source.id,
-                )
-                resolved += 1
-                source.contacts_resolved = resolved
-                source.contacts_pending = max(0, source.contacts_found - resolved)
+            await self._commit_progress(source)
 
             await self._upsert_person_person_edges(
                 user_id=user_id,
@@ -179,6 +170,211 @@ class ImportService:
             return
         await self.run_sync(source.id)
 
+    async def _commit_progress(self, source: Source) -> None:
+        await self._db.commit()
+        await self._db.refresh(source)
+
+    async def _scan_and_ingest_gmail(
+        self,
+        *,
+        access_token: str,
+        user_email: str,
+        user_id: uuid.UUID,
+        source: Source,
+    ) -> tuple[
+        dict[str, ContactAccumulator],
+        dict[tuple[str, str], tuple[int, datetime | None]],
+        set[str],
+    ]:
+        contacts: dict[str, ContactAccumulator] = {}
+        pair_stats: dict[tuple[str, str], tuple[int, datetime | None]] = {}
+        upserted_emails: set[str] = set()
+        page_token: str | None = None
+        messages_scanned: int = 0
+        messages_since_commit: int = 0
+        max_messages: int = self._settings.import_max_messages
+        commit_interval: int = max(1, self._settings.import_progress_commit_messages)
+
+        while messages_scanned < max_messages:
+            batch_size: int = min(100, max_messages - messages_scanned)
+            refs, page_token = await self._gmail.list_message_refs(
+                access_token,
+                max_results=batch_size,
+                page_token=page_token,
+                query=self._settings.import_gmail_query,
+            )
+            if not refs:
+                break
+
+            for ref in refs:
+                meta: GmailMessageMeta = await self._gmail.get_message_metadata(
+                    access_token, ref.id
+                )
+                self._accumulate_message(
+                    contacts=contacts,
+                    pair_stats=pair_stats,
+                    meta=meta,
+                    ref=ref,
+                    user_email=user_email,
+                )
+                messages_scanned += 1
+                messages_since_commit += 1
+                if messages_since_commit >= commit_interval:
+                    await self._flush_ingest_progress(
+                        contacts=contacts,
+                        upserted_emails=upserted_emails,
+                        user_id=user_id,
+                        user_email=user_email,
+                        source=source,
+                        messages_scanned=messages_scanned,
+                    )
+                    messages_since_commit = 0
+
+            if page_token is None:
+                break
+
+        if messages_since_commit > 0:
+            await self._flush_ingest_progress(
+                contacts=contacts,
+                upserted_emails=upserted_emails,
+                user_id=user_id,
+                user_email=user_email,
+                source=source,
+                messages_scanned=messages_scanned,
+            )
+
+        logger.info(
+            "Gmail scan complete: fetched=%s contacts=%s person_pairs=%s resolved=%s",
+            messages_scanned,
+            len(contacts),
+            len(pair_stats),
+            len(upserted_emails),
+        )
+        return contacts, pair_stats, upserted_emails
+
+    async def _flush_ingest_progress(
+        self,
+        *,
+        contacts: dict[str, ContactAccumulator],
+        upserted_emails: set[str],
+        user_id: uuid.UUID,
+        user_email: str,
+        source: Source,
+        messages_scanned: int,
+    ) -> None:
+        source.contacts_found = len(contacts)
+        source.contacts_pending = max(0, source.contacts_found - len(upserted_emails))
+
+        sorted_contacts: list[ContactAccumulator] = sorted(
+            contacts.values(),
+            key=lambda c: (
+                c.last_seen_at or datetime.min.replace(tzinfo=UTC),
+                c.message_count,
+            ),
+            reverse=True,
+        )
+
+        refresh_limit: int = max(
+            self._settings.import_partial_contact_target,
+            self._settings.import_initial_contact_target,
+        )
+        refresh_emails: set[str] = {
+            acc.email for acc in sorted_contacts[:refresh_limit]
+        }
+
+        for accumulator in sorted_contacts:
+            if (
+                accumulator.email not in upserted_emails
+                or accumulator.email in refresh_emails
+            ):
+                await self._upsert_person(
+                    user_id,
+                    user_email,
+                    accumulator,
+                    source_id=source.id,
+                )
+                upserted_emails.add(accumulator.email)
+
+        source.contacts_resolved = len(upserted_emails)
+        source.contacts_pending = max(0, source.contacts_found - source.contacts_resolved)
+
+        if (
+            source.sync_state == SyncState.SYNCING.value
+            and source.contacts_resolved >= self._settings.import_partial_contact_target
+        ):
+            source.sync_state = SyncState.PARTIAL.value
+
+        await self._db.flush()
+        await self._commit_progress(source)
+        logger.info(
+            "Sync progress for source %s: messages=%s contacts_found=%s resolved=%s state=%s",
+            source.id,
+            messages_scanned,
+            source.contacts_found,
+            source.contacts_resolved,
+            source.sync_state,
+        )
+
+    def _accumulate_message(
+        self,
+        *,
+        contacts: dict[str, ContactAccumulator],
+        pair_stats: dict[tuple[str, str], tuple[int, datetime | None]],
+        meta: GmailMessageMeta,
+        ref: GmailMessageRef,
+        user_email: str,
+    ) -> None:
+        seen_at: datetime | None = parse_internal_date_ms(
+            meta.internal_date_ms or ref.internal_date_ms
+        )
+        if (
+            meta.snippet
+            and message_from_user(meta.from_header, user_email)
+            and is_pitch_outreach_snippet(meta.snippet)
+        ):
+            self._tag_pitch_recipients(
+                contacts,
+                header=meta.to_header,
+                user_email=user_email,
+                seen_at=seen_at,
+            )
+            self._tag_pitch_recipients(
+                contacts,
+                header=meta.cc_header,
+                user_email=user_email,
+                seen_at=seen_at,
+            )
+        self._accumulate_header(
+            contacts,
+            header=meta.from_header,
+            user_email=user_email,
+            seen_at=seen_at,
+            from_user=False,
+        )
+        self._accumulate_header(
+            contacts,
+            header=meta.to_header,
+            user_email=user_email,
+            seen_at=seen_at,
+            from_user=True,
+        )
+        self._accumulate_header(
+            contacts,
+            header=meta.cc_header,
+            user_email=user_email,
+            seen_at=seen_at,
+            from_user=True,
+        )
+        participants = self._collect_participants(
+            user_email=user_email,
+            headers=(meta.from_header, meta.to_header, meta.cc_header),
+        )
+        self._accumulate_pair_stats(
+            pair_stats=pair_stats,
+            participants=participants,
+            seen_at=seen_at,
+        )
+
     async def _scan_gmail(
         self,
         *,
@@ -209,55 +405,12 @@ class ImportService:
                 meta: GmailMessageMeta = await self._gmail.get_message_metadata(
                     access_token, ref.id
                 )
-                seen_at: datetime | None = parse_internal_date_ms(
-                    meta.internal_date_ms or ref.internal_date_ms
-                )
-                if (
-                    meta.snippet
-                    and message_from_user(meta.from_header, user_email)
-                    and is_pitch_outreach_snippet(meta.snippet)
-                ):
-                    self._tag_pitch_recipients(
-                        contacts,
-                        header=meta.to_header,
-                        user_email=user_email,
-                        seen_at=seen_at,
-                    )
-                    self._tag_pitch_recipients(
-                        contacts,
-                        header=meta.cc_header,
-                        user_email=user_email,
-                        seen_at=seen_at,
-                    )
-                self._accumulate_header(
-                    contacts,
-                    header=meta.from_header,
-                    user_email=user_email,
-                    seen_at=seen_at,
-                    from_user=False,
-                )
-                self._accumulate_header(
-                    contacts,
-                    header=meta.to_header,
-                    user_email=user_email,
-                    seen_at=seen_at,
-                    from_user=True,
-                )
-                self._accumulate_header(
-                    contacts,
-                    header=meta.cc_header,
-                    user_email=user_email,
-                    seen_at=seen_at,
-                    from_user=True,
-                )
-                participants = self._collect_participants(
-                    user_email=user_email,
-                    headers=(meta.from_header, meta.to_header, meta.cc_header),
-                )
-                self._accumulate_pair_stats(
+                self._accumulate_message(
+                    contacts=contacts,
                     pair_stats=pair_stats,
-                    participants=participants,
-                    seen_at=seen_at,
+                    meta=meta,
+                    ref=ref,
+                    user_email=user_email,
                 )
             fetched += len(refs)
             if page_token is None:
