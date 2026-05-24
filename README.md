@@ -1,6 +1,10 @@
 # ContactSafe
 
-Agent-native personal graph from Gmail (read-only). MCP tools for connect, sync, and natural-language contact search.
+Agent-native personal social graph, constructed from email and other messaging platforms, that anyone can construct and use. Primary surface are MCP tools for connecting, syncing, and natural-language contact searching. Answers questions like:
+- What investors do I know?
+- Who do I know at ACME?
+- Who do I know who works in RevOps?
+- Where does Jim Smith work now?
 
 ## Quick start
 
