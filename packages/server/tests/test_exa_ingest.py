@@ -39,6 +39,7 @@ async def test_ingest_exa_enrichment_tags_investor(
             person_id=person.id,
             tie_strength_score=0.95,
             is_broadcast=False,
+            is_automated=False,
         )
     )
     await db_session.flush()

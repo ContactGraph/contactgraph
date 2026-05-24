@@ -31,7 +31,13 @@ async def test_executor_filters_name_and_excludes_broadcast(
         email_addresses=["newsletter@marketing.io"],
         last_seen_in_email=datetime.now(tz=UTC),
     )
-    db_session.add_all([human, newsletter])
+    bot = Person(
+        user_id=user.id,
+        canonical_name="GitHub Bot",
+        email_addresses=["ci_activity@noreply.github.com"],
+        last_seen_in_email=datetime.now(tz=UTC),
+    )
+    db_session.add_all([human, newsletter, bot])
     await db_session.flush()
 
     db_session.add_all(
@@ -42,6 +48,7 @@ async def test_executor_filters_name_and_excludes_broadcast(
                 tie_strength_score=0.9,
                 is_human=True,
                 is_broadcast=False,
+                is_automated=False,
                 outbound_count=5,
                 inbound_count=5,
             ),
@@ -51,8 +58,19 @@ async def test_executor_filters_name_and_excludes_broadcast(
                 tie_strength_score=0.8,
                 is_human=False,
                 is_broadcast=True,
+                is_automated=False,
                 outbound_count=0,
                 inbound_count=20,
+            ),
+            PersonEdge(
+                user_id=user.id,
+                person_id=bot.id,
+                tie_strength_score=0.95,
+                is_human=False,
+                is_broadcast=False,
+                is_automated=True,
+                outbound_count=50,
+                inbound_count=0,
             ),
         ]
     )
@@ -147,3 +165,52 @@ async def test_executor_org_matches_email_domain(db_session: AsyncSession) -> No
     )
     assert len(matches) == 1
     assert matches[0].emails == ["danny@sticker.vc"]
+
+
+@pytest.mark.asyncio
+async def test_executor_excludes_automated_by_default(
+    db_session: AsyncSession,
+) -> None:
+    user = User(email=f"auto-{uuid.uuid4()}@example.com")
+    db_session.add(user)
+    await db_session.flush()
+
+    human = Person(
+        user_id=user.id,
+        canonical_name="Real Person",
+        email_addresses=["real@company.com"],
+    )
+    bot = Person(
+        user_id=user.id,
+        canonical_name="GitHub Bot",
+        email_addresses=["push@noreply.github.com"],
+    )
+    db_session.add_all([human, bot])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            PersonEdge(
+                user_id=user.id,
+                person_id=human.id,
+                tie_strength_score=0.2,
+                is_human=True,
+                is_automated=False,
+                is_broadcast=False,
+            ),
+            PersonEdge(
+                user_id=user.id,
+                person_id=bot.id,
+                tie_strength_score=0.99,
+                is_automated=True,
+                is_broadcast=False,
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    matches = await NetworkQueryService(db_session).execute(
+        user_id=user.id,
+        plan=QueryPlan(limit=10),
+    )
+    assert len(matches) == 1
+    assert matches[0].name == "Real Person"

@@ -2,6 +2,21 @@
 
 import re
 
+_TRANSACTIONAL_DOMAIN_MARKERS: tuple[str, ...] = (
+    "capitalone",
+    "wellsfargo",
+    "stripe.com",
+    "paypal",
+    "chase.com",
+    "bankofamerica",
+    "americanexpress",
+    "discover.com",
+    "notification.",
+    "notify.",
+    "communication.",
+    "message.",
+)
+
 
 def infer_categories_from_contact(
     *,
@@ -12,6 +27,9 @@ def infer_categories_from_contact(
 ) -> list[str]:
     """Return lowercase category tags such as ``vc``, ``founder``."""
     domain: str = email.rsplit("@", 1)[-1].lower() if "@" in email else ""
+    if _is_transactional_domain(domain):
+        return []
+
     blob: str = f"{display_name} {org_name or ''} {domain}".lower()
     categories: list[str] = []
 
@@ -29,6 +47,8 @@ def infer_categories_from_contact(
 
 
 def _looks_like_vc(blob: str, domain: str) -> bool:
+    if _is_transactional_domain(domain):
+        return False
     if ".vc" in domain or domain.endswith(".vc"):
         return True
     vc_domain_markers: tuple[str, ...] = (
@@ -46,6 +66,11 @@ def _looks_like_vc(blob: str, domain: str) -> bool:
     if "investor" in blob and "newsletter" not in blob:
         return True
     return False
+
+
+def _is_transactional_domain(domain: str) -> bool:
+    domain_lower: str = domain.lower()
+    return any(marker in domain_lower for marker in _TRANSACTIONAL_DOMAIN_MARKERS)
 
 
 def _dedupe_lower(values: list[str]) -> list[str]:

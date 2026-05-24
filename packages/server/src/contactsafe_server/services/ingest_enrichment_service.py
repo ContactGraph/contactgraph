@@ -10,14 +10,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import Person, PersonEdge
+from contactsafe_server.services.employment_service import EmploymentService
 from contactsafe_server.services.exa_client import ExaClient
 from contactsafe_server.services.exa_enrichment import apply_exa_hints_to_person, extract_hints_from_exa_hits
 from contactsafe_server.services.openai_json import content_from_chat_completion, parse_json_object
 from contactsafe_server.services.category_inference import infer_categories_from_contact
 from contactsafe_server.services.email_parse import (
     ContactAccumulator,
-    is_human_edge,
-    is_likely_broadcast_contact,
     org_name_from_email,
 )
 
@@ -42,6 +41,7 @@ class IngestEnrichmentService:
     def __init__(self, db: AsyncSession, settings: Settings) -> None:
         self._db: AsyncSession = db
         self._settings: Settings = settings
+        self._employment: EmploymentService = EmploymentService(db)
 
     async def enrich_after_import(
         self,
@@ -58,6 +58,8 @@ class IngestEnrichmentService:
             acc: ContactAccumulator | None = contact_by_email.get(
                 person.email_addresses[0] if person.email_addresses else ""
             )
+            if await self._should_skip_enrichment(person):
+                continue
             self._heuristic_enrich_person(person, acc)
 
         if self._settings.exa_api_key:
@@ -74,14 +76,36 @@ class IngestEnrichmentService:
 
         await self._db.flush()
 
+    async def _should_skip_enrichment(self, person: Person) -> bool:
+        if person.edge is None:
+            result = await self._db.execute(
+                select(PersonEdge).where(
+                    PersonEdge.person_id == person.id,
+                    PersonEdge.user_id == person.user_id,
+                )
+            )
+            edge: PersonEdge | None = result.scalar_one_or_none()
+        else:
+            edge = person.edge
+        if edge is None:
+            return False
+        return edge.is_automated or edge.is_broadcast
+
     async def _load_top_people_by_tie_strength(
         self, user_id: uuid.UUID, *, limit: int
     ) -> list[Person]:
         result = await self._db.execute(
             select(Person)
             .join(PersonEdge, PersonEdge.person_id == Person.id)
-            .where(Person.user_id == user_id)
-            .order_by(PersonEdge.tie_strength_score.desc())
+            .where(
+                Person.user_id == user_id,
+                PersonEdge.is_automated.is_(False),
+                PersonEdge.is_broadcast.is_(False),
+            )
+            .order_by(
+                PersonEdge.is_human.desc(),
+                PersonEdge.tie_strength_score.desc(),
+            )
             .limit(limit)
         )
         return list(result.scalars().unique().all())
@@ -118,7 +142,9 @@ class IngestEnrichmentService:
                     break
 
         if not person.current_org_name and person.email_addresses:
-            person.current_org_name = org_name_from_email(person.email_addresses[0])
+            inferred_org: str | None = org_name_from_email(person.email_addresses[0])
+            if inferred_org:
+                person.current_org_name = inferred_org
 
     async def _exa_enrich_batch(
         self,
@@ -128,7 +154,7 @@ class IngestEnrichmentService:
         client = ExaClient(self._settings)
         for person in people:
             email: str = person.email_addresses[0] if person.email_addresses else ""
-            if not email:
+            if not email or await self._should_skip_enrichment(person):
                 continue
             acc: ContactAccumulator | None = contact_by_email.get(email)
             try:
@@ -150,14 +176,25 @@ class IngestEnrichmentService:
                 pitch_outbound_count=acc.pitch_outbound_count if acc else 0,
             )
             apply_exa_hints_to_person(person, hints)
+            await self._employment.apply_enrichment_to_employment(
+                person=person,
+                org_name=hints.org_name,
+                role_title=hints.current_role,
+                source="exa",
+            )
 
     async def _llm_enrich_batch(
         self,
         people: list[Person],
         contact_by_email: dict[str, ContactAccumulator],
     ) -> None:
+        enrichable: list[Person] = []
+        for person in people:
+            if not await self._should_skip_enrichment(person):
+                enrichable.append(person)
+
         payload_people: list[dict[str, str]] = []
-        for person in people[:50]:
+        for person in enrichable[:50]:
             email: str = person.email_addresses[0] if person.email_addresses else ""
             acc: ContactAccumulator | None = contact_by_email.get(email)
             payload_people.append(
@@ -169,6 +206,9 @@ class IngestEnrichmentService:
                     "notes": acc.display_name if acc else "",
                 }
             )
+
+        if not payload_people:
+            return
 
         prompt: str = (
             "For each contact, infer categories (vc, founder, engineer, sales, etc.), "
@@ -203,7 +243,7 @@ class IngestEnrichmentService:
                 )
         except Exception:
             logger.exception("LLM ingest enrichment failed; using heuristics")
-            for person in people:
+            for person in enrichable:
                 acc = contact_by_email.get(
                     person.email_addresses[0] if person.email_addresses else ""
                 )
@@ -214,7 +254,7 @@ class IngestEnrichmentService:
         if not isinstance(contacts_raw, list):
             return
 
-        by_id: dict[str, Person] = {str(p.id): p for p in people}
+        by_id: dict[str, Person] = {str(p.id): p for p in enrichable}
         items: list[object] = cast(list[object], contacts_raw)
         for item_raw in items:
             if not isinstance(item_raw, dict):
@@ -233,14 +273,18 @@ class IngestEnrichmentService:
                     str(c).lower() for c in cat_items if isinstance(c, (str, int))
                 ]
             role_raw: object = item.get("current_role")
+            role_title: str | None = None
             if isinstance(role_raw, str) and role_raw.strip():
-                person.current_role = role_raw.strip()
+                role_title = role_raw.strip()
+                person.current_role = role_title
             org_raw: object = item.get("org_name")
+            org_name: str | None = None
             if isinstance(org_raw, str) and org_raw.strip():
-                person.current_org_name = org_raw.strip()
-
-
-def edge_flags_from_accumulator(accumulator: ContactAccumulator) -> tuple[bool, bool]:
-    is_broadcast: bool = is_likely_broadcast_contact(accumulator)
-    is_human: bool = is_human_edge(accumulator) and not is_broadcast
-    return is_broadcast, is_human
+                org_name = org_raw.strip()
+                person.current_org_name = org_name
+            await self._employment.apply_enrichment_to_employment(
+                person=person,
+                org_name=org_name,
+                role_title=role_title,
+                source="llm",
+            )

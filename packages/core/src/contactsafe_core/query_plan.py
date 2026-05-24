@@ -25,6 +25,7 @@ class QueryPlan(BaseModel):
     relationship_types_any: list[str] = Field(default_factory=list)
     require_genuine_contact: bool = False
     exclude_broadcast: bool = True
+    exclude_automated: bool = True
     semantic_query: str | None = None
     sort_by: QuerySortBy = QuerySortBy.TIE_STRENGTH
     limit: int = 25

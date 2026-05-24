@@ -1,6 +1,7 @@
 from contactsafe_server.services.org_search import (
     email_matches_org_terms,
     expand_org_search_terms,
+    is_automation_domain,
     org_name_from_email,
 )
 
@@ -24,3 +25,9 @@ def test_email_matches_org_terms() -> None:
     terms: list[str] = expand_org_search_terms("Sticker VC")
     assert email_matches_org_terms("danny@sticker.vc", terms)
     assert not email_matches_org_terms("alice@gmail.com", terms)
+
+
+def test_automation_domain_skips_org_name() -> None:
+    assert is_automation_domain("noreply.github.com") is True
+    assert org_name_from_email("ci@noreply.github.com") is None
+    assert org_name_from_email("vincent@basebase.com") == "Basebase"

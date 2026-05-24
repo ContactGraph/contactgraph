@@ -10,8 +10,10 @@ from contactsafe_core.enums import OAuthProvider, SourceConnectionStatus, Source
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import (
     OAuthCredential,
+    OrgEdge,
     Person,
     PersonEdge,
+    PersonOrgEdge,
     PersonPersonEdge,
     Source,
     User,
@@ -24,11 +26,14 @@ from contactsafe_server.services.email_parse import (
     parse_address_header,
     parse_internal_date_ms,
 )
-from contactsafe_server.services.ingest_enrichment_service import (
-    IngestEnrichmentService,
-    edge_flags_from_accumulator,
+from contactsafe_server.services.contact_classifier import (
+    classify_contact,
+    compute_tie_strength,
 )
+from contactsafe_server.services.employment_service import EmploymentService
+from contactsafe_server.services.ingest_enrichment_service import IngestEnrichmentService
 from contactsafe_server.services.interaction_excerpt_service import InteractionExcerptService
+from contactsafe_server.services.org_edge_service import OrgEdgeService
 from contactsafe_server.services.org_service import OrgService
 from contactsafe_server.services.gmail_client import GmailClient, GmailMessageMeta
 from contactsafe_server.services.pitch_detection import (
@@ -100,6 +105,10 @@ class ImportService:
             await self._db.execute(
                 delete(PersonPersonEdge).where(PersonPersonEdge.user_id == user_id)
             )
+            await self._db.execute(
+                delete(PersonOrgEdge).where(PersonOrgEdge.user_id == user_id)
+            )
+            await self._db.execute(delete(OrgEdge).where(OrgEdge.user_id == user_id))
             await self._db.execute(delete(Person).where(Person.user_id == user_id))
             await self._db.flush()
 
@@ -133,11 +142,15 @@ class ImportService:
                 person_pair_counts=person_pair_counts,
             )
 
+            org_edge_service = OrgEdgeService(self._db)
+            await org_edge_service.rebuild_org_edges_for_user(user_id)
+
             enricher = IngestEnrichmentService(self._db, self._settings)
             await enricher.enrich_after_import(
                 user_id=user_id,
                 contact_by_email=contacts,
             )
+            await org_edge_service.rebuild_org_edges_for_user(user_id)
             await self._link_orgs_for_user(user_id)
             excerpt_service = InteractionExcerptService(self._db, self._settings)
             await excerpt_service.seed_excerpts_for_user(user_id)
@@ -341,18 +354,21 @@ class ImportService:
         user_email: str,
         accumulator: ContactAccumulator,
     ) -> None:
+        classification = classify_contact(accumulator)
         org_name: str | None = org_name_from_email(accumulator.email)
-        org_service = OrgService(self._db)
-        org = await org_service.resolve_org(
-            user_id=user_id,
-            email=accumulator.email,
-            org_name_hint=org_name,
-        )
+        org = None
+        if not classification.is_automated:
+            org_service = OrgService(self._db)
+            org = await org_service.resolve_org(
+                user_id=user_id,
+                email=accumulator.email,
+                org_name_hint=org_name,
+            )
         person = Person(
             user_id=user_id,
             canonical_name=accumulator.display_name,
             email_addresses=[accumulator.email],
-            current_org_name=org.canonical_name if org else org_name,
+            current_org_name=org.canonical_name if org else None,
             current_org_id=org.id if org else None,
             last_seen_in_email=accumulator.last_seen_at,
             confidence_score=0.85,
@@ -360,11 +376,7 @@ class ImportService:
         self._db.add(person)
         await self._db.flush()
 
-        is_broadcast, is_human = edge_flags_from_accumulator(accumulator)
-        tie_strength: float = min(
-            1.0,
-            float(accumulator.message_count) / 20.0,
-        )
+        tie_strength: float = compute_tie_strength(accumulator, classification)
         edge = PersonEdge(
             user_id=user_id,
             person_id=person.id,
@@ -375,15 +387,25 @@ class ImportService:
             thread_count=accumulator.message_count,
             last_email_at=accumulator.last_seen_at,
             last_genuine_interaction_at=accumulator.last_seen_at
-            if is_human
+            if classification.is_human
             else None,
             first_contact_date=accumulator.last_seen_at,
             tie_strength_score=tie_strength,
-            is_broadcast=is_broadcast,
-            is_human=is_human,
+            is_broadcast=classification.is_broadcast,
+            is_human=classification.is_human,
+            is_automated=classification.is_automated,
             notes=f"Imported from Gmail metadata for {user_email}",
         )
         self._db.add(edge)
+
+        if org is not None and not classification.is_automated:
+            employment_service = EmploymentService(self._db)
+            await employment_service.upsert_current_employment(
+                user_id=user_id,
+                person_id=person.id,
+                org_id=org.id,
+                source="email_domain",
+            )
 
     async def _link_orgs_for_user(self, user_id: uuid.UUID) -> None:
         result = await self._db.execute(select(Person).where(Person.user_id == user_id))
@@ -429,6 +451,8 @@ class ImportService:
                 left_person_id=left_id,
                 right_person_id=right_id,
                 co_occurrence_count=count,
+                relationship_hint="co_thread",
+                tie_strength_score=min(1.0, float(count) / 10.0),
                 last_seen_at=last_seen,
             )
             self._db.add(edge)

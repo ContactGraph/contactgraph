@@ -32,6 +32,7 @@ class InteractionExcerptService:
             .where(
                 Person.user_id == user_id,
                 PersonEdge.is_human.is_(True),
+                PersonEdge.is_automated.is_(False),
             )
             .order_by(PersonEdge.tie_strength_score.desc())
             .limit(50)
