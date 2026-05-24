@@ -15,6 +15,24 @@ async def test_landing_page(client: AsyncClient) -> None:
     assert response.status_code == 200
     assert "ContactSafe" in response.text
     assert "Intelligence hides in who knows who." in response.text
+    assert 'href="/skill.md"' in response.text
+    assert 'href="/mcp"' in response.text
+    assert "https://github.com/contactsafe/contactsafe" in response.text
+    assert 'href="/manifesto"' in response.text
+    assert "for agents" not in response.text.lower()
+    assert "for humans" not in response.text.lower()
+
+
+@pytest.mark.asyncio
+async def test_manifesto_page(client: AsyncClient) -> None:
+    response = await client.get("/manifesto")
+    assert response.status_code == 200
+    assert "The ContactSafe Manifesto" in response.text
+    assert "We gave away our relationships" in response.text
+    assert 'href="/"' in response.text
+    assert "# THE CONTACTSAFE MANIFESTO" not in response.text
+    assert "## WE GAVE AWAY" not in response.text
+    assert "<strong>ContactSafe is that graph.</strong>" in response.text
 
 
 @pytest.mark.asyncio
