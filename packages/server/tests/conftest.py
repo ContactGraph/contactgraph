@@ -22,7 +22,7 @@ os.environ.setdefault("GOOGLE_CLIENT_SECRET", "test-client-secret")
 os.environ.setdefault("GOOGLE_REDIRECT_URI", "http://testserver/oauth/callback")
 
 from contactsafe_server.config import get_settings  # noqa: E402
-from contactsafe_server.db.models import Base  # noqa: E402
+from contactsafe_server.db.connection import shutdown_db  # noqa: E402
 from contactsafe_server.main import create_app  # noqa: E402
 
 get_settings.cache_clear()
@@ -50,29 +50,23 @@ def anyio_backend() -> str:
 @pytest.fixture
 async def db_session() -> AsyncIterator[AsyncSession]:
     settings = get_settings()
+    engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
     try:
-        engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
         async with engine.connect() as conn:
             await conn.execute(__import__("sqlalchemy").text("SELECT 1"))
     except Exception as exc:
+        await engine.dispose()
         pytest.skip(f"Postgres not available: {exc}")
-    engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
+
+    connection = await engine.connect()
+    transaction = await connection.begin()
     factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
-        engine, expire_on_commit=False
+        connection, expire_on_commit=False
     )
-    async with engine.begin() as conn:
-        await conn.execute(
-            __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS vector")
-        )
-        await conn.execute(
-            __import__("sqlalchemy").text("CREATE EXTENSION IF NOT EXISTS pg_trgm")
-        )
-        await conn.run_sync(Base.metadata.create_all)
     async with factory() as session:
         yield session
-        await session.commit()
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+    await transaction.rollback()
+    await connection.close()
     await engine.dispose()
 
 
@@ -89,3 +83,9 @@ def clear_settings_cache() -> Iterator[None]:
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+async def reset_global_db_engine() -> AsyncIterator[None]:
+    yield
+    await shutdown_db()
