@@ -9,7 +9,7 @@ from pathlib import Path
 _REPO_ROOT: Path = Path(__file__).resolve().parents[5]
 _MANIFESTO_PATH: Path = _REPO_ROOT / "manifesto.md"
 
-_GITHUB_REPO_URL: str = "https://github.com/contactsafe/contactsafe"
+_GITHUB_REPO_URL: str = "https://github.com/ContactGraph/contactgraph"
 _SITE_YEAR: str = str(datetime.now(tz=UTC).year)
 _SITE_NAME: str = "ContactGraph"
 _TAGLINE: str = "Turn your contacts into a superpower."
@@ -323,14 +323,14 @@ def _header_html(*, mcp_path: str) -> str:
 
 
 def _footer_html() -> str:
-    return """
+    return f"""
     <footer class="site-footer">
       <div>~*~ © ContactGraph ~*~</div>
       <div class="rule">–––</div>
       <div class="links">
         <a href="/skill.md">Skill</a> |
         <a href="/manifesto">Manifesto</a> |
-        <a href="https://github.com/contactsafe/contactsafe">GitHub</a>
+        <a href="{_GITHUB_REPO_URL}">GitHub</a>
       </div>
     </footer>"""
 
