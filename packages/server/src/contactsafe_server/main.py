@@ -70,11 +70,15 @@ def create_app() -> FastAPI:
 
     @app.get("/", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
     async def landing_page() -> HTMLResponse:
-        return HTMLResponse(render_landing_page(mcp_path=settings.mcp_path))
+        return HTMLResponse(
+            render_landing_page(mcp_path=settings.mcp_path, base_url=settings.base_url)
+        )
 
     @app.get("/manifesto", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
     async def manifesto_page() -> HTMLResponse:
-        return HTMLResponse(render_manifesto_page(mcp_path=settings.mcp_path))
+        return HTMLResponse(
+            render_manifesto_page(mcp_path=settings.mcp_path, base_url=settings.base_url)
+        )
 
     @app.get("/skill.md", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
     async def serve_skill_md() -> FileResponse:
