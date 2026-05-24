@@ -10,6 +10,9 @@ from contactsafe_core.schemas import (
     ConnectSourceResult,
     ListSourcesResult,
     OAuthCredentialSummary,
+    CategoryCount,
+    DescribeGraphResult,
+    OrgCount,
     PersonMatch,
     QueryNetworkResult,
     SessionPublic,
@@ -20,9 +23,12 @@ from contactsafe_core.schemas import (
 )
 
 __all__ = [
+    "CategoryCount",
     "ConnectSourceResult",
+    "DescribeGraphResult",
     "ListSourcesResult",
     "OAuthCredentialSummary",
+    "OrgCount",
     "OAuthProvider",
     "PersonMatch",
     "QueryIntent",

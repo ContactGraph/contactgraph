@@ -12,6 +12,7 @@ from contactsafe_core.enums import SessionStatus, SourceConnectionStatus, Source
 from contactsafe_server.config import Settings
 from contactsafe_core.schemas import (
     ConnectSourceResult,
+    DescribeGraphResult,
     ListSourcesResult,
     PersonMatch,
     QueryNetworkResult,
@@ -25,6 +26,7 @@ from contactsafe_server.deps import (
     build_oauth_service,
     build_source_service,
 )
+from contactsafe_server.services.graph_summary_service import GraphSummaryService
 from contactsafe_server.services.network_query_service import NetworkQueryService
 from contactsafe_server.services.query_planner import QueryPlanner
 from contactsafe_server.services.oauth_service import OAuthService
@@ -56,6 +58,7 @@ def create_mcp_server(settings: Settings) -> FastMCP:
             "Authenticate with OAuth 2.1 Bearer tokens (see /.well-known/oauth-protected-resource). "
             "Use connect_source to start OAuth, list_sources to see connections, "
             "sync_source to (re)start ingestion, get_source_status for progress, "
+            "describe_graph for a high-level graph summary, "
             "and query_network to search contacts."
         ),
         json_response=True,
@@ -272,6 +275,58 @@ def create_mcp_server(settings: Settings) -> FastMCP:
                 applied_plan=plan,
                 message=f"Found {len(matches)} matching contact(s).{deprecation_note}",
             )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def describe_graph(
+        connect_session_id: str | None = None,
+        source_id: str | None = None,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> DescribeGraphResult:
+        """Summarize the user's contact graph (counts, top categories/orgs, strongest ties).
+
+        Use this for broad questions like "who do I know?" before drilling down with
+        query_network.
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        async with lifespan.app_context.session_factory() as db:
+            oauth: OAuthService = build_oauth_service(db, lifespan.app_context)
+            auth_user_id, deprecated = await _resolve_authenticated_user_id(
+                ctx, connect_session_id, oauth
+            )
+            sources: SourceService = build_source_service(db)
+
+            resolved_user_id: UUID | None = auth_user_id
+            if resolved_user_id is None and source_id is not None:
+                source_uuid = parse_source_id(source_id)
+                status = await sources.get_source_status(source_uuid)
+                if status.connection_status != SourceConnectionStatus.CONNECTED:
+                    return DescribeGraphResult(
+                        message="Source is not connected.",
+                    )
+                resolved_user_id = await sources.resolve_user_id(source_id=source_uuid)
+            elif resolved_user_id is None:
+                return DescribeGraphResult(
+                    message=(
+                        "Authentication required. Provide a Bearer token or source_id."
+                    ),
+                )
+
+            if not await sources.user_has_queryable_graph(resolved_user_id):
+                return DescribeGraphResult(
+                    message=(
+                        "Sync still running or not started. Call sync_source, then "
+                        "get_source_status until sync_state is partial or complete."
+                    ),
+                )
+
+            summary: DescribeGraphResult = await GraphSummaryService(db).describe(
+                resolved_user_id
+            )
+            if deprecated:
+                summary = summary.model_copy(
+                    update={"message": _with_deprecation(summary.message)}
+                )
+            return summary
 
     return mcp
 
