@@ -4,6 +4,7 @@ from contactsafe_core.query_plan import QueryIntent, QueryPlan, QuerySortBy
 from contactsafe_server.services.email_parse import (
     company_query_from_question,
     name_query_from_question,
+    name_tokens_from_proper_nouns,
 )
 
 
@@ -25,6 +26,8 @@ def plan_from_heuristics(question: str) -> QueryPlan:
         name_hint = _name_from_lookup_email_pattern(question)
     if name_hint is not None:
         plan.name_tokens = _tokenize_name(name_hint)
+    elif not plan.name_tokens:
+        plan.name_tokens = name_tokens_from_proper_nouns(question)
 
     company: str | None = company_query_from_question(question)
     if company is not None:

@@ -15,7 +15,7 @@ _PLANNER_SYSTEM_PROMPT: str = """You translate questions about a user's email-de
 
 Schema:
 - intent: list_people | lookup_contact | semantic_search
-- name_tokens: first name tokens to match in person names (e.g. ["chris"])
+- name_tokens: person-name tokens to match in person names (e.g. ["chris", "lee"] for "Chris Lee" or "Cynthia Johanson")
 - org_names: company names (e.g. ["Cowboy VC", "AIX"])
 - categories_any: person categories (e.g. ["vc", "founder", "engineer"])
 - role_keywords: job title keywords (e.g. ["revops", "revenue operations"])
@@ -26,7 +26,9 @@ Schema:
 - sort_by: tie_strength | last_seen
 - limit: max results (use 1 for lookup_contact with name+org)
 
-Return ONLY valid JSON matching QueryPlan. No markdown."""
+Return ONLY valid JSON matching QueryPlan. No markdown.
+
+Always extract proper-noun person names into name_tokens when the question names someone (e.g. "Cynthia Johanson" -> ["cynthia", "johanson"])."""
 
 
 class QueryPlanner:

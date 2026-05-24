@@ -14,6 +14,7 @@ from contactsafe_server.services.employment_service import EmploymentService
 from contactsafe_server.services.exa_client import ExaClient
 from contactsafe_server.services.exa_enrichment import apply_exa_hints_to_person, extract_hints_from_exa_hits
 from contactsafe_server.services.openai_json import content_from_chat_completion, parse_json_object
+from contactsafe_server.services.org_enrichment import should_apply_enrichment_org
 from contactsafe_server.services.category_inference import infer_categories_from_contact
 from contactsafe_server.services.email_parse import (
     BROADCAST_LOCAL_PARTS,
@@ -75,6 +76,8 @@ class IngestEnrichmentService:
             )
             await self._llm_enrich_batch(top_for_llm, contact_by_email)
 
+        await self._cleanup_non_human_enrichment(user_id)
+
         await self._db.flush()
 
     async def _should_skip_enrichment(self, person: Person) -> bool:
@@ -95,7 +98,10 @@ class IngestEnrichmentService:
     ) -> list[Person]:
         result = await self._db.execute(
             select(Person)
-            .join(PersonEdge, PersonEdge.person_id == Person.id)
+            .join(
+                PersonEdge,
+                (PersonEdge.person_id == Person.id) & (PersonEdge.user_id == user_id),
+            )
             .where(
                 Person.user_id == user_id,
                 PersonEdge.is_automated.is_(False),
@@ -108,6 +114,23 @@ class IngestEnrichmentService:
             .limit(limit)
         )
         return list(result.scalars().unique().all())
+
+    async def _cleanup_non_human_enrichment(self, user_id: uuid.UUID) -> None:
+        result = await self._db.execute(
+            select(Person, PersonEdge.is_automated, PersonEdge.is_broadcast)
+            .join(
+                PersonEdge,
+                (PersonEdge.person_id == Person.id) & (PersonEdge.user_id == user_id),
+            )
+            .where(Person.user_id == user_id)
+        )
+        for person, is_automated, is_broadcast in result.all():
+            if not is_automated and not is_broadcast:
+                continue
+            person.current_role = None
+            if person.email_addresses:
+                inferred_org: str | None = org_name_from_email(person.email_addresses[0])
+                person.current_org_name = inferred_org
 
     def _heuristic_enrich_person(
         self,
@@ -279,14 +302,23 @@ class IngestEnrichmentService:
                 ]
             role_raw: object = item.get("current_role")
             role_title: str | None = None
+            primary_email: str = person.email_addresses[0] if person.email_addresses else ""
+            local_part: str = primary_email.rsplit("@", 1)[0].lower() if primary_email else ""
             if isinstance(role_raw, str) and role_raw.strip():
-                role_title = role_raw.strip()
-                person.current_role = role_title
+                if local_part not in BROADCAST_LOCAL_PARTS:
+                    role_title = role_raw.strip()
+                    person.current_role = role_title
             org_raw: object = item.get("org_name")
             org_name: str | None = None
+            primary_email: str = person.email_addresses[0] if person.email_addresses else ""
             if isinstance(org_raw, str) and org_raw.strip():
-                org_name = org_raw.strip()
-                person.current_org_name = org_name
+                candidate_org: str = org_raw.strip()
+                if should_apply_enrichment_org(
+                    primary_email=primary_email,
+                    proposed_org=candidate_org,
+                ):
+                    org_name = candidate_org
+                    person.current_org_name = org_name
             await self._employment.apply_enrichment_to_employment(
                 person=person,
                 org_name=org_name,

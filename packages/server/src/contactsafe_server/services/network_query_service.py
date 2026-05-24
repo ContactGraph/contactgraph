@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import Text, cast, func, or_, select
+from sqlalchemy import Text, cast, func, literal, or_, select
 from sqlalchemy.dialects.postgresql import ARRAY, array as pg_array
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, selectinload
@@ -110,6 +110,21 @@ def _pg_text_array_overlaps(
     return column.op("&&")(rhs)
 
 
+def _category_match_condition(categories: list[str]) -> ColumnElement[bool]:
+    """Case-insensitive match against inferred_categories."""
+    lowered: list[str] = _normalize_category_tokens(categories)
+    if not lowered:
+        return cast(literal(True), ColumnElement[bool])
+    category = func.unnest(Person.inferred_categories).table_valued("category")
+    return (
+        select(literal(1))
+        .select_from(category)
+        .where(func.lower(category.c.category).in_(lowered))
+        .correlate(Person)
+        .exists()
+    )
+
+
 class NetworkQueryService:
     def __init__(self, db: AsyncSession) -> None:
         self._db: AsyncSession = db
@@ -130,7 +145,10 @@ class NetworkQueryService:
 
         stmt = (
             select(Person)
-            .join(PersonEdge, PersonEdge.person_id == Person.id)
+            .join(
+                PersonEdge,
+                (PersonEdge.person_id == Person.id) & (PersonEdge.user_id == user_id),
+            )
             .options(selectinload(Person.edge), selectinload(Person.current_org))
             .where(Person.user_id == user_id)
         )
@@ -161,8 +179,7 @@ class NetworkQueryService:
             stmt = stmt.where(or_(*org_conditions))
 
         if plan.categories_any:
-            lowered: list[str] = _normalize_category_tokens(plan.categories_any)
-            stmt = stmt.where(_pg_text_array_overlaps(Person.inferred_categories, lowered))
+            stmt = stmt.where(_category_match_condition(plan.categories_any))
 
         for role_kw in plan.role_keywords:
             role_pattern: str = f"%{role_kw.lower()}%"
@@ -274,10 +291,14 @@ class NetworkQueryService:
             else:
                 reasons.append(f"org filter: {', '.join(plan.org_names)}")
         if plan.categories_any and person.inferred_categories:
+            normalized_requested: set[str] = {
+                _CATEGORY_ALIASES.get(c.strip().lower(), c.strip().lower())
+                for c in plan.categories_any
+            }
             matched_cats: list[str] = [
                 c
                 for c in person.inferred_categories
-                if c.lower() in {x.lower() for x in plan.categories_any}
+                if _CATEGORY_ALIASES.get(c.lower(), c.lower()) in normalized_requested
             ]
             if matched_cats:
                 reasons.append(f"categories: {', '.join(matched_cats)}")

@@ -49,6 +49,7 @@ _KNOWN_DOMAIN_BRANDS: dict[str, str] = {
     "ycombinator.com": "Y Combinator",
     "basebase.com": "Basebase",
     "sparkcapital.com": "Spark Capital",
+    "bvp.com": "Bessemer Venture Partners",
     "patagonia.com": "Patagonia",
     "wayfair.com": "Wayfair",
     "statefarm.com": "State Farm",
