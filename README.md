@@ -6,26 +6,12 @@ Agent-native personal contact graph built from messaging, email, and calendar da
 **MCP endpoint:** `https://www.contactsafe.ai/mcp`  
 **Agent skill file:** `https://www.contactsafe.ai/skill.md`
 
-Example questions once synced:
+Example questions your agent will be able to answer once connected and synced:
 
 - What investors do I know?
 - Who do I know at ACME?
 - Who do I know who works in RevOps?
 - Where does Jim Smith work now?
-
-## Data sources (extensible framework)
-
-ContactSafe is built as an **extensible source framework**. Every connector uses the same MCP workflow (`connect_source` → `sync_source` → `query_network`) and writes into one unified graph (people, orgs, employment edges, relationship strength).
-
-| Source | `source_type` | Status |
-|--------|---------------|--------|
-| **Gmail** | `google_mail` | **Shipped** — imports email metadata (headers only) into contacts, org links, and tie strength |
-| Google Calendar | `google_calendar` | Planned — co-attendance and relationship signals from events |
-| Other (LinkedIn, WhatsApp, CRM, …) | TBD | Roadmap |
-
-**Gmail is the first data source, not the architecture.** New sources add importers and OAuth scopes behind the same tools and graph schema — agents and humans do not need new MCP tool names when we ship the next connector.
-
----
 
 ## Quick start for humans
 
@@ -260,6 +246,20 @@ make dev
 
 ---
 
+## Data sources (extensible framework)
+
+ContactSafe is built as an **extensible source framework**. Every connector uses the same MCP workflow (`connect_source` → `sync_source` → `query_network`) and writes into one unified graph (people, orgs, employment edges, relationship strength).
+
+| Source | `source_type` | Status |
+|--------|---------------|--------|
+| **Gmail** | `google_mail` | **Shipped** — imports email metadata (headers only) into contacts, org links, and tie strength |
+| Google Calendar | `google_calendar` | Planned — co-attendance and relationship signals from events |
+| Other (LinkedIn, WhatsApp, CRM, …) | TBD | Roadmap |
+
+**Gmail is the first data source, not the architecture.** New sources add importers and OAuth scopes behind the same tools and graph schema — agents and humans do not need new MCP tool names when we ship the next connector.
+
+---
+
 ## Testing locally
 
 1. `make dev`
@@ -422,3 +422,4 @@ Set `TOKEN_ENCRYPTION_KEY`, `SESSION_SECRET`, and optionally `JWT_SIGNING_KEY` (
 | `make migrate` | Alembic upgrade |
 | `make test` | Server tests |
 | `make docker-up` | Local Postgres + Redis |
+
