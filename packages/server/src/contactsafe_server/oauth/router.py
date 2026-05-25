@@ -17,6 +17,7 @@ from contactsafe_server.deps import build_jwt_service
 from contactsafe_server.oauth.google import GoogleOAuthClient
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.deps import build_source_service
+from contactsafe_server.services.source_service import SourceService
 from contactsafe_server.services.oauth_server_service import (
     DynamicClientRegistrationRequest,
     OAuthServerService,
@@ -229,7 +230,10 @@ async def oauth_callback(
         user, source = await service.complete_oauth(connect_session, code)
     except Exception as exc:
         logger.exception("Google OAuth callback failed")
-        await service.mark_session_failed(connect_session)
+        try:
+            await service.mark_session_failed(connect_session)
+        except Exception:
+            logger.exception("Failed to mark session as failed (DB may be dirty)")
         if connect_session.oauth_redirect_uri:
             oauth_server: OAuthServerService = _build_oauth_server_service(db, settings)
             error_url: str = oauth_server.build_client_redirect_url(
@@ -244,40 +248,52 @@ async def oauth_callback(
             status_code=500,
         )
 
-    sources = build_source_service(db)
-    await sources.request_sync(source.id)
-    await db.commit()
+    try:
+        sources: SourceService = build_source_service(db)
+        await sources.request_sync(source.id)
+        await db.commit()
+    except Exception:
+        logger.exception("Post-OAuth sync scheduling failed (user %s saved OK)", user.email)
 
-    if connect_session.oauth_redirect_uri:
-        oauth_server = _build_oauth_server_service(db, settings)
-        scopes: list[str] = (
-            list(connect_session.requested_scopes)
-            if connect_session.requested_scopes
-            else parse_scopes_param("")
-        )
-        auth_code: str = await oauth_server.create_authorization_code(
-            connect_session,
-            user.id,
-            scopes,
-        )
-        redirect_url: str = oauth_server.build_client_redirect_url(
-            connect_session,
-            code=auth_code,
-        )
-        logger.info(
-            "OAuth authorize complete for user %s, redirecting MCP client",
-            user.email,
-        )
-        return RedirectResponse(url=redirect_url, status_code=302)
+    try:
+        if connect_session.oauth_redirect_uri:
+            oauth_server = _build_oauth_server_service(db, settings)
+            scopes: list[str] = (
+                list(connect_session.requested_scopes)
+                if connect_session.requested_scopes
+                else parse_scopes_param("")
+            )
+            auth_code: str = await oauth_server.create_authorization_code(
+                connect_session,
+                user.id,
+                scopes,
+            )
+            redirect_url: str = oauth_server.build_client_redirect_url(
+                connect_session,
+                code=auth_code,
+            )
+            logger.info(
+                "OAuth authorize complete for user %s, redirecting MCP client",
+                user.email,
+            )
+            return RedirectResponse(url=redirect_url, status_code=302)
 
-    return templates.TemplateResponse(
-        request=request,
-        name="complete.html",
-        context={
-            "email": user.email,
-            "session_id": str(connect_session.id),
-        },
-    )
+        return templates.TemplateResponse(
+            request=request,
+            name="complete.html",
+            context={
+                "email": user.email,
+                "session_id": str(connect_session.id),
+            },
+        )
+    except Exception as exc:
+        logger.exception("Post-OAuth redirect/render failed for user %s", user.email)
+        return templates.TemplateResponse(
+            request=request,
+            name="error.html",
+            context={"message": f"Account connected but redirect failed: {exc}"},
+            status_code=500,
+        )
 
 
 @router.get("/complete/{session_id}", response_class=HTMLResponse)
