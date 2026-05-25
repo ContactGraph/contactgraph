@@ -4,7 +4,7 @@
 
 For twenty years, LinkedIn, Facebook, and Instagram asked us to manually maintain profiles about who we know and what we do — then sold access to that graph. The bargain made sense in 2005. It doesn't anymore.
 
-Your email, contacts, calendar, messages, and CRM already know who you actually talk to, where people work, and how strong each tie really is. An AI agent can read that signal and build a richer graph than you ever would by hand — but only if *you* own the result.
+Your messaging and calendar apps already know who you actually talk to, where people work, and how strong each tie really is. An AI agent can read that signal and build a richer graph than you ever would by hand — but only if *you* own the result.
 
 **ContactGraph is that graph.** Private by default. Populated from your own data sources. Queried by your agent, on your behalf.
 
@@ -24,7 +24,7 @@ Your email, contacts, calendar, messages, and CRM already know who you actually 
 
 ## What we're building
 
-ContactGraph distills your inboxes, contact lists, calendars, messages, and CRMs into a living relationship graph. Ask your agent one question — *Who do I know at Stripe? What VCs have I talked to? Who should I ask about hiring?* — and the right people surface before the meeting, before the pitch, before the moment is gone.
+ContactGraph distills your inboxes, contact lists, calendars, and messages into a living relationship graph. Ask your agent one question — *Who do I know at Stripe? What VCs have I talked to? Who should I ask about hiring?* — and the right people surface before the meeting, before the pitch, before the moment is gone.
 
 We're not trying to be a better LinkedIn. We're making the destination network structurally unnecessary for the things people actually need: finding people, getting introductions, hiring, building community.
 
