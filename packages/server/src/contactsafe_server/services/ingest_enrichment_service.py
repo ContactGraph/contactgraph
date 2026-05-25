@@ -11,8 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import Person, PersonEdge
 from contactsafe_server.services.employment_service import EmploymentService
-from contactsafe_server.services.exa_client import ExaClient
-from contactsafe_server.services.exa_enrichment import apply_exa_hints_to_person, extract_hints_from_exa_hits
 from contactsafe_server.services.openai_json import content_from_chat_completion, parse_json_object
 from contactsafe_server.services.org_enrichment import should_apply_enrichment_org
 from contactsafe_server.services.category_inference import infer_categories_from_contact
@@ -20,6 +18,15 @@ from contactsafe_server.services.email_parse import (
     BROADCAST_LOCAL_PARTS,
     ContactAccumulator,
     org_name_from_email,
+)
+from contactsafe_server.services.person_discovery_service import PersonDiscoveryService
+from contactsafe_server.services.signature_enrichment import (
+    apply_signature_hints_to_person,
+    parse_signature_from_snippets,
+)
+from contactsafe_server.services.web_enrichment import (
+    apply_web_hints_to_person,
+    extract_hints_from_web_hits,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,6 +51,7 @@ class IngestEnrichmentService:
         self._db: AsyncSession = db
         self._settings: Settings = settings
         self._employment: EmploymentService = EmploymentService(db)
+        self._discovery: PersonDiscoveryService = PersonDiscoveryService(settings)
 
     async def enrich_after_import(
         self,
@@ -63,12 +71,12 @@ class IngestEnrichmentService:
             if await self._should_skip_enrichment(person):
                 continue
             self._heuristic_enrich_person(person, acc)
+            await self._signature_enrich_person(person, acc)
 
-        if self._settings.exa_api_key:
-            top_for_exa = await self._load_top_people_by_tie_strength(
-                user_id, limit=self._settings.exa_enrichment_contact_limit
-            )
-            await self._exa_enrich_batch(top_for_exa, contact_by_email)
+        if self._has_web_enrichment_provider():
+            limit: int = self._web_enrichment_limit()
+            top_for_web = await self._load_top_people_by_tie_strength(user_id, limit=limit)
+            await self._web_enrich_batch(top_for_web, contact_by_email)
 
         if self._settings.openai_api_key:
             top_for_llm = await self._load_top_people_by_tie_strength(
@@ -79,6 +87,19 @@ class IngestEnrichmentService:
         await self._cleanup_non_human_enrichment(user_id)
 
         await self._db.flush()
+
+    def _has_web_enrichment_provider(self) -> bool:
+        return bool(
+            self._settings.exa_api_key
+            or self._settings.tavily_api_key
+            or self._settings.serper_api_key
+        )
+
+    def _web_enrichment_limit(self) -> int:
+        return max(
+            self._settings.web_enrichment_contact_limit,
+            self._settings.exa_enrichment_contact_limit,
+        )
 
     async def _should_skip_enrichment(self, person: Person) -> bool:
         result = await self._db.execute(
@@ -174,41 +195,66 @@ class IngestEnrichmentService:
             if inferred_org:
                 person.current_org_name = inferred_org
 
-    async def _exa_enrich_batch(
+    async def _signature_enrich_person(
+        self,
+        person: Person,
+        accumulator: ContactAccumulator | None,
+    ) -> None:
+        if accumulator is None or not accumulator.inbound_snippets:
+            return
+        hints = parse_signature_from_snippets(
+            accumulator.inbound_snippets,
+            display_name=person.canonical_name,
+        )
+        apply_signature_hints_to_person(person, hints)
+        if hints.org_name or hints.current_role:
+            await self._employment.apply_enrichment_to_employment(
+                person=person,
+                org_name=hints.org_name,
+                role_title=hints.current_role,
+                source="signature",
+            )
+
+    async def _web_enrich_batch(
         self,
         people: list[Person],
         contact_by_email: dict[str, ContactAccumulator],
     ) -> None:
-        client = ExaClient(self._settings)
         for person in people:
             email: str = person.email_addresses[0] if person.email_addresses else ""
             if not email or await self._should_skip_enrichment(person):
                 continue
             acc: ContactAccumulator | None = contact_by_email.get(email)
             try:
-                hits = await client.search_person_context(
+                discovery = await self._discovery.discover_person(
                     name=person.canonical_name,
                     email=email,
                     org_hint=person.current_org_name,
                 )
             except Exception:
-                logger.exception("Exa enrichment failed for %s", email)
+                logger.exception("Web discovery failed for %s", email)
                 continue
-            if not hits:
+
+            hits = [*discovery.employer_hits, *discovery.activity_hits]
+            if not hits and not discovery.posts:
                 continue
-            hints = extract_hints_from_exa_hits(
-                hits=hits,
+
+            activity_blob: str = self._discovery.activity_blob(discovery)
+            hints = extract_hints_from_web_hits(
+                hits=discovery.employer_hits or hits,
                 email=email,
                 display_name=person.canonical_name,
                 org_hint=person.current_org_name,
                 pitch_outbound_count=acc.pitch_outbound_count if acc else 0,
+                activity_posts=activity_blob,
             )
-            apply_exa_hints_to_person(person, hints)
+            apply_web_hints_to_person(person, hints)
+            source: str = discovery.providers_used[0] if discovery.providers_used else "web"
             await self._employment.apply_enrichment_to_employment(
                 person=person,
                 org_name=hints.org_name,
                 role_title=hints.current_role,
-                source="exa",
+                source=source.split(":")[0],
             )
 
     async def _llm_enrich_batch(
@@ -232,6 +278,7 @@ class IngestEnrichmentService:
                     "email": email,
                     "org_hint": person.current_org_name or "",
                     "notes": acc.display_name if acc else "",
+                    "bio_summary": person.bio_summary or "",
                 }
             )
 
@@ -310,7 +357,7 @@ class IngestEnrichmentService:
                     person.current_role = role_title
             org_raw: object = item.get("org_name")
             org_name: str | None = None
-            primary_email: str = person.email_addresses[0] if person.email_addresses else ""
+            primary_email = person.email_addresses[0] if person.email_addresses else ""
             if isinstance(org_raw, str) and org_raw.strip():
                 candidate_org: str = org_raw.strip()
                 if should_apply_enrichment_org(

@@ -74,6 +74,7 @@ class ContactAccumulator:
     outbound_count: int = 0
     inbound_count: int = 0
     pitch_outbound_count: int = 0
+    inbound_snippets: list[str] | None = None
 
     def observe(
         self,
@@ -81,12 +82,18 @@ class ContactAccumulator:
         display_name: str,
         seen_at: datetime | None,
         from_user: bool,
+        snippet: str | None = None,
     ) -> None:
         self.message_count += 1
         if from_user:
             self.outbound_count += 1
         else:
             self.inbound_count += 1
+            if snippet and snippet.strip():
+                if self.inbound_snippets is None:
+                    self.inbound_snippets = []
+                if snippet.strip() not in self.inbound_snippets:
+                    self.inbound_snippets.append(snippet.strip())
         if display_name and (not self.display_name or self.display_name == self.email):
             self.display_name = display_name
         if seen_at is not None and (self.last_seen_at is None or seen_at > self.last_seen_at):
