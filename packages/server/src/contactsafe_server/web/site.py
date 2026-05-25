@@ -414,7 +414,7 @@ def render_privacy_page(*, mcp_path: str, base_url: str) -> str:
     <main class="content content-wide">
       <article class="prose">
         <h1 class="doc-title">PRIVACY POLICY</h1>
-        <p><em>Effective: {_SITE_YEAR}-01-01</em></p>
+        <p><em>Effective: May 25, 2026</em></p>
 
         <h2>What we collect</h2>
         <p>
@@ -490,7 +490,7 @@ def render_terms_page(*, mcp_path: str, base_url: str) -> str:
     <main class="content content-wide">
       <article class="prose">
         <h1 class="doc-title">TERMS OF SERVICE</h1>
-        <p><em>Effective: {_SITE_YEAR}-01-01</em></p>
+        <p><em>Effective: May 25, 2026</em></p>
 
         <h2>Acceptance</h2>
         <p>
