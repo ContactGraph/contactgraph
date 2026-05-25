@@ -2,10 +2,9 @@ import uuid
 
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from contactsafe_server.config import Settings
-from contactsafe_server.db.models import InteractionExcerpt, Person, PersonEdge
+from contactsafe_server.db.models import InteractionExcerpt, Person, UserPersonObservation
 from contactsafe_server.services.embedding_service import EmbeddingService
 
 
@@ -26,20 +25,22 @@ class InteractionExcerptService:
         )
 
         result = await self._db.execute(
-            select(Person)
-            .join(PersonEdge, PersonEdge.person_id == Person.id)
-            .options(selectinload(Person.edge))
-            .where(
-                Person.user_id == user_id,
-                PersonEdge.is_human.is_(True),
-                PersonEdge.is_automated.is_(False),
+            select(Person, UserPersonObservation)
+            .join(
+                UserPersonObservation,
+                (UserPersonObservation.person_id == Person.id)
+                & (UserPersonObservation.user_id == user_id),
             )
-            .order_by(PersonEdge.tie_strength_score.desc())
+            .where(
+                UserPersonObservation.is_human.is_(True),
+                UserPersonObservation.is_automated.is_(False),
+            )
+            .order_by(UserPersonObservation.tie_strength_score.desc())
             .limit(50)
         )
-        people: list[Person] = list(result.scalars().unique().all())
+        rows: list[tuple[Person, UserPersonObservation]] = list(result.unique().all())
 
-        for person in people:
+        for person, obs in rows:
             parts: list[str] = [f"Contact: {person.canonical_name}"]
             if person.current_role:
                 parts.append(f"Role: {person.current_role}")
@@ -55,7 +56,7 @@ class InteractionExcerptService:
                     person_id=person.id,
                     excerpt_text=excerpt_text,
                     embedding=embedding,
-                    occurred_at=person.last_seen_in_email,
+                    occurred_at=obs.last_observed_at,
                 )
             )
         await self._db.flush()

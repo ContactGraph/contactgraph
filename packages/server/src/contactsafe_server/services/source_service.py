@@ -1,5 +1,6 @@
+import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import exists, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +19,10 @@ from contactsafe_core.schemas import (
     SyncSourceResult,
 )
 from contactsafe_server.db.models import ConnectSession, OAuthCredential, Source, User
+
+logger: logging.Logger = logging.getLogger(__name__)
+
+_STALE_SYNC_TIMEOUT: timedelta = timedelta(minutes=30)
 from contactsafe_server.services.import_scheduler import (
     is_source_sync_running,
     is_user_sync_running,
@@ -368,7 +373,17 @@ class SourceService:
     def _sync_in_progress(source: Source, user_id: uuid.UUID) -> bool:
         if is_user_sync_running(user_id) or is_source_sync_running(source.id):
             return True
-        return source.sync_state == SyncState.SYNCING.value
+        if source.sync_state != SyncState.SYNCING.value:
+            return False
+        if source.sync_started_at is not None:
+            elapsed: timedelta = datetime.now(tz=UTC) - source.sync_started_at
+            if elapsed > _STALE_SYNC_TIMEOUT:
+                logger.warning(
+                    "Source %s stuck in syncing for %s, treating as stale",
+                    source.id, elapsed,
+                )
+                return False
+        return True
 
     async def _try_claim_sync(self, source: Source) -> bool:
         """Atomically mark a source syncing; only one sync per user at a time."""

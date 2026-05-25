@@ -74,13 +74,14 @@ def apply_signature_hints_to_person(
     person: object,
     hints: SignatureHints,
 ) -> None:
+    """Legacy helper — kept for backward compatibility but superseded by claim writes."""
     from contactsafe_server.db.models import Person
     from contactsafe_server.services.org_enrichment import should_apply_enrichment_org
 
     if not isinstance(person, Person):
         return
 
-    primary_email: str = person.email_addresses[0] if person.email_addresses else ""
+    primary_email: str = person.primary_email or ""
     if hints.current_role and not person.current_role:
         person.current_role = hints.current_role
     if hints.org_name and should_apply_enrichment_org(

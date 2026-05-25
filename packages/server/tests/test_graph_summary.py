@@ -1,86 +1,76 @@
+"""Tests for GraphSummaryService against entity-claim schema."""
+
 import uuid
 from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from contactsafe_server.db.models import Person, PersonEdge, User
+from contactsafe_server.db.models import (
+    Base,
+    Person,
+    User,
+    UserPersonObservation,
+)
 from contactsafe_server.services.graph_summary_service import GraphSummaryService
 
+pytestmark = pytest.mark.anyio
 
-@pytest.mark.asyncio
+
+@pytest.fixture(autouse=True)
+async def _setup_tables(db_engine):
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
 async def test_describe_graph_summarizes_queryable_contacts(db_session: AsyncSession) -> None:
     user = User(email=f"summary-{uuid.uuid4()}@example.com")
     db_session.add(user)
     await db_session.flush()
 
     human_vc = Person(
-        user_id=user.id,
         canonical_name="Jane Investor",
-        email_addresses=["jane@vcfund.com"],
+        primary_email="jane@vcfund.com",
         current_org_name="VC Fund",
         inferred_categories=["vc"],
-        last_seen_in_email=datetime.now(tz=UTC),
     )
     human_founder = Person(
-        user_id=user.id,
         canonical_name="Chris Founder",
-        email_addresses=["chris@startup.com"],
+        primary_email="chris@startup.com",
         current_org_name="Startup Inc",
         inferred_categories=["founder"],
-        last_seen_in_email=datetime.now(tz=UTC),
     )
     newsletter = Person(
-        user_id=user.id,
         canonical_name="Newsletter",
-        email_addresses=["news@marketing.io"],
-        last_seen_in_email=datetime.now(tz=UTC),
+        primary_email="news@marketing.io",
     )
     bot = Person(
-        user_id=user.id,
         canonical_name="GitHub Bot",
-        email_addresses=["ci@noreply.github.com"],
-        last_seen_in_email=datetime.now(tz=UTC),
+        primary_email="ci@noreply.github.com",
     )
     db_session.add_all([human_vc, human_founder, newsletter, bot])
     await db_session.flush()
 
-    db_session.add_all(
-        [
-            PersonEdge(
-                user_id=user.id,
-                person_id=human_vc.id,
-                tie_strength_score=0.95,
-                is_human=True,
-                is_broadcast=False,
-                is_automated=False,
-            ),
-            PersonEdge(
-                user_id=user.id,
-                person_id=human_founder.id,
-                tie_strength_score=0.7,
-                is_human=True,
-                is_broadcast=False,
-                is_automated=False,
-            ),
-            PersonEdge(
-                user_id=user.id,
-                person_id=newsletter.id,
-                tie_strength_score=0.8,
-                is_human=False,
-                is_broadcast=True,
-                is_automated=False,
-            ),
-            PersonEdge(
-                user_id=user.id,
-                person_id=bot.id,
-                tie_strength_score=0.99,
-                is_human=False,
-                is_broadcast=False,
-                is_automated=True,
-            ),
-        ]
-    )
+    db_session.add_all([
+        UserPersonObservation(
+            user_id=user.id, person_id=human_vc.id, tie_strength_score=0.95,
+            is_human=True, is_broadcast=False, is_automated=False, email_count=20,
+            last_observed_at=datetime.now(tz=UTC),
+        ),
+        UserPersonObservation(
+            user_id=user.id, person_id=human_founder.id, tie_strength_score=0.7,
+            is_human=True, is_broadcast=False, is_automated=False, email_count=15,
+            last_observed_at=datetime.now(tz=UTC),
+        ),
+        UserPersonObservation(
+            user_id=user.id, person_id=newsletter.id, tie_strength_score=0.8,
+            is_human=False, is_broadcast=True, is_automated=False, email_count=50,
+        ),
+        UserPersonObservation(
+            user_id=user.id, person_id=bot.id, tie_strength_score=0.99,
+            is_human=False, is_broadcast=False, is_automated=True, email_count=100,
+        ),
+    ])
     await db_session.flush()
 
     summary = await GraphSummaryService(db_session).describe(user.id)

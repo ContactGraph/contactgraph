@@ -108,6 +108,7 @@ class PersonMatch(BaseModel):
     inferred_categories: list[str] = Field(default_factory=list)
     social_profiles: dict[str, str] = Field(default_factory=dict)
     bio_summary: str | None = None
+    also_known_as: list[str] = Field(default_factory=list)
     last_seen_in_email: datetime | None = None
     tie_strength_score: float = 0.0
     match_reason: str = ""

@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -6,6 +7,8 @@ from authlib.jose import jwt
 from authlib.jose.errors import JoseError
 
 from contactsafe_server.config import Settings
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 MCP_SCOPES: tuple[str, ...] = (
     "contactsafe:read",
@@ -61,19 +64,20 @@ class JWTService:
         return token.decode() if isinstance(token, bytes) else str(token)
 
     def decode_token(self, token: str) -> dict[str, Any]:
+        expected_iss: str = self._settings.effective_jwt_issuer
         try:
             claims = jwt.decode(
                 token,
                 self._settings.effective_jwt_signing_key,
                 claims_options={
-                    "iss": {"essential": True, "value": self._settings.effective_jwt_issuer},
-                    "aud": {"essential": True, "value": self._settings.effective_jwt_audience},
+                    "iss": {"essential": True, "value": expected_iss},
                     "exp": {"essential": True},
                     "sub": {"essential": True},
                 },
             )
             claims.validate()
         except JoseError as exc:
+            logger.warning("JWT validation failed: %s", exc)
             raise ValueError("Invalid or expired token") from exc
         return dict(claims)
 

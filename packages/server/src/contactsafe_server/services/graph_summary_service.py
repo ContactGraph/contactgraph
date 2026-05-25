@@ -5,7 +5,6 @@ from collections import Counter
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from contactsafe_core.query_plan import QueryPlan
 from contactsafe_core.schemas import (
@@ -14,7 +13,7 @@ from contactsafe_core.schemas import (
     OrgCount,
     PersonMatch,
 )
-from contactsafe_server.db.models import Person, PersonEdge
+from contactsafe_server.db.models import Person, UserPersonObservation
 from contactsafe_server.services.network_query_service import NetworkQueryService
 
 _DEFAULT_STRONGEST_TIES_LIMIT: int = 5
@@ -34,7 +33,7 @@ class GraphSummaryService:
         top_categories_limit: int = _DEFAULT_TOP_CATEGORIES_LIMIT,
         top_orgs_limit: int = _DEFAULT_TOP_ORGS_LIMIT,
     ) -> DescribeGraphResult:
-        counts = await self._load_edge_counts(user_id)
+        counts = await self._load_obs_counts(user_id)
         queryable_people = await self._load_queryable_people(user_id)
 
         category_counter: Counter[str] = Counter()
@@ -86,26 +85,21 @@ class GraphSummaryService:
             message=message,
         )
 
-    async def _load_edge_counts(self, user_id: uuid.UUID) -> dict[str, int]:
+    async def _load_obs_counts(self, user_id: uuid.UUID) -> dict[str, int]:
         result = await self._db.execute(
             select(
-                func.count(Person.id).label("total"),
-                func.count(Person.id)
-                .filter(PersonEdge.is_human.is_(True))
+                func.count(UserPersonObservation.person_id).label("total"),
+                func.count(UserPersonObservation.person_id)
+                .filter(UserPersonObservation.is_human.is_(True))
                 .label("human"),
-                func.count(Person.id)
-                .filter(PersonEdge.is_broadcast.is_(True))
+                func.count(UserPersonObservation.person_id)
+                .filter(UserPersonObservation.is_broadcast.is_(True))
                 .label("broadcast"),
-                func.count(Person.id)
-                .filter(PersonEdge.is_automated.is_(True))
+                func.count(UserPersonObservation.person_id)
+                .filter(UserPersonObservation.is_automated.is_(True))
                 .label("automated"),
             )
-            .select_from(Person)
-            .join(
-                PersonEdge,
-                (PersonEdge.person_id == Person.id) & (PersonEdge.user_id == user_id),
-            )
-            .where(Person.user_id == user_id)
+            .where(UserPersonObservation.user_id == user_id)
         )
         row = result.one()
         return {
@@ -119,14 +113,13 @@ class GraphSummaryService:
         result = await self._db.execute(
             select(Person)
             .join(
-                PersonEdge,
-                (PersonEdge.person_id == Person.id) & (PersonEdge.user_id == user_id),
+                UserPersonObservation,
+                (UserPersonObservation.person_id == Person.id)
+                & (UserPersonObservation.user_id == user_id),
             )
-            .options(selectinload(Person.edge), selectinload(Person.current_org))
             .where(
-                Person.user_id == user_id,
-                PersonEdge.is_broadcast.is_(False),
-                PersonEdge.is_automated.is_(False),
+                UserPersonObservation.is_broadcast.is_(False),
+                UserPersonObservation.is_automated.is_(False),
             )
         )
         return list(result.scalars().unique().all())
