@@ -51,8 +51,8 @@ _BASE_STYLES: str = f"""
       background: var(--bg);
       color: var(--ink);
       font-family: var(--mono);
-      font-size: 12px;
-      line-height: 20px;
+      font-size: 14px;
+      line-height: 22px;
       -webkit-font-smoothing: antialiased;
     }}
     a {{
@@ -117,8 +117,8 @@ _BASE_STYLES: str = f"""
     }}
     h1 {{
       margin: 0 0 20px;
-      font-size: 12px;
-      line-height: 20px;
+      font-size: 14px;
+      line-height: 22px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.08em;
@@ -142,8 +142,8 @@ _BASE_STYLES: str = f"""
     }}
     .prose h2 {{
       margin: 28px 0 12px;
-      font-size: 12px;
-      line-height: 20px;
+      font-size: 14px;
+      line-height: 22px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.06em;
@@ -171,8 +171,8 @@ _BASE_STYLES: str = f"""
     }}
     .prose .doc-title {{
       margin: 0 0 24px;
-      font-size: 12px;
-      line-height: 20px;
+      font-size: 14px;
+      line-height: 22px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.08em;
