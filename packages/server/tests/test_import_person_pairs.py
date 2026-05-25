@@ -32,6 +32,7 @@ async def test_scan_gmail_builds_contacts_and_cooccurrence_edges() -> None:
         settings=settings,
         encryptor=MagicMock(),
         gmail=gmail,
+        calendar=MagicMock(),
     )
 
     contacts, pairs = await service._scan_gmail(

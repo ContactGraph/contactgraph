@@ -48,6 +48,7 @@ async def test_upsert_person_updates_existing_contact_by_email(
         settings=settings,
         encryptor=TokenEncryptor(settings.token_encryption_key),
         gmail=MagicMock(),
+        calendar=MagicMock(),
     )
     accumulator = ContactAccumulator(
         email="friend@example.com",
@@ -122,6 +123,7 @@ async def test_upsert_person_leaves_unrelated_contacts_untouched(
         settings=settings,
         encryptor=TokenEncryptor(settings.token_encryption_key),
         gmail=MagicMock(),
+        calendar=MagicMock(),
     )
     accumulator = ContactAccumulator(
         email="gmail-friend@example.com",

@@ -36,6 +36,7 @@ async def test_flush_ingest_progress_marks_partial_and_commits() -> None:
         settings=settings,
         encryptor=MagicMock(),
         gmail=MagicMock(),
+        calendar=MagicMock(),
     )
     service._upsert_person = AsyncMock()  # type: ignore[method-assign]
 
@@ -111,6 +112,7 @@ async def test_scan_and_ingest_commits_during_scan() -> None:
         settings=settings,
         encryptor=MagicMock(),
         gmail=gmail,
+        calendar=MagicMock(),
     )
     service._upsert_person = AsyncMock()  # type: ignore[method-assign]
     service._load_user_identity = AsyncMock(  # type: ignore[method-assign]
@@ -136,3 +138,36 @@ async def test_scan_and_ingest_commits_during_scan() -> None:
     assert len(pairs) == 0
     assert upserted == {"alice@example.com", "bob@example.com"}
     assert db.commit.await_count == 2
+
+
+@pytest.mark.anyio
+async def test_scan_calendar_attendees_adds_contacts() -> None:
+    settings = Settings()
+    db = MagicMock()
+    service = ImportService(
+        db=db,
+        settings=settings,
+        encryptor=MagicMock(),
+        gmail=MagicMock(),
+        calendar=MagicMock(),
+    )
+    service._calendar.list_events = AsyncMock(
+        return_value=(
+            [
+                MagicMock(
+                    attendees=[
+                        MagicMock(email="friend@example.com", display_name="Friend", is_self=False),
+                        MagicMock(email="owner@example.com", display_name="Owner", is_self=True),
+                    ]
+                )
+            ],
+            None,
+        )
+    )
+    contacts: dict[str, MagicMock] = {}
+    await service._scan_calendar_attendees(
+        access_token="token",
+        contacts=contacts,  # type: ignore[arg-type]
+        user_email="owner@example.com",
+    )
+    assert "friend@example.com" in contacts

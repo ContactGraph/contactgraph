@@ -5,6 +5,7 @@ import uuid
 
 from contactsafe_server.db.connection import get_session_factory
 from contactsafe_server.oauth.google import GoogleOAuthClient
+from contactsafe_server.services.calendar_client import CalendarClient
 from contactsafe_server.services.gmail_client import GmailClient
 from contactsafe_server.services.import_service import ImportService
 
@@ -61,6 +62,7 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
                 settings=ctx.settings,
                 encryptor=ctx.encryptor,
                 gmail=gmail,
+                calendar=CalendarClient(),
             )
             try:
                 await service.run_sync(source_id)

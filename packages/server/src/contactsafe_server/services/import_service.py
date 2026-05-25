@@ -37,6 +37,7 @@ from contactsafe_server.services.ingest_enrichment_service import IngestEnrichme
 from contactsafe_server.services.interaction_excerpt_service import InteractionExcerptService
 from contactsafe_server.services.org_edge_service import OrgEdgeService
 from contactsafe_server.services.org_service import OrgService
+from contactsafe_server.services.calendar_client import CalendarClient
 from contactsafe_server.services.gmail_client import (
     GmailClient,
     GmailMessageMeta,
@@ -57,11 +58,13 @@ class ImportService:
         settings: Settings,
         encryptor: TokenEncryptor,
         gmail: GmailClient,
+        calendar: CalendarClient,
     ) -> None:
         self._db: AsyncSession = db
         self._settings: Settings = settings
         self._encryptor: TokenEncryptor = encryptor
         self._gmail: GmailClient = gmail
+        self._calendar: CalendarClient = calendar
 
     async def run_sync(self, source_id: uuid.UUID) -> None:
         source: Source | None = await self._db.get(Source, source_id)
@@ -102,6 +105,11 @@ class ImportService:
                 user_email=user.email,
                 user_id=user_id,
                 source=source,
+            )
+            await self._scan_calendar_attendees(
+                access_token=access_token,
+                contacts=contacts,
+                user_email=user.email,
             )
 
             sorted_contacts: list[ContactAccumulator] = sorted(
@@ -261,6 +269,62 @@ class ImportService:
         )
         return contacts, pair_stats, upserted_emails
 
+
+    async def _scan_calendar_attendees(
+        self,
+        *,
+        access_token: str,
+        contacts: dict[str, ContactAccumulator],
+        user_email: str,
+    ) -> None:
+        page_token: str | None = None
+        events_scanned: int = 0
+        max_events: int = max(50, self._settings.import_max_messages // 2)
+
+        while events_scanned < max_events:
+            batch_size: int = min(100, max_events - events_scanned)
+            events, page_token = await self._calendar.list_events(
+                access_token,
+                max_results=batch_size,
+                page_token=page_token,
+            )
+            if not events:
+                break
+
+            for event in events:
+                events_scanned += 1
+                for attendee in event.attendees:
+                    if attendee.is_self or attendee.email == user_email:
+                        continue
+                    normalized_email: str = attendee.email.strip().lower()
+                    if not normalized_email:
+                        continue
+                    normalized_name: str | None = sanitize_display_name(
+                        attendee.display_name
+                    )
+                    accumulator: ContactAccumulator = contacts.setdefault(
+                        normalized_email,
+                        ContactAccumulator(
+                            email=normalized_email,
+                            names=set(),
+                            message_count=0,
+                            last_seen_at=None,
+                            org_names=set(),
+                            variants=set(),
+                            outbound_count=0,
+                            inbound_count=0,
+                            pitch_outreach_count=0,
+                        ),
+                    )
+                    if normalized_name:
+                        accumulator.names.add(normalized_name)
+                    accumulator.org_names.add(org_name_from_email(normalized_email))
+                    accumulator.variants.update(email_lookup_variants(normalized_email))
+
+            if page_token is None:
+                break
+
+        logger.info("Calendar scan complete: events=%s contacts=%s", events_scanned, len(contacts))
     async def _flush_ingest_progress(
         self,
         *,

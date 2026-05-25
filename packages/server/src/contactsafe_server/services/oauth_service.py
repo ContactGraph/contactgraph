@@ -78,6 +78,7 @@ class OAuthService:
 
     async def complete_oauth(self, session: ConnectSession, code: str) -> tuple[User, Source]:
         tokens: GoogleTokens = await self._google.exchange_code(code)
+        self._validate_required_scopes(tokens.scopes)
         userinfo: GoogleUserInfo = await self._google.fetch_userinfo(tokens.access_token)
         email: str = str(userinfo.get("email", "")).strip().lower()
         if not email:
@@ -200,5 +201,15 @@ class OAuthService:
         )
         return result.scalar_one_or_none()
 
+
+    def _validate_required_scopes(self, granted_scopes: list[str]) -> None:
+        granted: set[str] = set(granted_scopes)
+        required: set[str] = {
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/calendar.readonly",
+        }
+        missing: list[str] = sorted(required - granted)
+        if missing:
+            raise ValueError(f"Missing required Google permissions: {', '.join(missing)}")
     async def _get_session(self, session_id: uuid.UUID) -> ConnectSession | None:
         return await self._db.get(ConnectSession, session_id)

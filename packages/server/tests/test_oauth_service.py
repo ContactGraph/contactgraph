@@ -53,3 +53,19 @@ async def test_get_source_status_unknown_session(db_session: AsyncSession) -> No
     sources = SourceService(db_session)
     with pytest.raises(ValueError, match="Unknown connect_session_id"):
         await sources.get_source_status_for_connect_session(uuid.uuid4())
+
+
+@pytest.mark.asyncio
+async def test_complete_oauth_requires_calendar_and_gmail_scopes(
+    db_session: AsyncSession,
+) -> None:
+    settings = get_settings()
+    service = OAuthService(
+        db=db_session,
+        settings=settings,
+        encryptor=TokenEncryptor(settings.token_encryption_key),
+        google=GoogleOAuthClient(settings),
+    )
+
+    with pytest.raises(ValueError, match="Missing required Google permissions"):
+        service._validate_required_scopes(["openid", "email"])  # pyright: ignore[reportPrivateUsage]
