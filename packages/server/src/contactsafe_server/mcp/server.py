@@ -53,6 +53,8 @@ def create_mcp_server(settings: Settings) -> FastMCP:
         instructions=(
             "ContactGraph builds a private contact graph from connected data sources. "
             "Authenticate with OAuth 2.1 Bearer tokens (see /.well-known/oauth-protected-resource). "
+            "Available source types: google_mail (Gmail metadata), google_contacts (Google Contacts / People API). "
+            "Both share one Google OAuth consent — connecting either auto-creates both sources. "
             "Use connect_source to start OAuth, list_sources to see connections, "
             "sync_source to (re)start ingestion, get_source_status for progress, "
             "describe_graph for a high-level graph summary, "
@@ -71,10 +73,11 @@ def create_mcp_server(settings: Settings) -> FastMCP:
         user_token: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> ConnectSourceResult:
-        """Connect a data source (google_mail supported today).
+        """Connect a data source. Available source_type values: "google_mail", "google_contacts".
 
-        Returns oauth_url when browser authorization is needed, or access_token when
-        the account is already connected.
+        Both share one Google OAuth consent flow. Connecting either auto-creates both
+        sources. Returns oauth_url when browser authorization is needed, or
+        access_token when the account is already connected.
         """
         lifespan: McpLifespanState = _require_lifespan(ctx)
         try:
