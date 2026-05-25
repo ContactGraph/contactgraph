@@ -1,4 +1,6 @@
 .env
+.env.*
+!.env.example
 .venv/
 __pycache__/
 *.py[cod]
@@ -9,3 +11,8 @@ __pycache__/
 dist/
 *.egg-info/
 .DS_Store
+*.pem
+*.key
+*.p12
+credentials.json
+service-account*.json
