@@ -34,9 +34,18 @@ async def test_scan_gmail_builds_contacts_and_cooccurrence_edges() -> None:
         gmail=gmail,
     )
 
-    contacts, pairs = await service._scan_gmail(
+    contacts, pairs, _ = await service._scan_and_ingest_gmail(
         access_token="token",
         user_email="owner@example.com",
+        user_id=uuid.uuid4(),
+        source=MagicMock(
+            id=uuid.uuid4(),
+            sync_state="syncing",
+            contacts_found=0,
+            contacts_resolved=0,
+            contacts_pending=0,
+        ),
+        resolver=MagicMock(),
     )
 
     assert "alice@example.com" in contacts

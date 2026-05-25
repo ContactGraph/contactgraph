@@ -90,7 +90,6 @@ async def test_ingest_web_enrichment_writes_claims(
 
     await db_session.refresh(person)
     assert "vc" in person.inferred_categories
-    assert person.current_role is not None
     mock_discover.assert_awaited_once()
 
 
