@@ -7,6 +7,7 @@ with the append-only claim tables.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 
 from sqlalchemy import and_, select, update
@@ -18,6 +19,7 @@ from contactsafe_server.db.models import (
     PersonAttributeClaim,
     UserPersonObservation,
 )
+from contactsafe_server.services.category_inference import infer_categories_from_contact
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -109,6 +111,36 @@ class PersonProfileRecompute:
             elif attr.kind == "phone":
                 if attr.value not in phone_numbers:
                     phone_numbers.append(attr.value)
+
+        # Re-infer categories from the now-resolved person data so that
+        # contacts whose org/role was only populated after initial heuristic
+        # enrichment still get properly categorized.
+        person_row: Person | None = await self._session.get(Person, person_id)
+        if person_row is not None:
+            primary_email: str = person_row.primary_email or ""
+            display_name: str = person_row.canonical_name or ""
+            inferred: list[str] = infer_categories_from_contact(
+                email=primary_email,
+                display_name=display_name,
+                org_name=current_org_name,
+            )
+            role_blob: str = f"{display_name} {current_role or ''} {current_org_name or ''}".lower()
+            if re.search(r"\b(vc|venture capital|general partner|managing partner)\b", role_blob):
+                if "vc" not in inferred:
+                    inferred.append("vc")
+            if "investor" in role_blob and "newsletter" not in role_blob:
+                if "vc" not in inferred:
+                    inferred.append("vc")
+            if re.search(r"\bfounder\b|\bco-founder\b", role_blob):
+                if "founder" not in inferred:
+                    inferred.append("founder")
+            if re.search(r"\bengineer\b|\bdeveloper\b|\bsoftware\b", role_blob):
+                if "engineer" not in inferred:
+                    inferred.append("engineer")
+
+            for cat in inferred:
+                if cat not in categories:
+                    categories.append(cat)
 
         await self._session.execute(
             update(Person)

@@ -1,4 +1,5 @@
 import logging
+import re
 import uuid
 
 from sqlalchemy import Text, cast, func, literal, or_, select
@@ -32,6 +33,16 @@ _CATEGORY_ALIASES: dict[str, str] = {
 }
 
 
+def _org_root_domain_slug(org_query: str) -> str:
+    """Extract a normalized root slug for multi-TLD domain matching.
+
+    "Basebase" → "basebase", "Sticker VC" → "stickervc"
+    """
+    raw: str = org_query.strip().lower()
+    slug: str = re.sub(r"[^a-z0-9]+", "", raw)
+    return slug
+
+
 def _normalize_category_tokens(categories: list[str]) -> list[str]:
     normalized: list[str] = []
     seen: set[str] = set()
@@ -52,6 +63,10 @@ def _org_match_conditions(org_query: str, user_id: uuid.UUID) -> ColumnElement[b
     terms: list[str] = expand_org_search_terms(org_query)
     if not terms:
         terms = [org_query.lower()]
+
+    # Also derive a root-domain token for multi-TLD matching:
+    # "Basebase" → matches basebase.com, basebase.ai, basebase.io, etc.
+    root_slug: str = _org_root_domain_slug(org_query)
 
     term_conditions: list[ColumnElement[bool]] = []
 
@@ -100,6 +115,26 @@ def _org_match_conditions(org_query: str, user_id: uuid.UUID) -> ColumnElement[b
             ]
         )
 
+    # Multi-TLD match: email domain starts with the root slug followed by '.'
+    # e.g. root_slug="basebase" matches @basebase.com, @basebase.ai, @basebase.io
+    if root_slug and len(root_slug) >= 3:
+        domain_pattern: str = f"%@{root_slug}.%"
+        term_conditions.append(
+            func.lower(Person.primary_email).like(domain_pattern)
+        )
+        term_conditions.append(
+            func.exists(
+                select(1)
+                .select_from(PersonAlias)
+                .where(
+                    PersonAlias.person_id == Person.id,
+                    PersonAlias.kind == "email",
+                    func.lower(PersonAlias.value).like(domain_pattern),
+                )
+                .correlate(Person)
+            )
+        )
+
     return or_(*term_conditions)
 
 
@@ -127,7 +162,11 @@ class NetworkQueryService:
         *,
         user_id: uuid.UUID,
         plan: QueryPlan,
+        allow_unfiltered: bool = False,
     ) -> list[PersonMatch]:
+        if not allow_unfiltered and not _plan_has_substantive_filters(plan):
+            return []
+
         if plan.intent == QueryIntent.SEMANTIC_SEARCH and plan.semantic_query:
             semantic_matches: list[PersonMatch] | None = await self._semantic_search(
                 user_id=user_id,
@@ -302,8 +341,15 @@ class NetworkQueryService:
                 (UserPersonObservation.person_id == Person.id)
                 & (UserPersonObservation.user_id == user_id),
             )
-            .order_by(subq.c.min_distance)
         )
+
+        if plan.exclude_broadcast:
+            stmt = stmt.where(UserPersonObservation.is_broadcast.is_(False))
+        if plan.exclude_automated:
+            stmt = stmt.where(UserPersonObservation.is_automated.is_(False))
+
+        stmt = stmt.order_by(subq.c.min_distance)
+
         result = await self._db.execute(stmt)
         rows = list(result.unique().all())
         matches: list[PersonMatch] = []
@@ -415,4 +461,17 @@ def _is_cooccurrence_relationship_query(relationship_types: list[str]) -> bool:
             "introduced",
             "connected",
         }
+    )
+
+
+def _plan_has_substantive_filters(plan: QueryPlan) -> bool:
+    """Return True if the plan has at least one filter that narrows results."""
+    return bool(
+        plan.name_tokens
+        or plan.org_names
+        or plan.categories_any
+        or plan.role_keywords
+        or plan.relationship_types_any
+        or plan.semantic_query
+        or plan.require_genuine_contact
     )
