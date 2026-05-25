@@ -61,6 +61,7 @@ async def test_recompute_employment(
         org_id=org.id,
         role_title="Partner",
         is_current=True,
+        contributor_user_id=user.id,
         contributor_source_kind="exa",
         confidence=0.9,
     ))
@@ -89,11 +90,13 @@ async def test_recompute_highest_confidence_wins(
     ))
     db_session.add(EmploymentClaim(
         person_id=person.id, org_id=org1.id, role_title="Junior",
-        is_current=True, contributor_source_kind="heuristic", confidence=0.4,
+        is_current=True, contributor_user_id=user.id,
+        contributor_source_kind="heuristic", confidence=0.4,
     ))
     db_session.add(EmploymentClaim(
         person_id=person.id, org_id=org2.id, role_title="CTO",
-        is_current=True, contributor_source_kind="exa", confidence=0.9,
+        is_current=True, contributor_user_id=user.id,
+        contributor_source_kind="exa", confidence=0.9,
     ))
     await db_session.flush()
 
@@ -114,19 +117,19 @@ async def test_recompute_categories_and_social(
     ))
     db_session.add(PersonAttributeClaim(
         person_id=person.id, kind="category", value="vc",
-        contributor_source_kind="heuristic",
+        contributor_user_id=user.id, contributor_source_kind="heuristic",
     ))
     db_session.add(PersonAttributeClaim(
         person_id=person.id, kind="category", value="founder",
-        contributor_source_kind="llm",
+        contributor_user_id=user.id, contributor_source_kind="llm",
     ))
     db_session.add(PersonAttributeClaim(
         person_id=person.id, kind="social_profile.github", value="https://github.com/test",
-        contributor_source_kind="exa",
+        contributor_user_id=user.id, contributor_source_kind="exa",
     ))
     db_session.add(PersonAttributeClaim(
         person_id=person.id, kind="bio_summary", value="A short bio.",
-        contributor_source_kind="exa",
+        contributor_user_id=user.id, contributor_source_kind="exa",
     ))
     await db_session.flush()
 

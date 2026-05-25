@@ -13,6 +13,7 @@ from contactsafe_server.db.models import (
     Person,
     PersonAttributeClaim,
     RelationshipClaim,
+    User,
 )
 from contactsafe_server.services.claim_writer import (
     record_employment,
@@ -46,8 +47,11 @@ async def org(db_session: AsyncSession) -> Org:
 
 
 @pytest.fixture
-async def user_id() -> uuid.UUID:
-    return uuid.uuid4()
+async def user_id(db_session: AsyncSession) -> uuid.UUID:
+    user = User(email=f"claim-writer-{uuid.uuid4()}@example.com")
+    db_session.add(user)
+    await db_session.flush()
+    return user.id
 
 
 async def test_employment_idempotent(
