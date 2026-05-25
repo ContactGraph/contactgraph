@@ -206,11 +206,29 @@ def create_mcp_server(settings: Settings) -> FastMCP:
                 plan=plan,
             )
             if not matches:
+                has_filters: bool = bool(
+                    plan.name_tokens
+                    or plan.org_names
+                    or plan.categories_any
+                    or plan.role_keywords
+                    or plan.relationship_types_any
+                    or plan.semantic_query
+                    or plan.require_genuine_contact
+                )
+                message: str = (
+                    "No matching contacts found in your graph for that question."
+                    if has_filters
+                    else (
+                        "Could not translate that question into specific filters. "
+                        "Try asking about a person by name, a company, a role, or a category "
+                        "(e.g. 'show me VCs', 'who works at Stripe', 'find engineers')."
+                    )
+                )
                 return QueryNetworkResult(
                     question=question,
                     matches=[],
                     applied_plan=plan,
-                    message="No matching contacts found in your graph for that question.",
+                    message=message,
                 )
             return QueryNetworkResult(
                 question=question,

@@ -13,7 +13,12 @@ from contactsafe_core.schemas import (
     OrgCount,
     PersonMatch,
 )
-from contactsafe_server.db.models import Person, UserPersonObservation
+from contactsafe_server.db.models import (
+    EmploymentClaim,
+    Org,
+    Person,
+    UserPersonObservation,
+)
 from contactsafe_server.services.network_query_service import NetworkQueryService
 
 _DEFAULT_STRONGEST_TIES_LIMIT: int = 5
@@ -47,6 +52,15 @@ class GraphSummaryService:
             if org_name and org_name.strip():
                 org_counter[org_name.strip()] += 1
 
+        # Supplement org counts from employment claims for contacts without
+        # current_org_name populated on the Person row.
+        emp_org_counts: dict[str, int] = await self._load_org_counts_from_employment(user_id)
+        for org_name_emp, emp_count in emp_org_counts.items():
+            if org_name_emp not in org_counter:
+                org_counter[org_name_emp] = emp_count
+            else:
+                org_counter[org_name_emp] = max(org_counter[org_name_emp], emp_count)
+
         top_categories: list[CategoryCount] = [
             CategoryCount(category=category, count=count)
             for category, count in category_counter.most_common(top_categories_limit)
@@ -63,6 +77,7 @@ class GraphSummaryService:
                 exclude_automated=True,
                 limit=max(1, strongest_ties_limit),
             ),
+            allow_unfiltered=True,
         )
 
         queryable_contacts: int = len(queryable_people)
@@ -123,6 +138,27 @@ class GraphSummaryService:
             )
         )
         return list(result.scalars().unique().all())
+
+    async def _load_org_counts_from_employment(self, user_id: uuid.UUID) -> dict[str, int]:
+        """Count persons per org using employment claims, for queryable contacts."""
+        result = await self._db.execute(
+            select(Org.canonical_name, func.count(EmploymentClaim.person_id.distinct()))
+            .select_from(EmploymentClaim)
+            .join(Org, Org.id == EmploymentClaim.org_id)
+            .join(
+                UserPersonObservation,
+                (UserPersonObservation.person_id == EmploymentClaim.person_id)
+                & (UserPersonObservation.user_id == user_id),
+            )
+            .where(
+                EmploymentClaim.is_current.is_(True),
+                UserPersonObservation.is_broadcast.is_(False),
+                UserPersonObservation.is_automated.is_(False),
+            )
+            .group_by(Org.canonical_name)
+            .having(func.count(EmploymentClaim.person_id.distinct()) >= 1)
+        )
+        return {row[0]: row[1] for row in result.all() if row[0]}
 
     def _build_message(
         self,

@@ -197,6 +197,7 @@ async def test_excludes_automated_by_default(db_session: AsyncSession) -> None:
     matches = await NetworkQueryService(db_session).execute(
         user_id=user.id,
         plan=QueryPlan(limit=10),
+        allow_unfiltered=True,
     )
     assert len(matches) == 1
     assert matches[0].name == "Real Person"
