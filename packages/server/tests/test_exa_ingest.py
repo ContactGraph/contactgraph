@@ -143,7 +143,7 @@ async def test_signature_enrichment_from_inbound_snippets(
     person = Person(
         user_id=user.id,
         canonical_name="Sam Rivera",
-        email_addresses=["sam@example.com"],
+        email_addresses=["sam@gmail.com"],
         last_seen_in_email=datetime.now(tz=UTC),
     )
     db_session.add(person)
@@ -160,7 +160,7 @@ async def test_signature_enrichment_from_inbound_snippets(
     await db_session.flush()
 
     acc = ContactAccumulator(
-        email="sam@example.com",
+        email="sam@gmail.com",
         display_name="Sam Rivera",
         inbound_snippets=[
             "Thanks for the intro.\nSam Rivera\nGeneral Partner at Horizon Capital\n415-555-0100",
@@ -168,7 +168,7 @@ async def test_signature_enrichment_from_inbound_snippets(
     )
     await IngestEnrichmentService(db_session, settings).enrich_after_import(
         user_id=user.id,
-        contact_by_email={"sam@example.com": acc},
+        contact_by_email={"sam@gmail.com": acc},
     )
 
     await db_session.refresh(person)
