@@ -51,8 +51,8 @@ _BASE_STYLES: str = f"""
       background: var(--bg);
       color: var(--ink);
       font-family: var(--mono);
-      font-size: 12px;
-      line-height: 20px;
+      font-size: 14px;
+      line-height: 22px;
       -webkit-font-smoothing: antialiased;
     }}
     a {{
@@ -117,8 +117,8 @@ _BASE_STYLES: str = f"""
     }}
     h1 {{
       margin: 0 0 20px;
-      font-size: 12px;
-      line-height: 20px;
+      font-size: 14px;
+      line-height: 22px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.08em;
@@ -142,8 +142,8 @@ _BASE_STYLES: str = f"""
     }}
     .prose h2 {{
       margin: 28px 0 12px;
-      font-size: 12px;
-      line-height: 20px;
+      font-size: 14px;
+      line-height: 22px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.06em;
@@ -171,8 +171,8 @@ _BASE_STYLES: str = f"""
     }}
     .prose .doc-title {{
       margin: 0 0 24px;
-      font-size: 12px;
-      line-height: 20px;
+      font-size: 14px;
+      line-height: 22px;
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.08em;
@@ -414,43 +414,59 @@ def render_privacy_page(*, mcp_path: str, base_url: str) -> str:
     <main class="content content-wide">
       <article class="prose">
         <h1 class="doc-title">PRIVACY POLICY</h1>
-        <p><em>Effective: {_SITE_YEAR}-01-01</em></p>
+        <p><em>Effective: May 25, 2026</em></p>
 
         <h2>What we collect</h2>
         <p>
-          When you sign in with Google and connect a data source, ContactGraph
-          accesses <strong>email metadata</strong> (headers such as sender,
-          recipient, subject, and date) from the scopes you authorize.
-          We do <strong>not</strong> read or store email body content or
-          attachments.
+          When you connect a data source, ContactGraph accesses
+          the data you authorize. Sources may include:
+        </p>
+        <ul>
+          <li><strong>Email</strong> (e.g. Gmail) — message metadata
+          such as sender, recipient, subject, and date.</li>
+          <li><strong>Contacts</strong> (e.g. Google Contacts,
+          Apple Contacts / VCF files) — names, emails, phone
+          numbers, organizations, and other contact fields.</li>
+          <li><strong>Calendar</strong> (e.g. Google Calendar) —
+          event metadata including attendees, titles, and times.</li>
+          <li><strong>File uploads</strong> — contact data you
+          export and upload directly (CSV, VCF, etc.).</li>
+        </ul>
+        <p>
+          For email sources we access <strong>headers only</strong>;
+          we do not read or store email body content or attachments.
+          For all sources we collect only the metadata and contact
+          fields needed to build your graph.
         </p>
 
         <h2>How we use it</h2>
         <p>
-          Metadata is processed to build your private contact graph — people,
-          organizations, relationship strength, and employment signals.
-          This graph is queryable only by you (or an AI agent acting on your
-          behalf via MCP).
+          Data from connected sources is processed to build your
+          private contact graph — people, organizations, relationship
+          strength, and employment signals. This graph is queryable
+          only by you (or an AI agent acting on your behalf via MCP).
         </p>
 
         <h2>Storage &amp; retention</h2>
         <p>
-          Data is stored in a PostgreSQL database. OAuth tokens are encrypted
-          at rest. You may delete your account and all associated data at any
-          time by contacting <strong>support@basebase.com</strong>.
+          Data is stored in a PostgreSQL database. OAuth tokens are
+          encrypted at rest. You may delete your account and all
+          associated data at any time by contacting
+          <strong>support@basebase.com</strong>.
         </p>
 
         <h2>Third-party services</h2>
         <p>
-          ContactGraph may call external APIs (e.g. OpenAI, Exa) to enrich
-          public profile information. Only non-sensitive identifiers (names,
-          public URLs) are sent — never email content or OAuth tokens.
+          ContactGraph may call external APIs (e.g. OpenAI, Exa) to
+          enrich public profile information. Only non-sensitive
+          identifiers (names, public URLs) are sent — never email
+          content, OAuth tokens, or uploaded files.
         </p>
 
         <h2>Sharing</h2>
         <p>
-          We do not sell, rent, or share your personal data with third parties
-          except as required by law.
+          We do not sell, rent, or share your personal data with
+          third parties except as required by law.
         </p>
 
         <h2>Contact</h2>
@@ -474,7 +490,7 @@ def render_terms_page(*, mcp_path: str, base_url: str) -> str:
     <main class="content content-wide">
       <article class="prose">
         <h1 class="doc-title">TERMS OF SERVICE</h1>
-        <p><em>Effective: {_SITE_YEAR}-01-01</em></p>
+        <p><em>Effective: May 25, 2026</em></p>
 
         <h2>Acceptance</h2>
         <p>
@@ -484,18 +500,21 @@ def render_terms_page(*, mcp_path: str, base_url: str) -> str:
 
         <h2>Description of service</h2>
         <p>
-          ContactGraph is an agent-native personal contact graph.  It connects
-          to data sources you authorize, builds a private relationship graph,
-          and exposes MCP tools for querying your network.
+          ContactGraph is an agent-native personal contact graph.
+          It connects to data sources you authorize (email,
+          contacts, calendar, file uploads, and others as added),
+          builds a private relationship graph, and exposes MCP
+          tools for querying your network.
         </p>
 
         <h2>Your responsibilities</h2>
         <ul>
-          <li>You must have the right to grant access to any data source you connect.</li>
-          <li>You are responsible for the security of your account
-          credentials and OAuth tokens.</li>
-          <li>You agree not to use the Service for unlawful purposes
-          or to violate others' privacy.</li>
+          <li>You must have the right to grant access to, or
+          upload, any data source you connect.</li>
+          <li>You are responsible for the security of your
+          account credentials and OAuth tokens.</li>
+          <li>You agree not to use the Service for unlawful
+          purposes or to violate others' privacy.</li>
         </ul>
 
         <h2>Intellectual property</h2>
