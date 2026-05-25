@@ -7,10 +7,10 @@ from contactsafe_server.services.org_enrichment import (
 
 
 def test_domain_derived_org_blocks_enrichment_overwrite() -> None:
-    assert has_domain_derived_org("santo@sparkcapital.com") is True
+    assert has_domain_derived_org("fatima@sparkcapital.com") is True
     assert (
         should_apply_enrichment_org(
-            primary_email="santo@sparkcapital.com",
+            primary_email="fatima@sparkcapital.com",
             proposed_org="Bloomberg Markets",
         )
         is False
@@ -34,5 +34,5 @@ def test_rejects_consumer_provider_org_labels() -> None:
 
 
 def test_org_names_equivalent_strips_suffixes() -> None:
-    assert org_names_equivalent("Basebase", "Basebase.com") is True
-    assert org_names_equivalent("Basebase AI", "Basebase") is True
+    assert org_names_equivalent("Northlight", "Northlight.io") is True
+    assert org_names_equivalent("Northlight AI", "Northlight") is True

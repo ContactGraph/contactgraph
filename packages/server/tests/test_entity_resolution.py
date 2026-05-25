@@ -52,14 +52,14 @@ async def test_resolve_person_returns_existing_by_email(db_session: AsyncSession
 async def test_resolve_person_merges_by_linkedin(db_session: AsyncSession) -> None:
     resolver = EntityResolver(db_session)
     p1 = await resolver.resolve_person(
-        emails=["dcohen@gmail.com"],
-        display_name="Daniel Cohen",
-        linkedin_url="https://linkedin.com/in/dcohen",
+        emails=["mchen@gmail.com"],
+        display_name="Marcus Chen",
+        linkedin_url="https://linkedin.com/in/mchen",
     )
     p2 = await resolver.resolve_person(
-        emails=["daniel@sticker.vc"],
-        display_name="Daniel Cohen",
-        linkedin_url="https://linkedin.com/in/dcohen",
+        emails=["marcus@horizon.vc"],
+        display_name="Marcus Chen",
+        linkedin_url="https://linkedin.com/in/mchen",
     )
     assert p1.id == p2.id
 
@@ -67,8 +67,8 @@ async def test_resolve_person_merges_by_linkedin(db_session: AsyncSession) -> No
         select(PersonAlias).where(PersonAlias.person_id == p1.id, PersonAlias.kind == "email")
     )
     email_values: set[str] = {a.value for a in result.scalars().all()}
-    assert "dcohen@gmail.com" in email_values
-    assert "daniel@sticker.vc" in email_values
+    assert "mchen@gmail.com" in email_values
+    assert "marcus@horizon.vc" in email_values
 
 
 async def test_resolve_person_merges_by_github(db_session: AsyncSession) -> None:
@@ -103,10 +103,10 @@ async def test_add_alias_raises_merge_conflict(db_session: AsyncSession) -> None
 
 async def test_resolve_org_creates_and_reuses(db_session: AsyncSession) -> None:
     resolver = EntityResolver(db_session)
-    org1 = await resolver.resolve_org(domain="sticker.vc", name="Sticker Ventures")
-    org2 = await resolver.resolve_org(domain="sticker.vc")
+    org1 = await resolver.resolve_org(domain="horizon.vc", name="Horizon Ventures")
+    org2 = await resolver.resolve_org(domain="horizon.vc")
     assert org1.id == org2.id
-    assert org1.canonical_name == "Sticker Ventures"
+    assert org1.canonical_name == "Horizon Ventures"
 
 
 async def test_resolve_org_by_name_only(db_session: AsyncSession) -> None:

@@ -34,31 +34,31 @@ def test_name_query_from_question() -> None:
 def test_name_tokens_from_proper_nouns() -> None:
     from contactsafe_server.services.email_parse import name_tokens_from_proper_nouns
 
-    assert name_tokens_from_proper_nouns("Cynthia Johanson") == ["cynthia", "johanson"]
+    assert name_tokens_from_proper_nouns("Tomoko Sato") == ["tomoko", "sato"]
     assert name_tokens_from_proper_nouns("What VCs do I know?") == []
 
 
 def test_email_lookup_variants_merges_apple_domains() -> None:
     from contactsafe_server.services.email_parse import email_lookup_variants
 
-    variants = email_lookup_variants("pmnorwood@mac.com")
-    assert "pmnorwood@mac.com" in variants
-    assert "pmnorwood@icloud.com" in variants
+    variants = email_lookup_variants("kmensah@mac.com")
+    assert "kmensah@mac.com" in variants
+    assert "kmensah@icloud.com" in variants
 
 
 def test_is_likely_self_contact_matches_owned_addresses() -> None:
     from contactsafe_server.services.email_parse import is_likely_self_contact
 
     assert is_likely_self_contact(
-        "teg@basebase.com",
-        user_emails={"teg@gmail.com"},
-        user_local_parts={"teg"},
+        "lherrera@northlight.io",
+        user_emails={"lherrera@gmail.com"},
+        user_local_parts={"lherrera"},
     )
 
 
 def test_person_matches_name() -> None:
-    assert person_matches_name("Chris Pappas", ["teampappas@e.chrispappas.org"], "Chris")
-    assert not person_matches_name("Sam Harris", ["team@news.samharris.org"], "Chris")
+    assert person_matches_name("Amara Okafor", ["teamokafor@e.amaraokafor.org"], "Amara")
+    assert not person_matches_name("Raj Patel", ["team@news.rajpatel.org"], "Amara")
 
 
 def test_parse_connect_session_id_json_wrapper() -> None:
@@ -76,7 +76,7 @@ def test_is_valid_person_name_rejects_header_artifacts() -> None:
     assert is_valid_person_name("Customer_Service") is False
     assert is_valid_person_name("Subscribed") is False
     assert is_valid_person_name("Ci activity") is False
-    assert is_valid_person_name("Reed Grenager") is True
+    assert is_valid_person_name("Luis Herrera") is True
 
 
 def test_sanitize_display_name_falls_back_to_email() -> None:

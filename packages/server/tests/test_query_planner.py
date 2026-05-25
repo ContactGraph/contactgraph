@@ -27,5 +27,5 @@ def test_heuristic_semantic_intent() -> None:
 
 
 def test_heuristic_proper_noun_name_tokens() -> None:
-    plan = plan_from_heuristics("Cynthia Johanson")
-    assert plan.name_tokens == ["cynthia", "johanson"]
+    plan = plan_from_heuristics("Tomoko Sato")
+    assert plan.name_tokens == ["tomoko", "sato"]
