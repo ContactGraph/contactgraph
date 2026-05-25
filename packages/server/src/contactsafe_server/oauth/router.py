@@ -230,10 +230,11 @@ async def oauth_callback(
         user, source = await service.complete_oauth(connect_session, code)
     except Exception as exc:
         logger.exception("Google OAuth callback failed")
+        await db.rollback()
         try:
             await service.mark_session_failed(connect_session)
         except Exception:
-            logger.exception("Failed to mark session as failed (DB may be dirty)")
+            logger.exception("Failed to mark session as failed")
         if connect_session.oauth_redirect_uri:
             oauth_server: OAuthServerService = _build_oauth_server_service(db, settings)
             error_url: str = oauth_server.build_client_redirect_url(
