@@ -330,6 +330,8 @@ def _footer_html() -> str:
       <div class="links">
         <a href="/skill.md">Skill</a> |
         <a href="/manifesto">Manifesto</a> |
+        <a href="/privacy">Privacy</a> |
+        <a href="/terms">Terms</a> |
         <a href="{_GITHUB_REPO_URL}">GitHub</a>
       </div>
     </footer>"""
@@ -402,6 +404,139 @@ def render_landing_page(*, mcp_path: str, base_url: str) -> str:
         title=f"{_SITE_NAME} — {_TAGLINE}",
         description=_LANDING_DESCRIPTION,
         path="/",
+    )
+    return _page_shell(meta=meta, base_url=base_url, header=header, content=content)
+
+
+def render_privacy_page(*, mcp_path: str, base_url: str) -> str:
+    header: str = _header_html(mcp_path=mcp_path)
+    content: str = f"""
+    <main class="content content-wide">
+      <article class="prose">
+        <h1 class="doc-title">PRIVACY POLICY</h1>
+        <p><em>Effective: {_SITE_YEAR}-01-01</em></p>
+
+        <h2>What we collect</h2>
+        <p>
+          When you sign in with Google and connect a data source, ContactGraph
+          accesses <strong>email metadata</strong> (headers such as sender,
+          recipient, subject, and date) from the scopes you authorize.
+          We do <strong>not</strong> read or store email body content or
+          attachments.
+        </p>
+
+        <h2>How we use it</h2>
+        <p>
+          Metadata is processed to build your private contact graph — people,
+          organizations, relationship strength, and employment signals.
+          This graph is queryable only by you (or an AI agent acting on your
+          behalf via MCP).
+        </p>
+
+        <h2>Storage &amp; retention</h2>
+        <p>
+          Data is stored in a PostgreSQL database. OAuth tokens are encrypted
+          at rest. You may delete your account and all associated data at any
+          time by contacting <strong>support@basebase.com</strong>.
+        </p>
+
+        <h2>Third-party services</h2>
+        <p>
+          ContactGraph may call external APIs (e.g. OpenAI, Exa) to enrich
+          public profile information. Only non-sensitive identifiers (names,
+          public URLs) are sent — never email content or OAuth tokens.
+        </p>
+
+        <h2>Sharing</h2>
+        <p>
+          We do not sell, rent, or share your personal data with third parties
+          except as required by law.
+        </p>
+
+        <h2>Contact</h2>
+        <p>Questions? Email <strong>support@basebase.com</strong>.</p>
+      </article>
+    </main>"""
+    meta = PageMeta(
+        title=f"Privacy Policy — {_SITE_NAME}",
+        description=(
+            "ContactGraph privacy policy — what data we collect, "
+            "how we use it, and your rights."
+        ),
+        path="/privacy",
+    )
+    return _page_shell(meta=meta, base_url=base_url, header=header, content=content)
+
+
+def render_terms_page(*, mcp_path: str, base_url: str) -> str:
+    header: str = _header_html(mcp_path=mcp_path)
+    content: str = f"""
+    <main class="content content-wide">
+      <article class="prose">
+        <h1 class="doc-title">TERMS OF SERVICE</h1>
+        <p><em>Effective: {_SITE_YEAR}-01-01</em></p>
+
+        <h2>Acceptance</h2>
+        <p>
+          By using ContactGraph ("the Service"), you agree to these terms.
+          If you do not agree, do not use the Service.
+        </p>
+
+        <h2>Description of service</h2>
+        <p>
+          ContactGraph is an agent-native personal contact graph.  It connects
+          to data sources you authorize, builds a private relationship graph,
+          and exposes MCP tools for querying your network.
+        </p>
+
+        <h2>Your responsibilities</h2>
+        <ul>
+          <li>You must have the right to grant access to any data source you connect.</li>
+          <li>You are responsible for the security of your account
+          credentials and OAuth tokens.</li>
+          <li>You agree not to use the Service for unlawful purposes
+          or to violate others' privacy.</li>
+        </ul>
+
+        <h2>Intellectual property</h2>
+        <p>
+          The ContactGraph source code is licensed under the
+          <a href="https://github.com/ContactGraph/contactgraph/blob/main/LICENSE"
+          >Apache License 2.0</a>.
+          Your data remains yours.
+        </p>
+
+        <h2>Disclaimers</h2>
+        <p>
+          The Service is provided <strong>"as is"</strong> without warranties
+          of any kind. We do not guarantee accuracy of inferred relationships,
+          employment data, or enrichment results.
+        </p>
+
+        <h2>Limitation of liability</h2>
+        <p>
+          To the fullest extent permitted by law, ContactGraph and its
+          contributors shall not be liable for any indirect, incidental,
+          or consequential damages arising from your use of the Service.
+        </p>
+
+        <h2>Changes</h2>
+        <p>
+          We may update these terms. Continued use after changes constitutes
+          acceptance. Material changes will be noted on this page.
+        </p>
+
+        <h2>Contact</h2>
+        <p>Questions? Email <strong>support@basebase.com</strong>.</p>
+      </article>
+    </main>"""
+    meta = PageMeta(
+        title=f"Terms of Service — {_SITE_NAME}",
+        description=(
+            "ContactGraph terms of service — usage terms, "
+            "responsibilities, and disclaimers."
+        ),
+        path="/terms",
     )
     return _page_shell(meta=meta, base_url=base_url, header=header, content=content)
 
