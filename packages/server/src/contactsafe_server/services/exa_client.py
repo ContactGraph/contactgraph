@@ -1,34 +1,15 @@
 """Async client for the Exa Search API."""
 
-from dataclasses import dataclass
 from typing import cast
 
 import httpx
 
 from contactsafe_server.config import Settings
-
-_GENERIC_EMAIL_DOMAINS: frozenset[str] = frozenset(
-    {
-        "gmail.com",
-        "googlemail.com",
-        "yahoo.com",
-        "hotmail.com",
-        "outlook.com",
-        "icloud.com",
-        "me.com",
-        "live.com",
-        "protonmail.com",
-        "fastmail.com",
-    }
+from contactsafe_server.services.person_search_query import (
+    build_activity_discovery_query,
+    build_employer_discovery_query,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class ExaSearchHit:
-    title: str
-    url: str
-    text: str
-    highlights: list[str]
+from contactsafe_server.services.web_search_types import ExaSearchCategory, ExaSearchHit, WebSearchHit
 
 
 class ExaClient:
@@ -44,26 +25,58 @@ class ExaClient:
         name: str,
         email: str,
         org_hint: str | None,
-    ) -> list[ExaSearchHit]:
+        category: ExaSearchCategory | None = "people",
+    ) -> list[WebSearchHit]:
         if not self._api_key:
             return []
 
-        query: str = _build_person_query(name, email, org_hint)
+        query: str = build_employer_discovery_query(name, email, org_hint)
+        return await self._search(
+            query=query,
+            category=category,
+            num_results=self._settings.exa_search_num_results,
+        )
+
+    async def search_person_activity(
+        self,
+        *,
+        name: str,
+        org_hint: str | None,
+    ) -> list[WebSearchHit]:
+        if not self._api_key:
+            return []
+
+        query: str = build_activity_discovery_query(name, org_hint)
+        return await self._search(
+            query=query,
+            category="personal_site",
+            num_results=self._settings.exa_activity_search_num_results,
+        )
+
+    async def _search(
+        self,
+        *,
+        query: str,
+        category: ExaSearchCategory | None,
+        num_results: int,
+    ) -> list[WebSearchHit]:
         payload: dict[str, object] = {
             "query": query,
             "type": "auto",
-            "numResults": self._settings.exa_search_num_results,
+            "numResults": num_results,
             "contents": {
                 "text": {"maxCharacters": 2000},
                 "highlights": True,
             },
         }
+        if category is not None:
+            payload["category"] = category
 
         async with httpx.AsyncClient(timeout=self._timeout) as http:
             response = await http.post(
                 f"{self._base_url}/search",
                 headers={
-                    "x-api-key": self._api_key,
+                    "x-api-key": self._api_key or "",
                     "Content-Type": "application/json",
                 },
                 json=payload,
@@ -75,23 +88,16 @@ class ExaClient:
 
 
 def _build_person_query(name: str, email: str, org_hint: str | None) -> str:
-    parts: list[str] = [f'"{name.strip()}"']
-    if org_hint and org_hint.strip():
-        parts.append(org_hint.strip())
-    if "@" in email:
-        domain: str = email.rsplit("@", 1)[1].lower()
-        if domain not in _GENERIC_EMAIL_DOMAINS:
-            parts.append(domain)
-    parts.append("job title role investor venture capital partner")
-    return " ".join(parts)
+    """Backward-compatible query builder for tests."""
+    return build_employer_discovery_query(name, email, org_hint)
 
 
-def _parse_results(data: dict[str, object]) -> list[ExaSearchHit]:
+def _parse_results(data: dict[str, object]) -> list[WebSearchHit]:
     results_raw: object = data.get("results")
     if not isinstance(results_raw, list):
         return []
 
-    hits: list[ExaSearchHit] = []
+    hits: list[WebSearchHit] = []
     items: list[object] = cast(list[object], results_raw)
     for item_raw in items:
         if not isinstance(item_raw, dict):
@@ -111,6 +117,12 @@ def _parse_results(data: dict[str, object]) -> list[ExaSearchHit]:
                     highlights.append(hl_raw.strip())
         if title or text or highlights:
             hits.append(
-                ExaSearchHit(title=title, url=url, text=text, highlights=highlights)
+                WebSearchHit(
+                    title=title,
+                    url=url,
+                    text=text,
+                    highlights=highlights,
+                    provider="exa",
+                )
             )
     return hits

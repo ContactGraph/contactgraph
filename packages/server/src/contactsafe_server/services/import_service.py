@@ -366,6 +366,7 @@ class ImportService:
             user_local_parts=owned_locals,
             seen_at=seen_at,
             from_user=False,
+            snippet=meta.snippet,
         )
         self._accumulate_header(
             contacts,
@@ -452,6 +453,7 @@ class ImportService:
         user_local_parts: set[str],
         seen_at: datetime | None,
         from_user: bool,
+        snippet: str | None = None,
     ) -> None:
         if not header:
             return
@@ -471,7 +473,12 @@ class ImportService:
                     last_seen_at=seen_at,
                 )
                 existing = contacts[email]
-            existing.observe(display_name=cleaned_name, seen_at=seen_at, from_user=from_user)
+            existing.observe(
+                display_name=cleaned_name,
+                seen_at=seen_at,
+                from_user=from_user,
+                snippet=snippet if not from_user else None,
+            )
 
     def _accumulate_pair_stats(
         self,

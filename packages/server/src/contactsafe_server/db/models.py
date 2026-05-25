@@ -292,6 +292,8 @@ class Person(Base):
     inferred_categories: Mapped[list[str]] = mapped_column(
         ARRAY(Text), nullable=False, default=list
     )
+    social_profiles: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False, default=dict)
+    bio_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_seen_in_email: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

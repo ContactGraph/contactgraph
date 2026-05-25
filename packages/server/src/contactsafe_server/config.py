@@ -113,6 +113,38 @@ class Settings(BaseSettings):
         default=30.0,
         description="HTTP timeout for Exa API requests",
     )
+    exa_activity_search_num_results: int = Field(
+        default=3,
+        description="Exa personal_site search results per contact",
+    )
+
+    tavily_api_key: str | None = Field(
+        default=None,
+        description="Tavily API key for web enrichment fallback",
+    )
+    tavily_base_url: str = Field(default="https://api.tavily.com")
+    tavily_search_depth: Literal["basic", "advanced"] = Field(default="basic")
+    tavily_search_num_results: int = Field(default=3)
+    tavily_request_timeout_seconds: float = Field(default=30.0)
+
+    serper_api_key: str | None = Field(
+        default=None,
+        description="Serper API key for Google SERP enrichment fallback",
+    )
+    serper_base_url: str = Field(default="https://google.serper.dev")
+    serper_search_num_results: int = Field(default=3)
+    serper_request_timeout_seconds: float = Field(default=30.0)
+
+    web_enrichment_contact_limit: int = Field(
+        default=50,
+        description="Max contacts for web discovery enrichment per sync",
+    )
+    platform_activity_enabled: bool = Field(
+        default=False,
+        description="Tier 2: fetch Bluesky/GitHub posts when social handles are discovered",
+    )
+    platform_activity_max_posts: int = Field(default=5)
+    platform_activity_timeout_seconds: float = Field(default=20.0)
 
     @field_validator("database_url", mode="before")
     @classmethod

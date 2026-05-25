@@ -342,7 +342,10 @@ Each sync builds a per-user graph:
 | Config | Effect |
 |--------|--------|
 | No `OPENAI_API_KEY` | Heuristic query planner + email-domain/name category tags |
-| `EXA_API_KEY` | Web enrichment during sync for top **human** contacts (role, org, VC tags) |
+| *(none)* | **Tier 0:** signature parsing + email-domain heuristics on every contact during sync |
+| `EXA_API_KEY` | **Tier 1:** Exa `people` + `personal_site` web search for top human contacts (role, org, social URLs) |
+| `TAVILY_API_KEY` | Tier 1 fallback when Exa returns no hits |
+| `SERPER_API_KEY` | Tier 1 fallback (cheap Google SERP) when Exa/Tavily miss |
 | `OPENAI_API_KEY` | LLM query plans, richer ingest enrichment, semantic excerpt search |
 
 By default, queries **exclude automated senders and newsletters** (`exclude_automated`, `exclude_broadcast`).
@@ -372,7 +375,7 @@ Requested scopes include `gmail.readonly` (used today) and `calendar.readonly` (
    - `BASE_URL=https://www.contactgraph.ai`
    - `GOOGLE_REDIRECT_URI=https://www.contactgraph.ai/oauth/callback`
    - `JWT_SIGNING_KEY` (separate from `SESSION_SECRET`)
-   - Optional: `OPENAI_API_KEY`, `EXA_API_KEY` (see `.env.example`)
+   - Optional: `OPENAI_API_KEY`, `EXA_API_KEY`, `TAVILY_API_KEY`, `SERPER_API_KEY` (see `.env.example`)
 4. Google Cloud redirect URI must match production callback.
 5. CNAME **www.contactgraph.ai** → Railway.
 6. **Before deploying** schema changes, run migrations manually against production:

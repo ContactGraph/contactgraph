@@ -8,12 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from contactsafe_server.config import get_settings
 from contactsafe_server.db.models import Person, PersonEdge, User
 from contactsafe_server.services.email_parse import ContactAccumulator
-from contactsafe_server.services.exa_client import ExaSearchHit
 from contactsafe_server.services.ingest_enrichment_service import IngestEnrichmentService
+from contactsafe_server.services.person_discovery_service import PersonDiscoveryResult
+from contactsafe_server.services.platform_activity import PlatformPost
+from contactsafe_server.services.web_search_types import WebSearchHit
 
 
 @pytest.mark.asyncio
-async def test_ingest_exa_enrichment_tags_investor(
+async def test_ingest_web_enrichment_tags_investor(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -44,19 +46,26 @@ async def test_ingest_exa_enrichment_tags_investor(
     )
     await db_session.flush()
 
-    mock_hits: list[ExaSearchHit] = [
-        ExaSearchHit(
+    mock_hits: list[WebSearchHit] = [
+        WebSearchHit(
             title="Jane Doe - General Partner - Acme Ventures",
             url="https://linkedin.com/in/janedoe",
             text="Jane Doe is a General Partner at Acme Ventures, a venture capital firm.",
             highlights=["venture capital investor"],
+            provider="exa",
         )
     ]
+    mock_discovery = PersonDiscoveryResult(
+        employer_hits=mock_hits,
+        activity_hits=[],
+        posts=[],
+        providers_used=["exa:people"],
+    )
 
-    mock_search = AsyncMock(return_value=mock_hits)
+    mock_discover = AsyncMock(return_value=mock_discovery)
     with patch(
-        "contactsafe_server.services.ingest_enrichment_service.ExaClient.search_person_context",
-        mock_search,
+        "contactsafe_server.services.ingest_enrichment_service.PersonDiscoveryService.discover_person",
+        mock_discover,
     ):
         acc = ContactAccumulator(email="jane@acmeventures.com", display_name="Jane Doe")
         await IngestEnrichmentService(db_session, settings).enrich_after_import(
@@ -68,7 +77,7 @@ async def test_ingest_exa_enrichment_tags_investor(
     assert "vc" in person.inferred_categories
     assert person.current_role == "General Partner"
     assert person.current_org_name == "Acmeventures"
-    mock_search.assert_awaited_once()
+    mock_discover.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -103,10 +112,10 @@ async def test_enrich_after_import_skips_automated_without_lazy_load(
     )
     await db_session.flush()
 
-    mock_search = AsyncMock(return_value=[])
+    mock_discover = AsyncMock(return_value=PersonDiscoveryResult([], [], [], []))
     with patch(
-        "contactsafe_server.services.ingest_enrichment_service.ExaClient.search_person_context",
-        mock_search,
+        "contactsafe_server.services.ingest_enrichment_service.PersonDiscoveryService.discover_person",
+        mock_discover,
     ):
         acc = ContactAccumulator(email="notifications@github.com", display_name="GitHub")
         await IngestEnrichmentService(db_session, settings).enrich_after_import(
@@ -117,4 +126,52 @@ async def test_enrich_after_import_skips_automated_without_lazy_load(
     await db_session.refresh(person)
     assert person.inferred_categories == []
     assert person.current_role is None
-    mock_search.assert_not_awaited()
+    mock_discover.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_signature_enrichment_from_inbound_snippets(
+    db_session: AsyncSession,
+) -> None:
+    get_settings.cache_clear()
+    settings = get_settings()
+
+    user = User(email=f"sig-{uuid.uuid4()}@example.com")
+    db_session.add(user)
+    await db_session.flush()
+
+    person = Person(
+        user_id=user.id,
+        canonical_name="Sam Rivera",
+        email_addresses=["sam@gmail.com"],
+        last_seen_in_email=datetime.now(tz=UTC),
+    )
+    db_session.add(person)
+    await db_session.flush()
+    db_session.add(
+        PersonEdge(
+            user_id=user.id,
+            person_id=person.id,
+            tie_strength_score=0.8,
+            is_broadcast=False,
+            is_automated=False,
+        )
+    )
+    await db_session.flush()
+
+    acc = ContactAccumulator(
+        email="sam@gmail.com",
+        display_name="Sam Rivera",
+        inbound_snippets=[
+            "Thanks for the intro.\nSam Rivera\nGeneral Partner at Horizon Capital\n415-555-0100",
+        ],
+    )
+    await IngestEnrichmentService(db_session, settings).enrich_after_import(
+        user_id=user.id,
+        contact_by_email={"sam@gmail.com": acc},
+    )
+
+    await db_session.refresh(person)
+    assert person.current_role == "General Partner"
+    assert person.current_org_name == "Horizon Capital"
+    assert person.phone_numbers
