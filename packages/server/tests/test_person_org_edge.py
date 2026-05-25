@@ -33,8 +33,8 @@ async def test_employment_claim_recomputes_person_denorm(
     db_session.add(user)
     await db_session.flush()
 
-    org = Org(canonical_name="Basebase", primary_domain="basebase.com")
-    person = Person(canonical_name="Vincent Bannister", primary_email="vincent@basebase.com")
+    org = Org(canonical_name="Northlight", primary_domain="northlight.io")
+    person = Person(canonical_name="Priya Ramaswamy", primary_email="priya@northlight.io")
     db_session.add_all([org, person])
     await db_session.flush()
 
@@ -58,5 +58,5 @@ async def test_employment_claim_recomputes_person_denorm(
 
     await db_session.refresh(person)
     assert person.current_org_id == org.id
-    assert person.current_org_name == "Basebase"
+    assert person.current_org_name == "Northlight"
     assert person.current_role == "Founder"

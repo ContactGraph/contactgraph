@@ -31,9 +31,9 @@ async def test_filters_name_and_excludes_broadcast(db_session: AsyncSession) -> 
     await db_session.flush()
 
     human = Person(
-        canonical_name="Chris Pappas",
-        primary_email="chris@aix.com",
-        current_org_name="AIX",
+        canonical_name="Amara Okafor",
+        primary_email="amara@novaworks.com",
+        current_org_name="Novaworks",
         inferred_categories=["founder"],
     )
     newsletter = Person(
@@ -47,7 +47,7 @@ async def test_filters_name_and_excludes_broadcast(db_session: AsyncSession) -> 
     db_session.add_all([human, newsletter, bot])
     await db_session.flush()
 
-    for alias_person, email in [(human, "chris@aix.com"), (newsletter, "newsletter@marketing.io"), (bot, "ci_activity@noreply.github.com")]:
+    for alias_person, email in [(human, "amara@novaworks.com"), (newsletter, "newsletter@marketing.io"), (bot, "ci_activity@noreply.github.com")]:
         db_session.add(PersonAlias(person_id=alias_person.id, kind="email", value=email))
 
     db_session.add_all([
@@ -67,11 +67,11 @@ async def test_filters_name_and_excludes_broadcast(db_session: AsyncSession) -> 
     await db_session.flush()
 
     executor = NetworkQueryService(db_session)
-    plan = QueryPlan(name_tokens=["chris"], org_names=["aix"], exclude_broadcast=True, limit=10)
+    plan = QueryPlan(name_tokens=["amara"], org_names=["novaworks"], exclude_broadcast=True, limit=10)
     matches = await executor.execute(user_id=user.id, plan=plan)
 
     assert len(matches) == 1
-    assert matches[0].name == "Chris Pappas"
+    assert matches[0].name == "Amara Okafor"
 
 
 async def test_category_filter(db_session: AsyncSession) -> None:
@@ -145,16 +145,16 @@ async def test_also_known_as_in_results(db_session: AsyncSession) -> None:
     await db_session.flush()
 
     person = Person(
-        canonical_name="Daniel Cohen",
-        primary_email="dcohen@gmail.com",
+        canonical_name="Marcus Chen",
+        primary_email="mchen@gmail.com",
     )
     db_session.add(person)
     await db_session.flush()
 
     db_session.add_all([
-        PersonAlias(person_id=person.id, kind="email", value="dcohen@gmail.com"),
-        PersonAlias(person_id=person.id, kind="email", value="daniel@sticker.vc"),
-        PersonAlias(person_id=person.id, kind="linkedin_url", value="https://linkedin.com/in/dcohen"),
+        PersonAlias(person_id=person.id, kind="email", value="mchen@gmail.com"),
+        PersonAlias(person_id=person.id, kind="email", value="marcus@horizon.vc"),
+        PersonAlias(person_id=person.id, kind="linkedin_url", value="https://linkedin.com/in/mchen"),
     ])
     db_session.add(UserPersonObservation(
         user_id=user.id, person_id=person.id,
@@ -164,12 +164,12 @@ async def test_also_known_as_in_results(db_session: AsyncSession) -> None:
 
     matches = await NetworkQueryService(db_session).execute(
         user_id=user.id,
-        plan=QueryPlan(name_tokens=["daniel"], limit=10),
+        plan=QueryPlan(name_tokens=["marcus"], limit=10),
     )
     assert len(matches) == 1
-    assert "dcohen@gmail.com" in matches[0].also_known_as
-    assert "daniel@sticker.vc" in matches[0].also_known_as
-    assert "https://linkedin.com/in/dcohen" in matches[0].also_known_as
+    assert "mchen@gmail.com" in matches[0].also_known_as
+    assert "marcus@horizon.vc" in matches[0].also_known_as
+    assert "https://linkedin.com/in/mchen" in matches[0].also_known_as
 
 
 async def test_excludes_automated_by_default(db_session: AsyncSession) -> None:

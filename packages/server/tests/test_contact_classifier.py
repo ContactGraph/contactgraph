@@ -21,8 +21,8 @@ def test_github_bot_is_automated() -> None:
 
 def test_bidirectional_human_contact() -> None:
     acc = ContactAccumulator(
-        email="vincent@basebase.com",
-        display_name="Vincent Bannister",
+        email="priya@northlight.io",
+        display_name="Priya Ramaswamy",
         message_count=6,
         outbound_count=3,
         inbound_count=3,
@@ -86,8 +86,8 @@ def test_capital_one_is_automated_or_broadcast() -> None:
 
 def test_outbound_only_contact_is_human() -> None:
     acc = ContactAccumulator(
-        email="cynthia@basebase.com",
-        display_name="Cynthia Johanson",
+        email="tomoko@northlight.io",
+        display_name="Tomoko Sato",
         message_count=3,
         outbound_count=3,
         inbound_count=0,

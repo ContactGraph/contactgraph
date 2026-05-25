@@ -47,7 +47,7 @@ _KNOWN_DOMAIN_BRANDS: dict[str, str] = {
     "sequoiacap.com": "Sequoia Capital",
     "a16z.com": "Andreessen Horowitz",
     "ycombinator.com": "Y Combinator",
-    "basebase.com": "Basebase",
+    "northlight.io": "Northlight",
     "sparkcapital.com": "Spark Capital",
     "bvp.com": "Bessemer Venture Partners",
     "patagonia.com": "Patagonia",
