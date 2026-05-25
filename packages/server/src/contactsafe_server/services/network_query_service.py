@@ -310,6 +310,11 @@ class NetworkQueryService:
             )
         if tie:
             relevance_parts.append(f"tie strength: {tie:.2f}")
+        social: dict[str, str] = dict(person.social_profiles or {})
+        if social:
+            relevance_parts.append(f"profiles: {', '.join(social.keys())}")
+        if person.bio_summary:
+            relevance_parts.append(f"bio: {person.bio_summary[:120]}")
 
         return PersonMatch(
             person_id=person.id,
@@ -319,6 +324,8 @@ class NetworkQueryService:
             or (person.current_org.canonical_name if person.current_org else None),
             current_role=person.current_role,
             inferred_categories=list(person.inferred_categories),
+            social_profiles=social,
+            bio_summary=person.bio_summary,
             last_seen_in_email=person.last_seen_in_email,
             tie_strength_score=tie,
             match_reason="; ".join(reasons) if reasons else "matched graph filters",
