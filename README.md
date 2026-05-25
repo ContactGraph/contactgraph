@@ -253,6 +253,7 @@ ContactGraph is built as an **extensible source framework**. Every connector use
 | Source | `source_type` | Status |
 |--------|---------------|--------|
 | **Gmail** | `google_mail` | **Shipped** — imports email metadata (headers only) into contacts, org links, and tie strength |
+| **Google Contacts** | `google_contacts` | **Shipped** — imports contacts (names, phone numbers, orgs) from Google Contacts / People API |
 | Google Calendar | `google_calendar` | Planned — co-attendance and relationship signals from events |
 | Other (LinkedIn, WhatsApp, CRM, …) | TBD | Roadmap |
 
@@ -360,15 +361,15 @@ Example questions: *"Who do I know named Chris?"*, *"What VCs do I know?"*, *"Wh
 
 ---
 
-## Google OAuth (Gmail source)
+## Google OAuth (Gmail + Contacts source)
 
-1. [Google Cloud Console](https://console.cloud.google.com/) → enable **Gmail API** (Calendar API optional; calendar ingest not shipped yet)
+1. [Google Cloud Console](https://console.cloud.google.com/) → enable **Gmail API** and **People API** (Calendar API optional; calendar ingest not shipped yet)
 2. OAuth client (Web) → redirect URIs:
    - Local: `http://localhost:8000/oauth/callback`
    - Production: `https://www.contactgraph.ai/oauth/callback`
 3. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` in `.env` / Railway
 
-Requested scopes include `gmail.readonly` (used today) and `calendar.readonly` (reserved for the calendar connector).
+Requested scopes include `gmail.readonly` (Gmail source), `contacts.readonly` (Google Contacts source), and `calendar.readonly` (reserved for the calendar connector).
 
 ---
 

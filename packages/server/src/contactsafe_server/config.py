@@ -62,6 +62,7 @@ class Settings(BaseSettings):
             "profile",
             "https://www.googleapis.com/auth/gmail.readonly",
             "https://www.googleapis.com/auth/calendar.readonly",
+            "https://www.googleapis.com/auth/contacts.readonly",
         ]
     )
 
@@ -86,6 +87,15 @@ class Settings(BaseSettings):
     import_gmail_query: str = Field(
         default="newer_than:2y",
         description="Gmail search query for import",
+    )
+
+    import_contacts_max_results: int = Field(
+        default=2000,
+        description="Max Google Contacts fetched per sync",
+    )
+    import_contacts_page_size: int = Field(
+        default=100,
+        description="Page size for People API connections.list (max 1000)",
     )
 
     openai_api_key: str | None = Field(default=None, description="OpenAI API key for query planning")
