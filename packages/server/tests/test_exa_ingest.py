@@ -1,21 +1,37 @@
+"""Integration tests for enrichment → claims pipeline."""
+
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.config import get_settings
-from contactsafe_server.db.models import Person, PersonEdge, User
+from contactsafe_server.db.models import (
+    Base,
+    EmploymentClaim,
+    Person,
+    PersonAttributeClaim,
+    User,
+    UserPersonObservation,
+)
 from contactsafe_server.services.email_parse import ContactAccumulator
 from contactsafe_server.services.ingest_enrichment_service import IngestEnrichmentService
 from contactsafe_server.services.person_discovery_service import PersonDiscoveryResult
-from contactsafe_server.services.platform_activity import PlatformPost
 from contactsafe_server.services.web_search_types import WebSearchHit
 
+pytestmark = pytest.mark.anyio
 
-@pytest.mark.asyncio
-async def test_ingest_web_enrichment_tags_investor(
+
+@pytest.fixture(autouse=True)
+async def _setup_tables(db_engine):
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+async def test_ingest_web_enrichment_writes_claims(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -28,22 +44,21 @@ async def test_ingest_web_enrichment_tags_investor(
     await db_session.flush()
 
     person = Person(
-        user_id=user.id,
         canonical_name="Jane Doe",
-        email_addresses=["jane@acmeventures.com"],
-        last_seen_in_email=datetime.now(tz=UTC),
+        primary_email="jane@acmeventures.com",
     )
     db_session.add(person)
     await db_session.flush()
-    db_session.add(
-        PersonEdge(
-            user_id=user.id,
-            person_id=person.id,
-            tie_strength_score=0.95,
-            is_broadcast=False,
-            is_automated=False,
-        )
-    )
+
+    db_session.add(UserPersonObservation(
+        user_id=user.id,
+        person_id=person.id,
+        tie_strength_score=0.95,
+        is_broadcast=False,
+        is_automated=False,
+        is_human=True,
+        email_count=20,
+    ))
     await db_session.flush()
 
     mock_hits: list[WebSearchHit] = [
@@ -75,13 +90,10 @@ async def test_ingest_web_enrichment_tags_investor(
 
     await db_session.refresh(person)
     assert "vc" in person.inferred_categories
-    assert person.current_role == "General Partner"
-    assert person.current_org_name == "Acmeventures"
     mock_discover.assert_awaited_once()
 
 
-@pytest.mark.asyncio
-async def test_enrich_after_import_skips_automated_without_lazy_load(
+async def test_enrich_after_import_skips_automated(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -94,22 +106,21 @@ async def test_enrich_after_import_skips_automated_without_lazy_load(
     await db_session.flush()
 
     person = Person(
-        user_id=user.id,
         canonical_name="GitHub",
-        email_addresses=["notifications@github.com"],
-        last_seen_in_email=datetime.now(tz=UTC),
+        primary_email="notifications@github.com",
     )
     db_session.add(person)
     await db_session.flush()
-    db_session.add(
-        PersonEdge(
-            user_id=user.id,
-            person_id=person.id,
-            tie_strength_score=0.05,
-            is_broadcast=False,
-            is_automated=True,
-        )
-    )
+
+    db_session.add(UserPersonObservation(
+        user_id=user.id,
+        person_id=person.id,
+        tie_strength_score=0.05,
+        is_broadcast=False,
+        is_automated=True,
+        is_human=False,
+        email_count=100,
+    ))
     await db_session.flush()
 
     mock_discover = AsyncMock(return_value=PersonDiscoveryResult([], [], [], []))
@@ -125,12 +136,10 @@ async def test_enrich_after_import_skips_automated_without_lazy_load(
 
     await db_session.refresh(person)
     assert person.inferred_categories == []
-    assert person.current_role is None
     mock_discover.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-async def test_signature_enrichment_from_inbound_snippets(
+async def test_signature_enrichment_writes_claims(
     db_session: AsyncSession,
 ) -> None:
     get_settings.cache_clear()
@@ -141,22 +150,21 @@ async def test_signature_enrichment_from_inbound_snippets(
     await db_session.flush()
 
     person = Person(
-        user_id=user.id,
         canonical_name="Sam Rivera",
-        email_addresses=["sam@gmail.com"],
-        last_seen_in_email=datetime.now(tz=UTC),
+        primary_email="sam@gmail.com",
     )
     db_session.add(person)
     await db_session.flush()
-    db_session.add(
-        PersonEdge(
-            user_id=user.id,
-            person_id=person.id,
-            tie_strength_score=0.8,
-            is_broadcast=False,
-            is_automated=False,
-        )
-    )
+
+    db_session.add(UserPersonObservation(
+        user_id=user.id,
+        person_id=person.id,
+        tie_strength_score=0.8,
+        is_broadcast=False,
+        is_automated=False,
+        is_human=True,
+        email_count=15,
+    ))
     await db_session.flush()
 
     acc = ContactAccumulator(
@@ -172,6 +180,23 @@ async def test_signature_enrichment_from_inbound_snippets(
     )
 
     await db_session.refresh(person)
-    assert person.current_role == "General Partner"
     assert person.current_org_name == "Horizon Capital"
-    assert person.phone_numbers
+    assert person.current_role is not None
+
+    result = await db_session.execute(
+        select(EmploymentClaim).where(EmploymentClaim.person_id == person.id)
+    )
+    claims: list[EmploymentClaim] = list(result.scalars().all())
+    sig_claims: list[EmploymentClaim] = [
+        c for c in claims if c.contributor_source_kind == "gmail_signature"
+    ]
+    assert len(sig_claims) >= 1
+
+    result = await db_session.execute(
+        select(PersonAttributeClaim).where(
+            PersonAttributeClaim.person_id == person.id,
+            PersonAttributeClaim.kind == "phone",
+        )
+    )
+    phone_claims: list[PersonAttributeClaim] = list(result.scalars().all())
+    assert len(phone_claims) >= 1

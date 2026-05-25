@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     app_env: Literal["development", "staging", "production"] = "development"
     base_url: str = "http://localhost:8000"
     log_level: str = "info"
+    database_echo: bool = Field(default=False, description="Echo all SQL statements (very verbose)")
+
 
     database_url: str = Field(
         default="postgresql+asyncpg://contactsafe:contactsafe@localhost:5432/contactsafe"
@@ -145,6 +147,11 @@ class Settings(BaseSettings):
     )
     platform_activity_max_posts: int = Field(default=5)
     platform_activity_timeout_seconds: float = Field(default=20.0)
+
+    web_enrichment_ttl_days: int = Field(
+        default=30,
+        description="Days before re-querying web enrichment providers for a contact",
+    )
 
     @field_validator("database_url", mode="before")
     @classmethod

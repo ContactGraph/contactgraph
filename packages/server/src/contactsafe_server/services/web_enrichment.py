@@ -98,10 +98,11 @@ def extract_hints_from_exa_hits(
 
 
 def apply_web_hints_to_person(person: Person, hints: PersonWebHints) -> None:
+    """Legacy direct-mutation helper — superseded by claim writes in the new graph."""
     if hints.categories:
         merged: list[str] = list(dict.fromkeys([*person.inferred_categories, *hints.categories]))
         person.inferred_categories = merged
-    primary_email: str = person.email_addresses[0] if person.email_addresses else ""
+    primary_email: str = person.primary_email or ""
     if hints.current_role and not person.current_role and primary_email:
         local_part: str = primary_email.rsplit("@", 1)[0].lower()
         if local_part not in {"info", "team", "hello", "support", "contact", "customer_service"}:

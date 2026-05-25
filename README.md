@@ -331,13 +331,19 @@ Dynamic Client Registration: `POST /oauth/register` (RFC 7591).
 
 ## Graph model and query engine
 
-Each sync builds a per-user graph:
+The schema uses a **three-layer entity-claim graph**:
 
-- **People** — name, email, inferred categories (`vc`, `founder`, …), role/org (denormalized cache)
-- **Orgs** — domain, name, flexible `categories` + JSON `attributes` (schools, hospitals, nonprofits, companies, …)
-- **Edges** — user↔person (tie strength, human/broadcast/automated flags), person↔org employment, user↔org aggregates, person↔person co-occurrence
+1. **Entities (global)** — `person` and `org` nodes with derived/cached columns. Deduplicated via `person_alias` and `org_alias` (email, LinkedIn URL, GitHub URL, domain).
+2. **Claims (global, with provenance)** — append-only assertions like `employment_claim`, `relationship_claim`, `person_attribute_claim`. Each claim records who contributed it, from what source, when, and at what confidence. Re-syncing upserts in place (idempotent on unique keys).
+3. **User observations (per-user)** — `user_person_observation`, `user_relationship_observation`, `user_org_observation` — per-user rollups of email volume, tie strength, and classification flags.
 
-**`query_network`** accepts a natural-language `question` and returns `matches` + `applied_plan`.
+Derived columns on `person` (current org, role, categories, social profiles, bio) are **recomputed from claims** at the end of each enrichment run.
+
+**Enrichment freshness:** web search providers (Exa, Tavily, Serper) are gated by `enrichment_attempt` — contacts enriched within `WEB_ENRICHMENT_TTL_DAYS` (default 30) are skipped on re-sync, making repeat syncs near-free for web API costs.
+
+**One-time re-sync required:** migration 011 drops the old user-coupled tables. Existing users must run `sync_source` once to rebuild their graph.
+
+**`query_network`** accepts a natural-language `question` and returns `matches` (including `also_known_as` aliases) + `applied_plan`.
 
 | Config | Effect |
 |--------|--------|

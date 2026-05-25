@@ -4,9 +4,9 @@ from contactsafe_server.db.models import (
     ConnectSession,
     OAuthCredential,
     Person,
-    PersonEdge,
     Source,
     User,
+    UserPersonObservation,
 )
 
 __all__ = [
@@ -14,9 +14,9 @@ __all__ = [
     "ConnectSession",
     "OAuthCredential",
     "Person",
-    "PersonEdge",
     "Source",
     "User",
+    "UserPersonObservation",
     "get_session_factory",
     "init_db",
     "shutdown_db",

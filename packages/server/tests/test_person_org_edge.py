@@ -1,56 +1,62 @@
+"""Tests for employment claims (replaces old PersonOrgEdge tests)."""
+
 import uuid
-from datetime import UTC, datetime
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from contactsafe_server.db.models import Org, Person, PersonEdge, User
-from contactsafe_server.services.employment_service import EmploymentService
+from contactsafe_server.db.models import (
+    Base,
+    EmploymentClaim,
+    Org,
+    Person,
+    User,
+    UserPersonObservation,
+)
+from contactsafe_server.services.claim_writer import record_employment
+from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
+
+pytestmark = pytest.mark.anyio
 
 
-@pytest.mark.asyncio
-async def test_upsert_current_employment_syncs_person_denorm(
+@pytest.fixture(autouse=True)
+async def _setup_tables(db_engine):
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+
+async def test_employment_claim_recomputes_person_denorm(
     db_session: AsyncSession,
 ) -> None:
     user = User(email=f"emp-{uuid.uuid4()}@example.com")
     db_session.add(user)
     await db_session.flush()
 
-    org = Org(
-        user_id=user.id,
-        canonical_name="Basebase",
-        domain="basebase.com",
-        aliases=["basebase"],
-    )
-    person = Person(
-        user_id=user.id,
-        canonical_name="Vincent Bannister",
-        email_addresses=["vincent@basebase.com"],
-        last_seen_in_email=datetime.now(tz=UTC),
-    )
+    org = Org(canonical_name="Basebase", primary_domain="basebase.com")
+    person = Person(canonical_name="Vincent Bannister", primary_email="vincent@basebase.com")
     db_session.add_all([org, person])
     await db_session.flush()
-    db_session.add(
-        PersonEdge(
-            user_id=user.id,
-            person_id=person.id,
-            tie_strength_score=0.5,
-            is_human=True,
-            is_broadcast=False,
-            is_automated=False,
-        )
-    )
+
+    db_session.add(UserPersonObservation(
+        user_id=user.id, person_id=person.id,
+        tie_strength_score=0.5, is_human=True, email_count=5,
+    ))
     await db_session.flush()
 
-    service = EmploymentService(db_session)
-    await service.upsert_current_employment(
-        user_id=user.id,
+    await record_employment(
+        db_session,
         person_id=person.id,
         org_id=org.id,
         role_title="Founder",
+        contributor_user_id=user.id,
+        contributor_source_kind="gmail_domain",
     )
-    await db_session.refresh(person)
 
+    recompute = PersonProfileRecompute(db_session)
+    await recompute.recompute_for_user(user.id)
+
+    await db_session.refresh(person)
     assert person.current_org_id == org.id
     assert person.current_org_name == "Basebase"
     assert person.current_role == "Founder"

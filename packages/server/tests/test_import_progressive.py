@@ -66,6 +66,7 @@ async def test_flush_ingest_progress_marks_partial_and_commits() -> None:
         user_email="owner@example.com",
         source=source,
         messages_scanned=25,
+        resolver=MagicMock(),
     )
 
     assert source.sync_state == SyncState.PARTIAL.value
@@ -129,6 +130,7 @@ async def test_scan_and_ingest_commits_during_scan() -> None:
         user_email="owner@example.com",
         user_id=uuid.uuid4(),
         source=source,
+        resolver=MagicMock(),
     )
 
     assert "alice@example.com" in contacts

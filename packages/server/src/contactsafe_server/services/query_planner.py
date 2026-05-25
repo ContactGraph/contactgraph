@@ -15,20 +15,24 @@ _PLANNER_SYSTEM_PROMPT: str = """You translate questions about a user's email-de
 
 Schema:
 - intent: list_people | lookup_contact | semantic_search
-- name_tokens: person-name tokens to match in person names (e.g. ["chris", "lee"] for "Chris Lee" or "Cynthia Johanson")
+- name_tokens: person-name tokens to match in person names (e.g. ["chris", "lee"] for "Chris Lee")
 - org_names: company names (e.g. ["Cowboy VC", "AIX"])
 - categories_any: person categories (e.g. ["vc", "founder", "engineer"])
 - role_keywords: job title keywords (e.g. ["revops", "revenue operations"])
-- relationship_types_any: edge types (e.g. ["investor", "colleague"])
-- require_genuine_contact: default false; true only when the question asks for real back-and-forth (not for "what VCs do I know" style lists)
+- relationship_types_any: ONLY use for structural graph queries like "who knows who" or co-occurrence. Leave EMPTY for vague social terms.
+- require_genuine_contact: true when the question implies two-way communication ("people I actually talk to", "friends")
 - exclude_broadcast: true to omit newsletters/marketing (default true)
 - semantic_query: full text for topical search when intent is semantic_search
 - sort_by: tie_strength | last_seen
 - limit: max results (use 1 for lookup_contact with name+org)
 
-Return ONLY valid JSON matching QueryPlan. No markdown.
+IMPORTANT mapping rules:
+- "friends", "close contacts", "people I know" → sort_by=tie_strength, require_genuine_contact=true, relationship_types_any=[] (NOT ["friend"])
+- "who do I email most" → sort_by=tie_strength, limit=10
+- Person name lookups → name_tokens with lowercase tokens
+- Vague social terms are NOT relationship types. Only use relationship_types_any for explicit graph edge queries.
 
-Always extract proper-noun person names into name_tokens when the question names someone (e.g. "Cynthia Johanson" -> ["cynthia", "johanson"])."""
+Return ONLY valid JSON matching QueryPlan. No markdown."""
 
 
 class QueryPlanner:

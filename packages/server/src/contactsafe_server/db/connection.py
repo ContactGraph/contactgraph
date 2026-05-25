@@ -21,7 +21,7 @@ def get_engine(settings: Settings | None = None) -> AsyncEngine:
         connect_args: dict[str, Any] = cfg.database_connect_args
         _engine = create_async_engine(
             str(cfg.database_url),
-            echo=cfg.app_env == "development",
+            echo=cfg.database_echo,
             pool_pre_ping=True,
             connect_args=connect_args if connect_args else {},
         )
