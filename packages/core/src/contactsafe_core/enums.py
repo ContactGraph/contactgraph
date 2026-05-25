@@ -14,6 +14,7 @@ class OAuthProvider(StrEnum):
 class SourceType(StrEnum):
     GOOGLE_MAIL = "google_mail"
     GOOGLE_CALENDAR = "google_calendar"
+    GOOGLE_CONTACTS = "google_contacts"
     LINKEDIN_CONNECTIONS_UPLOAD = "linkedin_connections_upload"
     PHONE_CONTACTS_UPLOAD = "phone_contacts_upload"
 

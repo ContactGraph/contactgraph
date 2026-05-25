@@ -28,13 +28,18 @@ class OAuthService:
         self._google: GoogleOAuthClient = google
         self._sources: SourceService = SourceService(db)
 
+    _GOOGLE_SOURCE_TYPES: frozenset[SourceType] = frozenset({
+        SourceType.GOOGLE_MAIL,
+        SourceType.GOOGLE_CONTACTS,
+    })
+
     async def create_connect_session(
         self,
         user_token: str | None = None,
         source_type: SourceType = SourceType.GOOGLE_MAIL,
     ) -> ConnectSourceResult:
         """Start OAuth flow or return existing connection for a known user."""
-        if source_type != SourceType.GOOGLE_MAIL:
+        if source_type not in self._GOOGLE_SOURCE_TYPES:
             raise ValueError(f"connect_source not implemented for {source_type.value}")
 
         if user_token:
@@ -60,7 +65,7 @@ class OAuthService:
             connect_session_id=session.id,
             oauth_url=oauth_url,
             status=SessionStatus.PENDING,
-            message="Open the OAuth URL in a browser to connect Gmail and Calendar.",
+            message="Open the OAuth URL in a browser to connect Gmail, Calendar, and Contacts.",
             already_connected=False,
         )
 
@@ -88,6 +93,8 @@ class OAuthService:
         source: Source = await self._sources.ensure_google_mail_source(user.id, email)
         await self._sources.link_credential_to_source(cred, source)
 
+        await self._sources.ensure_google_contacts_source(user.id, email)
+
         session.user_id = user.id
         session.status = SessionStatus.CONNECTED.value
         session.completed_at = datetime.now(tz=UTC)
@@ -112,6 +119,7 @@ class OAuthService:
 
         source: Source = await self._sources.ensure_google_mail_source(user.id, normalized)
         await self._sources.link_credential_to_source(cred, source)
+        await self._sources.ensure_google_contacts_source(user.id, normalized)
 
         session: ConnectSession = ConnectSession(
             state=secrets.token_urlsafe(32),

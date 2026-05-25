@@ -3,7 +3,9 @@ import logging
 import threading
 import uuid
 
+from contactsafe_core.enums import SourceType
 from contactsafe_server.db.connection import get_session_factory
+from contactsafe_server.db.models import Source
 from contactsafe_server.oauth.google import GoogleOAuthClient
 from contactsafe_server.services.gmail_client import GmailClient
 from contactsafe_server.services.import_service import ImportService
@@ -52,22 +54,49 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
     from contactsafe_server.deps import build_app_context
 
     ctx = build_app_context()
-    gmail = GmailClient(ctx.settings, GoogleOAuthClient(ctx.settings))
+    google_client: GoogleOAuthClient = GoogleOAuthClient(ctx.settings)
     factory = get_session_factory(ctx.settings)
     try:
         async with factory() as db:
-            service = ImportService(
-                db=db,
-                settings=ctx.settings,
-                encryptor=ctx.encryptor,
-                gmail=gmail,
-            )
-            try:
-                await service.run_sync(source_id)
-                await db.commit()
-                logger.info("Source sync completed for source %s", source_id)
-            except Exception:
-                await db.commit()
-                logger.exception("Source sync failed for source %s", source_id)
+            source: Source | None = await db.get(Source, source_id)
+            if source is None:
+                logger.warning("Source %s not found, skipping sync", source_id)
+                return
+
+            if source.source_type == SourceType.GOOGLE_CONTACTS.value:
+                from contactsafe_server.services.people_api_client import PeopleApiClient
+                from contactsafe_server.services.google_contacts_import_service import (
+                    GoogleContactsImportService,
+                )
+
+                people = PeopleApiClient(ctx.settings, google_client)
+                service_contacts = GoogleContactsImportService(
+                    db=db,
+                    settings=ctx.settings,
+                    encryptor=ctx.encryptor,
+                    people_client=people,
+                )
+                try:
+                    await service_contacts.run_sync(source_id)
+                    await db.commit()
+                    logger.info("Google Contacts sync completed for source %s", source_id)
+                except Exception:
+                    await db.commit()
+                    logger.exception("Google Contacts sync failed for source %s", source_id)
+            else:
+                gmail = GmailClient(ctx.settings, google_client)
+                service = ImportService(
+                    db=db,
+                    settings=ctx.settings,
+                    encryptor=ctx.encryptor,
+                    gmail=gmail,
+                )
+                try:
+                    await service.run_sync(source_id)
+                    await db.commit()
+                    logger.info("Source sync completed for source %s", source_id)
+                except Exception:
+                    await db.commit()
+                    logger.exception("Source sync failed for source %s", source_id)
     finally:
         release_sync_lock(source_id, user_id)

@@ -35,6 +35,34 @@ class SourceService:
     def __init__(self, db: AsyncSession) -> None:
         self._db: AsyncSession = db
 
+    async def ensure_google_contacts_source(self, user_id: uuid.UUID, email: str) -> Source:
+        normalized: str = email.strip().lower()
+        result = await self._db.execute(
+            select(Source).where(
+                Source.user_id == user_id,
+                Source.source_type == SourceType.GOOGLE_CONTACTS.value,
+                Source.external_account_id == normalized,
+            )
+        )
+        existing: Source | None = result.scalar_one_or_none()
+        if existing is not None:
+            existing.connection_status = SourceConnectionStatus.CONNECTED.value
+            existing.label = f"{normalized} (contacts)"
+            await self._db.flush()
+            return existing
+
+        source = Source(
+            user_id=user_id,
+            source_type=SourceType.GOOGLE_CONTACTS.value,
+            label=f"{normalized} (contacts)",
+            external_account_id=normalized,
+            connection_status=SourceConnectionStatus.CONNECTED.value,
+            sync_state=SyncState.PENDING.value,
+        )
+        self._db.add(source)
+        await self._db.flush()
+        return source
+
     async def ensure_google_mail_source(self, user_id: uuid.UUID, email: str) -> Source:
         normalized: str = email.strip().lower()
         result = await self._db.execute(
@@ -245,7 +273,11 @@ class SourceService:
         if source is None:
             raise ValueError(f"Unknown source_id: {source_id}")
 
-        if source.source_type != SourceType.GOOGLE_MAIL.value:
+        _SYNCABLE_TYPES: set[str] = {
+            SourceType.GOOGLE_MAIL.value,
+            SourceType.GOOGLE_CONTACTS.value,
+        }
+        if source.source_type not in _SYNCABLE_TYPES:
             return SyncSourceResult(
                 source_id=source.id,
                 scheduled=False,
@@ -352,13 +384,16 @@ class SourceService:
         result = await self._db.execute(
             select(Source).where(
                 Source.user_id == user_id,
-                Source.source_type == SourceType.GOOGLE_MAIL.value,
+                Source.source_type.in_([
+                    SourceType.GOOGLE_MAIL.value,
+                    SourceType.GOOGLE_CONTACTS.value,
+                ]),
                 Source.sync_state.in_(
                     [SyncState.PARTIAL.value, SyncState.COMPLETE.value]
                 ),
             )
         )
-        return result.scalar_one_or_none() is not None
+        return result.first() is not None
 
     async def _get_default_google_mail_source(self, user_id: uuid.UUID) -> Source | None:
         result = await self._db.execute(
@@ -461,20 +496,25 @@ class SourceService:
     @staticmethod
     def _sync_message(source: Source) -> str:
         sync_state: SyncState = SyncState(source.sync_state)
+        label: str = (
+            "Google Contacts"
+            if source.source_type == SourceType.GOOGLE_CONTACTS.value
+            else "Gmail"
+        )
         if source.sync_error:
             return f"Sync failed: {source.sync_error}"
         match sync_state:
             case SyncState.SYNCING:
                 if source.contacts_resolved > 0:
                     return (
-                        f"Syncing Gmail ({source.contacts_resolved}/"
+                        f"Syncing {label} ({source.contacts_resolved}/"
                         f"{source.contacts_found} contacts in your graph so far)..."
                     )
                 if source.contacts_found > 0:
                     return (
-                        f"Scanning Gmail ({source.contacts_found} contacts found so far)..."
+                        f"Scanning {label} ({source.contacts_found} contacts found so far)..."
                     )
-                return "Scanning Gmail..."
+                return f"Scanning {label}..."
             case SyncState.PARTIAL:
                 return (
                     f"Partial graph ready ({source.contacts_resolved} contacts). "
