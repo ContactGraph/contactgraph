@@ -24,9 +24,9 @@ _ROLE_LINE_PATTERNS: list[tuple[str, str]] = [
 ]
 
 _ORG_PATTERNS: list[str] = [
-    r"\b(?:partner|investor|director|manager|engineer|founder|ceo|vp)\s+(?:at|@)\s+([A-Z][A-Za-z0-9&.\s'-]{2,60})",
-    r"\b([A-Z][A-Za-z0-9&.\s'-]{2,60})\s*\|\s*(?:partner|investor|founder|ceo|engineer|director)\b",
-    r"\|\s*([A-Z][A-Za-z0-9&.\s'-]{2,60})\s*$",
+    r"\b(?:partner|investor|director|manager|engineer|founder|ceo|vp)\s+(?:at|@)\s+([A-Z][A-Za-z0-9&. '-]{2,60})",
+    r"\b([A-Z][A-Za-z0-9&. '-]{2,60})\s*\|\s*(?:partner|investor|founder|ceo|engineer|director)\b",
+    r"\|\s*([A-Z][A-Za-z0-9&. '-]{2,60})\s*$",
 ]
 
 _PHONE_RE: re.Pattern[str] = re.compile(
