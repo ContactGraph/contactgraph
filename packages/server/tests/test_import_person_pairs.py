@@ -27,12 +27,23 @@ async def test_scan_gmail_builds_contacts_and_cooccurrence_edges() -> None:
         )
     )
 
+    db = MagicMock()
+    db.flush = AsyncMock()
+    db.commit = AsyncMock()
+    db.refresh = AsyncMock()
+
     service = ImportService(
-        db=MagicMock(),
+        db=db,
         settings=settings,
         encryptor=MagicMock(),
         gmail=gmail,
     )
+    service._upsert_person = AsyncMock()  # type: ignore[method-assign]
+    service._load_user_identity = AsyncMock(  # type: ignore[method-assign]
+        return_value=({"owner@example.com"}, {"owner"})
+    )
+
+    resolver = AsyncMock()
 
     contacts, pairs, _ = await service._scan_and_ingest_gmail(
         access_token="token",
@@ -45,7 +56,7 @@ async def test_scan_gmail_builds_contacts_and_cooccurrence_edges() -> None:
             contacts_resolved=0,
             contacts_pending=0,
         ),
-        resolver=MagicMock(),
+        resolver=resolver,
     )
 
     assert "alice@example.com" in contacts
