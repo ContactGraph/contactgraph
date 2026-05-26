@@ -125,7 +125,10 @@ async def main(limit: int, dry_run: bool) -> None:
                 async with session_factory() as session:
                     await session.execute(
                         update(UserPersonObservation)
-                        .where(UserPersonObservation.id == obs.id)
+                        .where(
+                            UserPersonObservation.user_id == obs.user_id,
+                            UserPersonObservation.person_id == obs.person_id,
+                        )
                         .values(is_human=False, is_broadcast=True)
                     )
                     await session.commit()
