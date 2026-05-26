@@ -3,7 +3,10 @@ import logging
 import threading
 import uuid
 
-from contactsafe_core.enums import SourceType
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from contactsafe_core.enums import SourceType, SyncState
 from contactsafe_server.db.connection import get_session_factory
 from contactsafe_server.db.models import Source
 from contactsafe_server.oauth.google import GoogleOAuthClient
@@ -56,6 +59,7 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
     ctx = build_app_context()
     google_client: GoogleOAuthClient = GoogleOAuthClient(ctx.settings)
     factory = get_session_factory(ctx.settings)
+    chain_contacts_source_id: uuid.UUID | None = None
     try:
         async with factory() as db:
             source: Source | None = await db.get(Source, source_id)
@@ -115,5 +119,32 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
                 except Exception:
                     await db.commit()
                     logger.exception("Source sync failed for source %s", source_id)
+
+                chain_contacts_source_id = await _find_pending_contacts_source(
+                    db, user_id,
+                )
     finally:
         release_sync_lock(source_id, user_id)
+
+    if chain_contacts_source_id is not None:
+        logger.info(
+            "Auto-scheduling Google Contacts sync %s after Gmail sync for user %s",
+            chain_contacts_source_id,
+            user_id,
+        )
+        schedule_source_sync(chain_contacts_source_id, user_id)
+
+
+async def _find_pending_contacts_source(
+    db: AsyncSession,
+    user_id: uuid.UUID,
+) -> uuid.UUID | None:
+    """Return the ID of a pending Google Contacts source for this user, if any."""
+    result = await db.execute(
+        select(Source.id).where(
+            Source.user_id == user_id,
+            Source.source_type == SourceType.GOOGLE_CONTACTS.value,
+            Source.sync_state == SyncState.PENDING.value,
+        ).limit(1)
+    )
+    return result.scalar_one_or_none()
