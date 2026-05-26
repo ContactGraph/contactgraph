@@ -26,6 +26,8 @@ Transport: Streamable HTTP (trailing slash OK).
 
 Call `connect_source` with the appropriate `source_type`. Both `google_mail` and `google_contacts` are available; additional types will use the same tool surface. When a user connects Google, both sources are auto-created — call `sync_source` on whichever you want to import.
 
+**Multiple Gmail accounts:** A user can connect 2nd/3rd Gmail accounts by calling `connect_source` while already authenticated with a Bearer token. Each Google account gets its own sources and credentials; all contacts merge into one unified graph.
+
 ## Setup flow (OAuth 2.1)
 
 1. Obtain a Bearer token via OAuth 2.1 PKCE (`/.well-known/oauth-protected-resource`).
@@ -42,7 +44,7 @@ Legacy `connect_session_id` parameters still work but are deprecated.
 
 ### `connect_source`
 
-Connect a data source.
+Connect a data source. To add another Gmail account to the same user, call this while authenticated with a Bearer token — the new Google account will be linked automatically.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -57,7 +59,7 @@ List connected sources. **Requires Bearer token** (or deprecated `connect_sessio
 
 ### `sync_source`
 
-Start or restart ingestion for a connected source.
+Start or restart ingestion for a connected source. When called without `source_id`, syncs all connected Gmail sources for the user.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
