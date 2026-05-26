@@ -177,3 +177,64 @@ async def test_request_sync_rejects_when_claim_fails(
     assert result.scheduled is False
     assert "already running" in result.message.lower()
     assert released == [(source.id, user.id)]
+
+
+@pytest.mark.asyncio
+async def test_ensure_google_calendar_source(db_session: AsyncSession) -> None:
+    from contactsafe_server.db.models import User
+
+    user = User(email="cal@example.com")
+    db_session.add(user)
+    await db_session.flush()
+
+    service = SourceService(db_session)
+    source = await service.ensure_google_calendar_source(user.id, user.email)
+
+    assert source.source_type == SourceType.GOOGLE_CALENDAR.value
+    assert source.connection_status == SourceConnectionStatus.CONNECTED.value
+    assert source.sync_state == SyncState.PENDING.value
+
+
+@pytest.mark.asyncio
+async def test_request_sync_allows_google_calendar_type(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contactsafe_server.db.models import OAuthCredential, Source, User
+    from contactsafe_server.services.crypto import TokenEncryptor
+    from contactsafe_server.config import get_settings
+
+    user = User(email="cal-sync@example.com")
+    db_session.add(user)
+    await db_session.flush()
+    source = Source(
+        user_id=user.id,
+        source_type=SourceType.GOOGLE_CALENDAR.value,
+        label="calendar",
+        external_account_id=user.email,
+        connection_status=SourceConnectionStatus.CONNECTED.value,
+        sync_state=SyncState.PENDING.value,
+    )
+    db_session.add(source)
+    await db_session.flush()
+    enc = TokenEncryptor(get_settings().token_encryption_key)
+    db_session.add(OAuthCredential(
+        user_id=user.id,
+        source_id=source.id,
+        provider=OAuthProvider.GOOGLE.value,
+        external_account_id=user.email,
+        access_token_encrypted=enc.encrypt("a"),
+        refresh_token_encrypted=enc.encrypt("r"),
+        token_expires_at=datetime.now(tz=UTC) + timedelta(hours=1),
+        scopes=["https://www.googleapis.com/auth/calendar.readonly"],
+        is_valid=True,
+    ))
+    await db_session.flush()
+
+    monkeypatch.setattr(
+        "contactsafe_server.services.source_service.schedule_source_sync",
+        lambda *_args, **_kwargs: True,
+    )
+    result = await SourceService(db_session).request_sync(source.id)
+    assert result.scheduled is True
+    assert result.sync_state == SyncState.SYNCING
