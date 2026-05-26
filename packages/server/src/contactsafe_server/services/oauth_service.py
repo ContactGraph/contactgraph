@@ -5,10 +5,10 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from contactsafe_core.enums import OAuthProvider, SessionStatus, SourceType, SyncState
+from contactsafe_core.enums import IdentityKind, OAuthProvider, SessionStatus, SourceType, SyncState
 from contactsafe_core.schemas import ConnectSourceResult
 from contactsafe_server.config import Settings
-from contactsafe_server.db.models import ConnectSession, OAuthCredential, Source, User
+from contactsafe_server.db.models import ConnectSession, OAuthCredential, Source, User, UserIdentity
 from contactsafe_server.oauth.google import GoogleOAuthClient, GoogleTokens, GoogleUserInfo
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.source_service import SourceService
@@ -37,8 +37,14 @@ class OAuthService:
         self,
         user_token: str | None = None,
         source_type: SourceType = SourceType.GOOGLE_MAIL,
+        *,
+        authenticated_user_id: uuid.UUID | None = None,
     ) -> ConnectSourceResult:
-        """Start OAuth flow or return existing connection for a known user."""
+        """Start OAuth flow or return existing connection for a known user.
+
+        When ``authenticated_user_id`` is provided the new Google account will
+        be linked to the existing user on callback (add-another-account flow).
+        """
         if source_type not in self._GOOGLE_SOURCE_TYPES:
             raise ValueError(f"connect_source not implemented for {source_type.value}")
 
@@ -54,6 +60,7 @@ class OAuthService:
             state=state,
             status=SessionStatus.PENDING.value,
             requested_scopes=list(self._settings.google_scopes),
+            user_id=authenticated_user_id,
         )
         self._db.add(session)
         await self._db.flush()
@@ -88,8 +95,8 @@ class OAuthService:
         if not email:
             raise ValueError("Google account did not return an email address")
 
-        user: User = await self._upsert_user(email, userinfo)
-        cred: OAuthCredential = await self._upsert_credentials(user.id, tokens)
+        user: User = await self._resolve_or_create_user(email, userinfo, session)
+        cred: OAuthCredential = await self._upsert_credentials(user.id, email, tokens)
         source: Source = await self._sources.ensure_google_mail_source(user.id, email)
         await self._sources.link_credential_to_source(cred, source)
 
@@ -108,12 +115,13 @@ class OAuthService:
 
     async def _check_existing_by_email(self, email: str) -> ConnectSourceResult | None:
         normalized: str = email.strip().lower()
-        result = await self._db.execute(select(User).where(User.email == normalized))
-        user: User | None = result.scalar_one_or_none()
+        user: User | None = await self._find_user_by_email(normalized)
         if user is None:
             return None
 
-        cred: OAuthCredential | None = await self._get_valid_credential(user.id)
+        cred: OAuthCredential | None = await self._get_valid_credential(
+            user.id, external_account_id=normalized,
+        )
         if cred is None:
             return None
 
@@ -147,13 +155,49 @@ class OAuthService:
             source_id=source.id,
         )
 
-    async def _upsert_user(self, email: str, userinfo: GoogleUserInfo) -> User:
-        result = await self._db.execute(select(User).where(User.email == email))
-        existing: User | None = result.scalar_one_or_none()
-        if existing is not None:
-            existing.google_profile_name = userinfo.get("name")
-            existing.google_profile_picture = userinfo.get("picture")
-            return existing
+    async def _find_user_by_email(self, email: str) -> User | None:
+        """Look up a user via the user_identities table."""
+        result = await self._db.execute(
+            select(User).join(UserIdentity).where(
+                UserIdentity.kind == IdentityKind.EMAIL.value,
+                UserIdentity.value == email,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def _resolve_or_create_user(
+        self,
+        email: str,
+        userinfo: GoogleUserInfo,
+        session: ConnectSession,
+    ) -> User:
+        """Resolve an existing user via identity lookup, or create a new one.
+
+        Three cases:
+        1. Email already in user_identities -> return that user (reconnect / known link).
+        2. Email unknown + session has user_id -> link email to existing user (add account).
+        3. Email unknown + no session user_id -> create new user + identity (signup).
+        """
+        existing_user: User | None = await self._find_user_by_email(email)
+        if existing_user is not None:
+            existing_user.google_profile_name = userinfo.get("name")
+            existing_user.google_profile_picture = userinfo.get("picture")
+            return existing_user
+
+        if session.user_id is not None:
+            user = await self._db.get(User, session.user_id)
+            if user is None:
+                raise ValueError("Session references a non-existent user")
+            identity = UserIdentity(
+                user_id=user.id,
+                kind=IdentityKind.EMAIL.value,
+                value=email,
+                is_primary=False,
+                verified_at=datetime.now(tz=UTC),
+            )
+            self._db.add(identity)
+            await self._db.flush()
+            return user
 
         user = User(
             email=email,
@@ -162,15 +206,25 @@ class OAuthService:
         )
         self._db.add(user)
         await self._db.flush()
+        identity = UserIdentity(
+            user_id=user.id,
+            kind=IdentityKind.EMAIL.value,
+            value=email,
+            is_primary=True,
+            verified_at=datetime.now(tz=UTC),
+        )
+        self._db.add(identity)
+        await self._db.flush()
         return user
 
     async def _upsert_credentials(
-        self, user_id: uuid.UUID, tokens: GoogleTokens
+        self, user_id: uuid.UUID, external_account_id: str, tokens: GoogleTokens,
     ) -> OAuthCredential:
         result = await self._db.execute(
             select(OAuthCredential).where(
                 OAuthCredential.user_id == user_id,
                 OAuthCredential.provider == OAuthProvider.GOOGLE.value,
+                OAuthCredential.external_account_id == external_account_id,
             )
         )
         existing: OAuthCredential | None = result.scalar_one_or_none()
@@ -188,6 +242,7 @@ class OAuthService:
         cred = OAuthCredential(
             user_id=user_id,
             provider=OAuthProvider.GOOGLE.value,
+            external_account_id=external_account_id,
             access_token_encrypted=access_encrypted,
             refresh_token_encrypted=refresh_encrypted,
             token_expires_at=tokens.expires_at,
@@ -198,14 +253,23 @@ class OAuthService:
         await self._db.flush()
         return cred
 
-    async def _get_valid_credential(self, user_id: uuid.UUID) -> OAuthCredential | None:
-        result = await self._db.execute(
-            select(OAuthCredential).where(
-                OAuthCredential.user_id == user_id,
-                OAuthCredential.provider == OAuthProvider.GOOGLE.value,
-                OAuthCredential.is_valid.is_(True),
-            )
+    async def _get_valid_credential(
+        self,
+        user_id: uuid.UUID,
+        *,
+        external_account_id: str | None = None,
+    ) -> OAuthCredential | None:
+        """Find a valid Google credential, optionally scoped to a specific account."""
+        query = select(OAuthCredential).where(
+            OAuthCredential.user_id == user_id,
+            OAuthCredential.provider == OAuthProvider.GOOGLE.value,
+            OAuthCredential.is_valid.is_(True),
         )
+        if external_account_id is not None:
+            query = query.where(
+                OAuthCredential.external_account_id == external_account_id,
+            )
+        result = await self._db.execute(query.limit(1))
         return result.scalar_one_or_none()
 
     async def _get_session(self, session_id: uuid.UUID) -> ConnectSession | None:

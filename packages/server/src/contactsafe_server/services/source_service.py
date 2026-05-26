@@ -214,8 +214,22 @@ class SourceService:
         return result
 
     async def request_sync_for_user(self, user_id: uuid.UUID) -> SyncSourceResult:
-        source_id: uuid.UUID = await self.resolve_source_id(user_id=user_id)
-        return await self.request_sync(source_id)
+        result = await self._db.execute(
+            select(Source)
+            .where(
+                Source.user_id == user_id,
+                Source.source_type == SourceType.GOOGLE_MAIL.value,
+            )
+            .order_by(Source.created_at)
+        )
+        sources: list[Source] = list(result.scalars().all())
+        if not sources:
+            raise ValueError("No google_mail source for this user")
+        last_result: SyncSourceResult | None = None
+        for source in sources:
+            last_result = await self.request_sync(source.id)
+        assert last_result is not None
+        return last_result
 
     async def resolve_source_id(
         self,
@@ -397,10 +411,13 @@ class SourceService:
 
     async def _get_default_google_mail_source(self, user_id: uuid.UUID) -> Source | None:
         result = await self._db.execute(
-            select(Source).where(
+            select(Source)
+            .where(
                 Source.user_id == user_id,
                 Source.source_type == SourceType.GOOGLE_MAIL.value,
             )
+            .order_by(Source.created_at)
+            .limit(1)
         )
         return result.scalar_one_or_none()
 
@@ -457,15 +474,28 @@ class SourceService:
                 OAuthCredential.is_valid.is_(True),
             )
         )
-        cred = result.scalar_one_or_none()
+        cred: OAuthCredential | None = result.scalar_one_or_none()
         if cred is not None:
             return cred
         result = await self._db.execute(
             select(OAuthCredential).where(
                 OAuthCredential.user_id == source.user_id,
                 OAuthCredential.provider == OAuthProvider.GOOGLE.value,
+                OAuthCredential.external_account_id == source.external_account_id,
                 OAuthCredential.is_valid.is_(True),
             )
+        )
+        cred = result.scalar_one_or_none()
+        if cred is not None:
+            return cred
+        result = await self._db.execute(
+            select(OAuthCredential)
+            .where(
+                OAuthCredential.user_id == source.user_id,
+                OAuthCredential.provider == OAuthProvider.GOOGLE.value,
+                OAuthCredential.is_valid.is_(True),
+            )
+            .limit(1)
         )
         return result.scalar_one_or_none()
 
