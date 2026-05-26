@@ -21,6 +21,7 @@ class QueryPlan(BaseModel):
     name_tokens: list[str] = Field(default_factory=list)
     org_names: list[str] = Field(default_factory=list)
     categories_any: list[str] = Field(default_factory=list)
+    type_keywords: list[str] = Field(default_factory=list)
     role_keywords: list[str] = Field(default_factory=list)
     relationship_types_any: list[str] = Field(default_factory=list)
     require_genuine_contact: bool = False

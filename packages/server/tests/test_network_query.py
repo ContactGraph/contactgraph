@@ -139,6 +139,106 @@ async def test_category_filter_aliases_investor_to_vc(db_session: AsyncSession) 
     assert matches[0].name == "Jane Investor"
 
 
+async def test_type_keywords_matches_descriptive_tags(db_session: AsyncSession) -> None:
+    """type_keywords should match against Person.descriptive_tags via array overlap."""
+    user = User(email=f"typekw-{uuid.uuid4()}@example.com")
+    db_session.add(user)
+    await db_session.flush()
+
+    teacher = Person(
+        canonical_name="Sara Educator",
+        primary_email="sara@school.edu",
+        descriptive_tags=["teacher", "educator", "academic"],
+        inferred_categories=[],
+    )
+    engineer = Person(
+        canonical_name="Dan Dev",
+        primary_email="dan@techco.io",
+        descriptive_tags=["engineer", "devops"],
+        inferred_categories=["engineer"],
+    )
+    db_session.add_all([teacher, engineer])
+    await db_session.flush()
+
+    db_session.add_all([
+        UserPersonObservation(
+            user_id=user.id, person_id=teacher.id,
+            tie_strength_score=0.6, is_broadcast=False, is_automated=False, email_count=10,
+        ),
+        UserPersonObservation(
+            user_id=user.id, person_id=engineer.id,
+            tie_strength_score=0.9, is_broadcast=False, is_automated=False, email_count=50,
+        ),
+    ])
+    await db_session.flush()
+
+    matches = await NetworkQueryService(db_session).execute(
+        user_id=user.id,
+        plan=QueryPlan(type_keywords=["teacher", "professor", "educator"], limit=10),
+    )
+    assert len(matches) == 1
+    assert matches[0].name == "Sara Educator"
+    assert "teacher" in matches[0].descriptive_tags
+
+
+async def test_type_keywords_matches_role_freetext(db_session: AsyncSession) -> None:
+    """type_keywords should also match freetext in current_role."""
+    user = User(email=f"rolekw-{uuid.uuid4()}@example.com")
+    db_session.add(user)
+    await db_session.flush()
+
+    artist = Person(
+        canonical_name="Kim Painter",
+        primary_email="kim@gallery.art",
+        current_role="Visual Artist & Illustrator",
+        descriptive_tags=[],
+        inferred_categories=[],
+    )
+    db_session.add(artist)
+    await db_session.flush()
+
+    db_session.add(UserPersonObservation(
+        user_id=user.id, person_id=artist.id,
+        tie_strength_score=0.5, is_broadcast=False, is_automated=False, email_count=5,
+    ))
+    await db_session.flush()
+
+    matches = await NetworkQueryService(db_session).execute(
+        user_id=user.id,
+        plan=QueryPlan(type_keywords=["artist", "painter", "illustrator"], limit=10),
+    )
+    assert len(matches) == 1
+    assert matches[0].name == "Kim Painter"
+
+
+async def test_type_keywords_no_fallback_to_unfiltered(db_session: AsyncSession) -> None:
+    """When no one matches type_keywords, return empty."""
+    user = User(email=f"notype-{uuid.uuid4()}@example.com")
+    db_session.add(user)
+    await db_session.flush()
+
+    person = Person(
+        canonical_name="Random Contact",
+        primary_email="random@gmail.com",
+        descriptive_tags=[],
+        inferred_categories=[],
+    )
+    db_session.add(person)
+    await db_session.flush()
+
+    db_session.add(UserPersonObservation(
+        user_id=user.id, person_id=person.id,
+        tie_strength_score=0.99, is_broadcast=False, is_automated=False, email_count=200,
+    ))
+    await db_session.flush()
+
+    matches = await NetworkQueryService(db_session).execute(
+        user_id=user.id,
+        plan=QueryPlan(type_keywords=["journalist", "reporter", "media"], limit=25),
+    )
+    assert matches == []
+
+
 async def test_also_known_as_in_results(db_session: AsyncSession) -> None:
     user = User(email=f"aka-{uuid.uuid4()}@example.com")
     db_session.add(user)
@@ -170,6 +270,44 @@ async def test_also_known_as_in_results(db_session: AsyncSession) -> None:
     assert "mchen@gmail.com" in matches[0].also_known_as
     assert "marcus@horizon.vc" in matches[0].also_known_as
     assert "https://linkedin.com/in/mchen" in matches[0].also_known_as
+
+
+async def test_category_filter_no_fallback_to_unfiltered(db_session: AsyncSession) -> None:
+    """When no one matches the category, return empty — never fall back to top-N by tie strength."""
+    user = User(email=f"nofallback-{uuid.uuid4()}@example.com")
+    db_session.add(user)
+    await db_session.flush()
+
+    engineer = Person(
+        canonical_name="Alice Builder",
+        primary_email="alice@startup.io",
+        inferred_categories=["engineer"],
+    )
+    family = Person(
+        canonical_name="Mom",
+        primary_email="mom@gmail.com",
+        inferred_categories=[],
+    )
+    db_session.add_all([engineer, family])
+    await db_session.flush()
+
+    db_session.add_all([
+        UserPersonObservation(
+            user_id=user.id, person_id=engineer.id,
+            tie_strength_score=0.9, is_broadcast=False, is_automated=False, email_count=50,
+        ),
+        UserPersonObservation(
+            user_id=user.id, person_id=family.id,
+            tie_strength_score=0.99, is_broadcast=False, is_automated=False, email_count=200,
+        ),
+    ])
+    await db_session.flush()
+
+    matches = await NetworkQueryService(db_session).execute(
+        user_id=user.id,
+        plan=QueryPlan(categories_any=["vc"], limit=25),
+    )
+    assert matches == []
 
 
 async def test_excludes_automated_by_default(db_session: AsyncSession) -> None:

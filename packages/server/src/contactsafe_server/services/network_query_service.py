@@ -159,6 +159,28 @@ def _category_match_condition(categories: list[str]) -> ColumnElement[bool]:
     return _pg_text_array_overlaps(Person.inferred_categories, lowered)
 
 
+def _type_keywords_condition(keywords: list[str]) -> ColumnElement[bool]:
+    """Match type_keywords against descriptive_tags (array overlap) OR freetext in role/bio/org."""
+    conditions: list[ColumnElement[bool]] = []
+    lowered: list[str] = [k.strip().lower() for k in keywords if k.strip()]
+    if not lowered:
+        return cast(literal(True), ColumnElement[bool])
+
+    # Fast path: array overlap on descriptive_tags
+    conditions.append(_pg_text_array_overlaps(Person.descriptive_tags, lowered))
+    # Also match against inferred_categories for backward compat
+    conditions.append(_pg_text_array_overlaps(Person.inferred_categories, lowered))
+
+    # Freetext ILIKE across role, bio, org
+    for kw in lowered:
+        pattern: str = f"%{kw}%"
+        conditions.append(func.lower(func.coalesce(Person.current_role, "")).like(pattern))
+        conditions.append(func.lower(func.coalesce(Person.bio_summary, "")).like(pattern))
+        conditions.append(func.lower(func.coalesce(Person.current_org_name, "")).like(pattern))
+
+    return or_(*conditions)
+
+
 class NetworkQueryService:
     def __init__(self, db: AsyncSession) -> None:
         self._db: AsyncSession = db
@@ -188,7 +210,23 @@ class NetworkQueryService:
         relaxed: QueryPlan | None = self._relax_plan(plan)
         if relaxed is not None:
             logger.info("Strict query returned 0 results, retrying with relaxed plan")
-            return await self._execute_plan(user_id, relaxed)
+            relaxed_matches: list[PersonMatch] = await self._execute_plan(user_id, relaxed)
+            if relaxed_matches:
+                return relaxed_matches
+
+        # Semantic fallback: if the plan had type_keywords and keyword search
+        # found nothing, try embedding-based search over bios/excerpts.
+        if plan.type_keywords:
+            semantic_query: str = " ".join(plan.type_keywords[:5])
+            semantic_plan: QueryPlan = plan.model_copy(deep=True)
+            semantic_plan.semantic_query = semantic_query
+            semantic_results: list[PersonMatch] | None = await self._semantic_search(
+                user_id=user_id,
+                plan=semantic_plan,
+            )
+            if semantic_results:
+                return semantic_results
+
         return []
 
     async def execute_second_degree(
@@ -242,7 +280,12 @@ class NetworkQueryService:
 
     @staticmethod
     def _relax_plan(plan: QueryPlan) -> QueryPlan | None:
-        """Drop the most restrictive optional filters for a retry."""
+        """Drop secondary filters for a retry, preserving primary intent filters.
+
+        categories_any, type_keywords, and org_names are primary intent filters
+        and are never relaxed — returning unfiltered results when a user asked
+        for a specific category/type is worse than returning nothing.
+        """
         relaxed: QueryPlan = plan.model_copy(deep=True)
         changed: bool = False
         if relaxed.relationship_types_any:
@@ -251,13 +294,14 @@ class NetworkQueryService:
         if relaxed.require_genuine_contact:
             relaxed.require_genuine_contact = False
             changed = True
-        if relaxed.categories_any:
-            relaxed.categories_any = []
-            changed = True
         if relaxed.role_keywords:
             relaxed.role_keywords = []
             changed = True
-        return relaxed if changed else None
+        if not changed:
+            return None
+        if not _plan_has_substantive_filters(relaxed):
+            return None
+        return relaxed
 
     async def _execute_plan(
         self,
@@ -320,7 +364,14 @@ class NetworkQueryService:
             ]
             stmt = stmt.where(or_(*org_conditions))
 
-        if plan.categories_any:
+        if plan.categories_any and plan.type_keywords:
+            stmt = stmt.where(or_(
+                _category_match_condition(plan.categories_any),
+                _type_keywords_condition(plan.type_keywords),
+            ))
+        elif plan.type_keywords:
+            stmt = stmt.where(_type_keywords_condition(plan.type_keywords))
+        elif plan.categories_any:
             stmt = stmt.where(_category_match_condition(plan.categories_any))
 
         for role_kw in plan.role_keywords:
@@ -466,6 +517,16 @@ class NetworkQueryService:
             ]
             if matched_cats:
                 reasons.append(f"categories: {', '.join(matched_cats)}")
+        if plan.type_keywords:
+            kw_set: set[str] = {k.lower() for k in plan.type_keywords}
+            matched_tags: list[str] = [
+                t for t in (person.descriptive_tags or [])
+                if t.lower() in kw_set
+            ]
+            if matched_tags:
+                reasons.append(f"tags: {', '.join(matched_tags)}")
+            elif person.current_role and any(k in person.current_role.lower() for k in kw_set):
+                reasons.append(f"role: {person.current_role}")
         if plan.role_keywords and person.current_role:
             reasons.append(f"role: {person.current_role}")
 
@@ -500,6 +561,7 @@ class NetworkQueryService:
             org_name=person.current_org_name,
             current_role=person.current_role,
             inferred_categories=list(person.inferred_categories),
+            descriptive_tags=list(person.descriptive_tags),
             social_profiles=social,
             bio_summary=person.bio_summary,
             also_known_as=also_known_as or [],
@@ -532,6 +594,7 @@ def _plan_has_substantive_filters(plan: QueryPlan) -> bool:
         plan.name_tokens
         or plan.org_names
         or plan.categories_any
+        or plan.type_keywords
         or plan.role_keywords
         or plan.relationship_types_any
         or plan.semantic_query

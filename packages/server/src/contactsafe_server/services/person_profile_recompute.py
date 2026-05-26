@@ -90,6 +90,7 @@ class PersonProfileRecompute:
 
         social_profiles: dict[str, str] = {}
         categories: list[str] = []
+        descriptive_tags: list[str] = []
         bio_summary: str | None = None
         location: str | None = None
         phone_numbers: list[str] = []
@@ -102,6 +103,9 @@ class PersonProfileRecompute:
             elif attr.kind == "category":
                 if attr.value not in categories:
                     categories.append(attr.value)
+            elif attr.kind == "descriptive_tag":
+                if attr.value not in descriptive_tags:
+                    descriptive_tags.append(attr.value)
             elif attr.kind == "bio_summary":
                 if len(attr.value) > best_bio_len:
                     bio_summary = attr.value
@@ -152,6 +156,7 @@ class PersonProfileRecompute:
                 bio_summary=bio_summary,
                 social_profiles=social_profiles,
                 inferred_categories=categories,
+                descriptive_tags=descriptive_tags,
                 phone_numbers=phone_numbers,
                 location=location,
             )

@@ -17,8 +17,14 @@ Schema:
 - intent: list_people | lookup_contact | semantic_search
 - name_tokens: person-name tokens to match in person names (e.g. ["chris", "lee"] for "Chris Lee")
 - org_names: company names (e.g. ["Cowboy VC", "AIX"])
-- categories_any: person categories (e.g. ["vc", "founder", "engineer"])
-- role_keywords: job title keywords (e.g. ["revops", "revenue operations"])
+- categories_any: legacy short tags — only use ["vc", "founder", "engineer", "sales"] if applicable
+- type_keywords: 5–10 expanded synonyms for "type of person" queries. Use whenever the question asks about a category/type/profession of contact. Expand broadly with synonyms, related terms, and industry jargon.
+  Examples:
+    "investors" → ["investor", "angel", "vc", "venture", "partner", "fund", "capital", "lp", "limited partner"]
+    "teachers" → ["teacher", "professor", "instructor", "educator", "lecturer", "tutor", "academic"]
+    "artists" → ["artist", "painter", "sculptor", "illustrator", "creative director", "gallery", "musician"]
+    "nonprofit" → ["nonprofit", "ngo", "charity", "foundation", "social enterprise", "philanthropy"]
+- role_keywords: job title keywords for ADDITIONAL filtering (e.g. ["revops"]). Do NOT duplicate type_keywords here.
 - relationship_types_any: ONLY use for structural graph queries like "who knows who" or co-occurrence. Leave EMPTY for vague social terms.
 - require_genuine_contact: true when the question implies two-way communication ("people I actually talk to", "friends")
 - exclude_broadcast: true to omit newsletters/marketing (default true)
@@ -27,6 +33,7 @@ Schema:
 - limit: max results (use 1 for lookup_contact with name+org)
 
 IMPORTANT mapping rules:
+- "what investors/teachers/artists/etc. do I know?" → use type_keywords with 5–10 broad synonyms. Also set categories_any if one of the 4 legacy tags applies.
 - "friends", "close contacts", "people I know" → sort_by=tie_strength, require_genuine_contact=true, relationship_types_any=[] (NOT ["friend"])
 - "who do I email most" → sort_by=tie_strength, limit=10
 - Person name lookups → name_tokens with lowercase tokens
@@ -88,6 +95,8 @@ class QueryPlanner:
             merged.org_names = heuristic.org_names
         if not merged.categories_any:
             merged.categories_any = heuristic.categories_any
+        if not merged.type_keywords:
+            merged.type_keywords = heuristic.type_keywords
         if not merged.role_keywords:
             merged.role_keywords = heuristic.role_keywords
         if merged.semantic_query is None and heuristic.semantic_query is not None:
