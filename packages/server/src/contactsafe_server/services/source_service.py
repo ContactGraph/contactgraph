@@ -63,34 +63,6 @@ class SourceService:
         await self._db.flush()
         return source
 
-    async def ensure_google_calendar_source(self, user_id: uuid.UUID, email: str) -> Source:
-        normalized: str = email.strip().lower()
-        result = await self._db.execute(
-            select(Source).where(
-                Source.user_id == user_id,
-                Source.source_type == SourceType.GOOGLE_CALENDAR.value,
-                Source.external_account_id == normalized,
-            )
-        )
-        existing: Source | None = result.scalar_one_or_none()
-        if existing is not None:
-            existing.connection_status = SourceConnectionStatus.CONNECTED.value
-            existing.label = f"{normalized} (calendar)"
-            await self._db.flush()
-            return existing
-
-        source = Source(
-            user_id=user_id,
-            source_type=SourceType.GOOGLE_CALENDAR.value,
-            label=f"{normalized} (calendar)",
-            external_account_id=normalized,
-            connection_status=SourceConnectionStatus.CONNECTED.value,
-            sync_state=SyncState.PENDING.value,
-        )
-        self._db.add(source)
-        await self._db.flush()
-        return source
-
     async def ensure_google_mail_source(self, user_id: uuid.UUID, email: str) -> Source:
         normalized: str = email.strip().lower()
         result = await self._db.execute(
@@ -318,7 +290,6 @@ class SourceService:
         _SYNCABLE_TYPES: set[str] = {
             SourceType.GOOGLE_MAIL.value,
             SourceType.GOOGLE_CONTACTS.value,
-            SourceType.GOOGLE_CALENDAR.value,
         }
         if source.source_type not in _SYNCABLE_TYPES:
             return SyncSourceResult(
@@ -430,7 +401,6 @@ class SourceService:
                 Source.source_type.in_([
                     SourceType.GOOGLE_MAIL.value,
                     SourceType.GOOGLE_CONTACTS.value,
-            SourceType.GOOGLE_CALENDAR.value,
                 ]),
                 Source.sync_state.in_(
                     [SyncState.PARTIAL.value, SyncState.COMPLETE.value]

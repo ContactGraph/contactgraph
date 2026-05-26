@@ -31,7 +31,6 @@ class OAuthService:
     _GOOGLE_SOURCE_TYPES: frozenset[SourceType] = frozenset({
         SourceType.GOOGLE_MAIL,
         SourceType.GOOGLE_CONTACTS,
-        SourceType.GOOGLE_CALENDAR,
     })
 
     async def create_connect_session(
@@ -102,7 +101,6 @@ class OAuthService:
         await self._sources.link_credential_to_source(cred, source)
 
         await self._sources.ensure_google_contacts_source(user.id, email)
-        await self._sources.ensure_google_calendar_source(user.id, email)
 
         session.user_id = user.id
         session.status = SessionStatus.CONNECTED.value
@@ -130,7 +128,6 @@ class OAuthService:
         source: Source = await self._sources.ensure_google_mail_source(user.id, normalized)
         await self._sources.link_credential_to_source(cred, source)
         await self._sources.ensure_google_contacts_source(user.id, normalized)
-        await self._sources.ensure_google_calendar_source(user.id, normalized)
 
         session: ConnectSession = ConnectSession(
             state=secrets.token_urlsafe(32),

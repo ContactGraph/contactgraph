@@ -38,3 +38,22 @@ class IdentityKind(StrEnum):
     EMAIL = "email"
     PHONE = "phone"
     GOOGLE_SUB = "google_sub"
+
+
+class TrustListInviteStatus(StrEnum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    DECLINED = "declined"
+    EXPIRED = "expired"
+
+
+class TrustListMembershipStatus(StrEnum):
+    ACTIVE = "active"
+    MUTED_BY_A = "muted_by_a"
+    MUTED_BY_B = "muted_by_b"
+    REVOKED = "revoked"
+
+
+class ContactPrivacyLabel(StrEnum):
+    STANDARD = "standard"
+    PRIVATE = "private"

@@ -431,3 +431,54 @@ class InteractionExcerpt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="interaction_excerpts")
+
+
+# ---------------------------------------------------------------------------
+# Trust List (2nd-degree queries)
+# ---------------------------------------------------------------------------
+
+
+class TrustListInvite(Base):
+    __tablename__ = "trust_list_invites"
+    __table_args__ = (
+        UniqueConstraint("inviter_user_id", "invitee_email", name="uq_trust_invite_pair"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    inviter_user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    invitee_email: Mapped[str] = mapped_column(Text, nullable=False)
+    referral_code: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    inviter: Mapped["User"] = relationship(foreign_keys=[inviter_user_id])
+
+
+class TrustListMembership(Base):
+    __tablename__ = "trust_list_memberships"
+    __table_args__ = (
+        UniqueConstraint("user_a_id", "user_b_id", name="uq_trust_membership_pair"),
+        CheckConstraint("user_a_id < user_b_id", name="ck_trust_membership_order"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_a_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_b_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    established_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    user_a: Mapped["User"] = relationship(foreign_keys=[user_a_id])
+    user_b: Mapped["User"] = relationship(foreign_keys=[user_b_id])
+
+
+class ContactPrivacyLabelRow(Base):
+    __tablename__ = "contact_privacy_labels"
+    __table_args__ = (
+        UniqueConstraint("user_id", "person_id", name="uq_contact_privacy_user_person"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    person_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False)
+    label: Mapped[str] = mapped_column(String(32), nullable=False, default="standard")

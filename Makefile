@@ -1,4 +1,4 @@
-.PHONY: dev migrate migrate-new sync test lint typecheck docker-up docker-down
+.PHONY: dev migrate migrate-new sync test coverage lint typecheck docker-up docker-down
 
 sync:
 	uv sync
@@ -21,6 +21,9 @@ dev:
 
 test:
 	uv run --package contactsafe-server --extra dev pytest packages/server/tests -q
+
+coverage:
+	uv run --package contactsafe-server --extra dev pytest packages/server/tests --cov --cov-report=term-missing --cov-report=html:htmlcov -q
 
 lint:
 	uv run ruff check packages
