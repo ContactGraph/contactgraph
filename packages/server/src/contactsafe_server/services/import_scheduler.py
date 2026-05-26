@@ -83,6 +83,23 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
                 except Exception:
                     await db.commit()
                     logger.exception("Google Contacts sync failed for source %s", source_id)
+            elif source.source_type == SourceType.GOOGLE_CALENDAR.value:
+                from contactsafe_server.services.calendar_api_client import CalendarApiClient
+                from contactsafe_server.services.google_calendar_import_service import GoogleCalendarImportService
+
+                calendar = CalendarApiClient(google_client)
+                service_calendar = GoogleCalendarImportService(
+                    db=db,
+                    encryptor=ctx.encryptor,
+                    calendar_client=calendar,
+                )
+                try:
+                    await service_calendar.run_sync(source_id)
+                    await db.commit()
+                    logger.info("Google Calendar sync completed for source %s", source_id)
+                except Exception:
+                    await db.commit()
+                    logger.exception("Google Calendar sync failed for source %s", source_id)
             else:
                 gmail = GmailClient(ctx.settings, google_client)
                 service = ImportService(
