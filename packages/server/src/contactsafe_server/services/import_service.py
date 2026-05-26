@@ -381,6 +381,7 @@ class ImportService:
             seen_at=seen_at,
             from_user=False,
             snippet=meta.snippet,
+            has_list_unsubscribe=meta.has_list_unsubscribe,
         )
         self._accumulate_header(
             contacts,
@@ -419,6 +420,7 @@ class ImportService:
         seen_at: datetime | None,
         from_user: bool,
         snippet: str | None = None,
+        has_list_unsubscribe: bool = False,
     ) -> None:
         if not header:
             return
@@ -443,6 +445,7 @@ class ImportService:
                 seen_at=seen_at,
                 from_user=from_user,
                 snippet=snippet if not from_user else None,
+                has_list_unsubscribe=has_list_unsubscribe if not from_user else False,
             )
 
     def _accumulate_pair_stats(

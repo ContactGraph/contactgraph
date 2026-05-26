@@ -193,6 +193,7 @@ class Person(Base):
     bio_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     social_profiles: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False, default=dict)
     inferred_categories: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    descriptive_tags: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
     phone_numbers: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
     location: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

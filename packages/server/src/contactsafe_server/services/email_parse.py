@@ -74,6 +74,7 @@ class ContactAccumulator:
     outbound_count: int = 0
     inbound_count: int = 0
     pitch_outbound_count: int = 0
+    list_unsubscribe_count: int = 0
     inbound_snippets: list[str] | None = None
 
     def observe(
@@ -83,12 +84,15 @@ class ContactAccumulator:
         seen_at: datetime | None,
         from_user: bool,
         snippet: str | None = None,
+        has_list_unsubscribe: bool = False,
     ) -> None:
         self.message_count += 1
         if from_user:
             self.outbound_count += 1
         else:
             self.inbound_count += 1
+            if has_list_unsubscribe:
+                self.list_unsubscribe_count += 1
             if snippet and snippet.strip():
                 if self.inbound_snippets is None:
                     self.inbound_snippets = []

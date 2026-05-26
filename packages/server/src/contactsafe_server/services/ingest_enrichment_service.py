@@ -429,10 +429,20 @@ class IngestEnrichmentService:
             return
 
         prompt: str = (
-            "For each contact, infer categories (vc, founder, engineer, sales, etc.), "
-            "current_role (job title if known), and improved org_name. "
-            'Return JSON: {"contacts": [{"person_id": "...", "categories": [], '
-            '"current_role": "", "org_name": ""}]}'
+            "For each contact, produce:\n"
+            "- descriptive_tags: 3–8 lowercase tags describing what this person does, "
+            "their industry, and professional identity. Be broad and generous — "
+            "over-tagging is better than under-tagging. "
+            "Examples: investor, angel, vc, venture-capital, founder, teacher, professor, "
+            "artist, journalist, nonprofit, healthcare, real-estate, government, engineer, "
+            "designer, product-manager, recruiter, lawyer, consultant, scientist, musician, "
+            "author, podcaster, executive, sales, marketing, data-science, devops, "
+            "finance, banking, crypto, climate-tech, biotech, edtech.\n"
+            "- categories: legacy short tags (vc, founder, engineer, sales) if applicable.\n"
+            "- current_role: job title if inferrable.\n"
+            "- org_name: company/org if inferrable.\n\n"
+            'Return JSON: {"contacts": [{"person_id": "...", "descriptive_tags": [], '
+            '"categories": [], "current_role": "", "org_name": ""}]}'
         )
         try:
             async with httpx.AsyncClient(timeout=60.0) as http:
@@ -490,6 +500,21 @@ class IngestEnrichmentService:
 
             primary_email: str = person.primary_email or ""
             local_part: str = primary_email.rsplit("@", 1)[0].lower() if primary_email else ""
+
+            tags_raw: object = item.get("descriptive_tags")
+            if isinstance(tags_raw, list):
+                tag_items: list[object] = cast(list[object], tags_raw)
+                for t in tag_items:
+                    if isinstance(t, (str, int)):
+                        await record_person_attribute(
+                            self._db,
+                            person_id=person.id,
+                            kind="descriptive_tag",
+                            value=str(t).lower().strip(),
+                            contributor_user_id=user_id,
+                            contributor_source_kind="llm",
+                            confidence=0.6,
+                        )
 
             cats_raw: object = item.get("categories")
             if isinstance(cats_raw, list):

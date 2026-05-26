@@ -112,6 +112,7 @@ class PersonMatch(BaseModel):
     org_name: str | None = None
     current_role: str | None = None
     inferred_categories: list[str] = Field(default_factory=list)
+    descriptive_tags: list[str] = Field(default_factory=list)
     social_profiles: dict[str, str] = Field(default_factory=dict)
     bio_summary: str | None = None
     also_known_as: list[str] = Field(default_factory=list)

@@ -23,6 +23,7 @@ class GmailMessageMeta:
     to_header: str | None
     cc_header: str | None
     snippet: str | None
+    has_list_unsubscribe: bool = False
 
 
 class GmailClient:
@@ -82,6 +83,7 @@ class GmailClient:
             ("metadataHeaders", "To"),
             ("metadataHeaders", "Cc"),
             ("metadataHeaders", "Date"),
+            ("metadataHeaders", "List-Unsubscribe"),
         ]
         data: dict[str, Any] = await self._get_with_query(
             access_token,
@@ -93,10 +95,11 @@ class GmailClient:
         for header in cast(list[dict[str, Any]], payload.get("headers") or []):
             name: str = str(header.get("name", "")).lower()
             value: str = str(header.get("value", ""))
-            if name in {"from", "to", "cc", "date"}:
+            if name in {"from", "to", "cc", "date", "list-unsubscribe"}:
                 headers[name] = value
         snippet_raw: object = data.get("snippet")
         snippet: str | None = str(snippet_raw) if isinstance(snippet_raw, str) and snippet_raw else None
+        has_unsub: bool = bool(headers.get("list-unsubscribe", "").strip())
         return GmailMessageMeta(
             id=str(data.get("id", message_id)),
             internal_date_ms=str(data.get("internalDate")) if data.get("internalDate") else None,
@@ -104,6 +107,7 @@ class GmailClient:
             to_header=headers.get("to"),
             cc_header=headers.get("cc"),
             snippet=snippet,
+            has_list_unsubscribe=has_unsub,
         )
 
     async def _get(

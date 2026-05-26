@@ -40,6 +40,13 @@ def plan_from_heuristics(question: str) -> QueryPlan:
     if _mentions_vcs(q_lower):
         plan.categories_any.extend(["vc", "investor"])
         plan.categories_any = _dedupe(plan.categories_any)
+        plan.type_keywords = _dedupe(plan.type_keywords + [
+            "investor", "angel", "vc", "venture", "partner", "fund", "capital", "lp",
+        ])
+
+    type_kws: list[str] = _extract_type_keywords(q_lower)
+    if type_kws:
+        plan.type_keywords = _dedupe(plan.type_keywords + type_kws)
 
     for role in _extract_role_keywords(q_lower):
         plan.role_keywords.append(role)
@@ -74,6 +81,30 @@ def _is_semantic_intent(q_lower: str) -> bool:
 
 def _mentions_vcs(q_lower: str) -> bool:
     return bool(re.search(r"\b(vcs?|venture capital|investors?)\b", q_lower))
+
+
+_TYPE_KEYWORD_PATTERNS: list[tuple[str, list[str]]] = [
+    (r"\b(teachers?|professors?|educators?)\b", ["teacher", "professor", "instructor", "educator", "lecturer", "tutor", "academic"]),
+    (r"\b(artists?|painters?|sculptors?)\b", ["artist", "painter", "sculptor", "illustrator", "creative director", "gallery", "musician"]),
+    (r"\b(journalists?|reporters?|writers?)\b", ["journalist", "reporter", "writer", "editor", "author", "media", "press"]),
+    (r"\b(lawyers?|attorneys?)\b", ["lawyer", "attorney", "legal", "counsel", "litigator"]),
+    (r"\b(doctors?|physicians?)\b", ["doctor", "physician", "medical", "healthcare", "clinician", "surgeon"]),
+    (r"\b(scientists?|researchers?)\b", ["scientist", "researcher", "academic", "phd", "professor", "lab"]),
+    (r"\b(designers?)\b", ["designer", "ux", "ui", "product designer", "graphic designer", "creative"]),
+    (r"\b(nonprofits?|ngo|charity|philanthrop)\b", ["nonprofit", "ngo", "charity", "foundation", "social enterprise", "philanthropy"]),
+    (r"\b(recruiters?|headhunters?|talent)\b", ["recruiter", "headhunter", "talent", "hiring", "hr"]),
+    (r"\b(consultants?|advisors?)\b", ["consultant", "advisor", "advisory", "consulting"]),
+    (r"\b(founders?|entrepreneurs?)\b", ["founder", "co-founder", "entrepreneur", "startup", "ceo"]),
+    (r"\b(engineers?|developers?|programmers?)\b", ["engineer", "developer", "programmer", "software", "devops", "sre"]),
+]
+
+
+def _extract_type_keywords(q_lower: str) -> list[str]:
+    found: list[str] = []
+    for pattern, keywords in _TYPE_KEYWORD_PATTERNS:
+        if re.search(pattern, q_lower):
+            found.extend(keywords)
+    return found
 
 
 def _extract_role_keywords(q_lower: str) -> list[str]:
@@ -147,6 +178,7 @@ def _has_any_filter(plan: QueryPlan) -> bool:
         plan.name_tokens
         or plan.org_names
         or plan.categories_any
+        or plan.type_keywords
         or plan.role_keywords
         or plan.relationship_types_any
         or plan.semantic_query
