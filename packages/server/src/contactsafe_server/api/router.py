@@ -25,6 +25,7 @@ from contactsafe_core.schemas import (
     EditTrustedUsersResult,
     GetSourceStatusRequest,
     ListSourcesResult,
+    PollConnectResult,
     QueryNetworkRequest,
     QueryNetworkResult,
     SourceStatusResult,
@@ -153,23 +154,68 @@ Ctx = Annotated[AppContext, Depends(_get_app_context)]
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Optional-auth helper (for connect-source)
+# ---------------------------------------------------------------------------
+
+
+async def _optional_authenticate(
+    request: Request,
+    authorization: Annotated[str | None, Header()] = None,
+) -> AuthenticatedUser | None:
+    """Like ``_authenticate`` but returns ``None`` when no token is sent."""
+    if authorization is None or not authorization.lower().startswith("bearer "):
+        return None
+    token: str = authorization[7:].strip()
+    if not token:
+        return None
+    jwt_service: JWTService = _get_jwt_service(request)
+    try:
+        claims: dict[str, Any] = jwt_service.decode_token(token)
+    except ValueError:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if claims.get("typ") == "refresh":
+        raise HTTPException(status_code=401, detail="Refresh tokens cannot be used for API access")
+    sub: str = str(claims.get("sub", ""))
+    if not sub:
+        raise HTTPException(status_code=401, detail="Token missing subject")
+    scopes: str = str(claims.get("scope", ""))
+    return AuthenticatedUser(user_id=UUID(sub), scopes=scopes, is_admin=_ADMIN_SCOPE in scopes)
+
+
+# ---------------------------------------------------------------------------
+# Routes (unauthenticated)
 # ---------------------------------------------------------------------------
 
 
 @router.post("/connect-source", response_model=ConnectSourceResult)
 async def api_connect_source(
     ctx: Ctx,
-    user_id: EffectiveUser,
     body: ConnectSourceRequest | None = None,
+    auth: AuthenticatedUser | None = Depends(_optional_authenticate),
 ) -> ConnectSourceResult:
     b: ConnectSourceRequest = body or ConnectSourceRequest()
+    user_id: UUID | None = auth.user_id if auth else None
     return await actions.connect_source(
         ctx,
         user_id,
         source_type=b.source_type,
         user_token=b.user_token,
     )
+
+
+@router.post("/poll-connect/{connect_session_id}", response_model=PollConnectResult)
+async def api_poll_connect(
+    ctx: Ctx,
+    connect_session_id: UUID,
+) -> PollConnectResult:
+    try:
+        return await actions.poll_connect(ctx, connect_session_id=connect_session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.post("/list-sources", response_model=ListSourcesResult)

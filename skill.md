@@ -14,48 +14,48 @@ Build and query a private contact graph from Gmail and Google Contacts via REST.
 
 ## Authentication
 
-Pass an OAuth 2.1 Bearer token on every `/api` request:
+Pass a Bearer token on every `/api` request (except `connect-source` and `poll-connect`):
 
 ```
 Authorization: Bearer <access_token>
 ```
 
-### Obtain a token (OAuth 2.1 PKCE)
+### Get a token (3 steps)
 
-1. Register a client (once):
+No client registration, PKCE, or callback server needed.
+
+1. Start a connection (no auth required):
 
 ```bash
-curl -s -X POST "$BASE_URL/oauth/register" \
+RESP=$(curl -s -X POST "$BASE_URL/api/connect-source" \
   -H "Content-Type: application/json" \
-  -d '{"client_name":"my-agent","redirect_uris":["http://localhost:9999/callback"]}'
+  -d '{"source_type":"google_mail"}')
+SESSION_ID=$(echo "$RESP" | jq -r '.connect_session_id')
+OAUTH_URL=$(echo "$RESP" | jq -r '.oauth_url')
 ```
 
-2. Generate PKCE values:
+2. Ask the user to open `$OAUTH_URL` in their browser and complete Google sign-in.
+
+3. Poll until you receive tokens:
 
 ```bash
-CODE_VERIFIER=$(openssl rand -base64 64 | tr -d '=+/' | head -c 128)
-CODE_CHALLENGE=$(printf '%s' "$CODE_VERIFIER" | openssl dgst -sha256 -binary | base64 | tr '+/' '-_' | tr -d '=')
-STATE=$(openssl rand -hex 16)
+while true; do
+  POLL=$(curl -s -X POST "$BASE_URL/api/poll-connect/$SESSION_ID")
+  STATUS=$(echo "$POLL" | jq -r '.status')
+  if [ "$STATUS" = "connected" ]; then
+    TOKEN=$(echo "$POLL" | jq -r '.access_token')
+    REFRESH=$(echo "$POLL" | jq -r '.refresh_token')
+    break
+  fi
+  sleep 4
+done
 ```
 
-3. Direct the user to authorize (open in browser):
-
-```
-$BASE_URL/oauth/authorize?redirect_uri=http://localhost:9999/callback&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256&state=$STATE&scope=contactsafe:read+contactsafe:write
-```
-
-4. Exchange the authorization code:
-
-```bash
-curl -s -X POST "$BASE_URL/oauth/token" \
-  -d "grant_type=authorization_code&code=$CODE&redirect_uri=http://localhost:9999/callback&code_verifier=$CODE_VERIFIER"
-```
-
-5. Refresh when expired:
+Tokens are dispensed **once** per session. Store `access_token` and `refresh_token`. Refresh when expired:
 
 ```bash
 curl -s -X POST "$BASE_URL/oauth/token" \
-  -d "grant_type=refresh_token&refresh_token=$REFRESH_TOKEN"
+  -d "grant_type=refresh_token&refresh_token=$REFRESH"
 ```
 
 ### Admin impersonation
@@ -67,13 +67,10 @@ Add `X-On-Behalf-Of: user@example.com` (or a user UUID) to act on behalf of anot
 Connect a user's Google account, sync, and query their contacts:
 
 ```bash
-# 1. Connect Google (returns oauth_url for user to open in browser)
-curl -s -X POST "$BASE_URL/api/connect-source" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"source_type":"google_mail"}'
+# 1. Connect and authenticate (see "Get a token" above)
+# After completing OAuth, you have $TOKEN
 
-# 2. Start sync after user completes OAuth
+# 2. Start sync
 curl -s -X POST "$BASE_URL/api/sync-source" \
   -H "Authorization: Bearer $TOKEN"
 
@@ -81,7 +78,7 @@ curl -s -X POST "$BASE_URL/api/sync-source" \
 curl -s -X POST "$BASE_URL/api/get-source-status" \
   -H "Authorization: Bearer $TOKEN"
 
-# 4. Sync Google Contacts too (grab source_id from list-sources)
+# 4. Sync Google Contacts too
 CONTACTS_ID=$(curl -s -X POST "$BASE_URL/api/list-sources" \
   -H "Authorization: Bearer $TOKEN" | jq -r '.sources[] | select(.source_type=="google_contacts") | .source_id')
 
@@ -103,12 +100,18 @@ All requests are `POST`. All request bodies are JSON. Omit the body for endpoint
 
 ### POST /api/connect-source
 
-Connect a data source. Both `google_mail` and `google_contacts` are auto-created on first Google connect.
+Connect a data source. **No auth required** (for first-time users). Both `google_mail` and `google_contacts` are auto-created on first Google connect.
 
 - `source_type` (string, default `"google_mail"`) — `"google_mail"` or `"google_contacts"`
 - `user_token` (string, optional) — user email to check existing connection
 
-Returns `oauth_url` to open in browser, or `access_token` if already connected. Key fields: `already_connected`, `source_id`, `message`.
+Returns `connect_session_id`, `oauth_url` to open in browser, or `access_token` if already connected. Key fields: `already_connected`, `source_id`, `message`.
+
+### POST /api/poll-connect/{connect_session_id}
+
+Poll for OAuth completion and receive tokens. **No auth required.** Use the `connect_session_id` from `connect-source`.
+
+Returns `status` (`pending` | `connected` | `failed`), `message`. When `connected`: includes `access_token`, `refresh_token`, `email`. Tokens are dispensed once per session.
 
 ### POST /api/list-sources
 
