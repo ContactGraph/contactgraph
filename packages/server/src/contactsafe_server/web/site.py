@@ -14,8 +14,8 @@ _SITE_YEAR: str = str(datetime.now(tz=UTC).year)
 _SITE_NAME: str = "ContactGraph"
 _TAGLINE: str = "Turn your contacts into a superpower."
 _LANDING_DESCRIPTION: str = (
-    f"{_TAGLINE} Connect Gmail via MCP, sync your network, and query it in "
-    "natural language."
+    f"{_TAGLINE} A free, open-source contact graph built from your email, "
+    "contacts, and calendar — searchable by AI, owned by you."
 )
 _MANIFESTO_DESCRIPTION: str = (
     f"{_TAGLINE} We gave away our relationships — ContactGraph builds a private "
@@ -392,13 +392,31 @@ def render_landing_page(*, mcp_path: str, base_url: str) -> str:
     <main class="content">
       <h1>{html.escape(_TAGLINE)}</h1>
       <p class="lead">
-        ContactGraph distills your inboxes, calendars, and messages into a living relationship graph for AI.
-        Ask one question, and the right context appears before the meeting, before the pitch, before the moment is gone.
+        Find the people you and your trusted friends already know.
+        ContactGraph normalizes, enriches, and indexes your email, contacts,
+        and calendar into a private graph you can search by name, company,
+        role, or industry — things that are nearly impossible to dig out of
+        your inbox directly.
       </p>
       <p class="lead">
-        Connect through MCP. Sync your sources. Query your network in natural language.
+        Think of it as an agent-friendly alternative to LinkedIn for
+        "who do I know?" questions — except you own the data, always.
+        Download or delete it anytime.
       </p>
-      <p class="status">Private preview opening soon</p>
+      <p class="lead">
+        <strong>Agent-first.</strong> No human UI yet — ask your AI assistant
+        to set it up. Works with Claude, ChatGPT, and Gemini (via
+        <a href="{html.escape(mcp_path)}">MCP</a>) and with OpenClaw
+        and similar terminal agents (via
+        <a href="/skill.md">skill.md</a>).
+      </p>
+      <p class="lead">
+        <strong>Free</strong> for personal use.
+        <strong><a href="{_GITHUB_REPO_URL}">Open source</a></strong>
+        — contributions welcome.
+        We intend to structure ContactGraph as a nonprofit so the graph
+        is held in public trust. Social graphs should belong to everyone.
+      </p>
     </main>"""
     meta = PageMeta(
         title=f"{_SITE_NAME} — {_TAGLINE}",
