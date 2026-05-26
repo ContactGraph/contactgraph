@@ -464,9 +464,10 @@ class TestCompleteOauth:
         google.fetch_userinfo = AsyncMock(return_value=_make_userinfo(email="orphan@example.com"))
 
         svc: OAuthService = _build_service(db_session, google=google)
-        result: ConnectSourceResult = await svc.create_connect_session(authenticated_user_id=fake_id)
+        result: ConnectSourceResult = await svc.create_connect_session()
         session: ConnectSession | None = await svc.get_session_by_id(result.connect_session_id)
         assert session is not None
+        session.user_id = fake_id
 
         with pytest.raises(ValueError, match="non-existent user"):
             await svc.complete_oauth(session, "code")
@@ -662,10 +663,11 @@ class TestResolveOrCreateUser:
         fake_id: uuid.UUID = uuid.uuid4()
         session: ConnectSession = ConnectSession(
             state="s4", status=SessionStatus.PENDING.value,
-            requested_scopes=["openid"], user_id=fake_id,
+            requested_scopes=["openid"], user_id=None,
         )
         db_session.add(session)
         await db_session.flush()
+        session.user_id = fake_id
 
         userinfo: GoogleUserInfo = _make_userinfo(email="orphan@example.com")
 
