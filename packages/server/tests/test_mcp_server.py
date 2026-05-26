@@ -30,7 +30,6 @@ from contactsafe_server.mcp.server import (
     McpLifespanState,
     _get_user_id_from_ctx,
     _require_lifespan,
-    _resolve_authenticated_user_id,
     create_mcp_server,
 )
 
@@ -144,108 +143,6 @@ class TestGetUserIdFromCtx:
 
 
 # ---------------------------------------------------------------------------
-# _resolve_authenticated_user_id
-# ---------------------------------------------------------------------------
-
-
-class TestResolveAuthenticatedUserId:
-    @pytest.mark.asyncio
-    async def test_returns_user_from_ctx(self) -> None:
-        uid: UUID = uuid4()
-        ctx: MagicMock = _make_ctx(user_id=uid)
-        oauth: AsyncMock = AsyncMock()
-
-        result_id: UUID | None
-        from_session: bool
-        result_id, from_session = await _resolve_authenticated_user_id(ctx, None, oauth)
-
-        assert result_id == uid
-        assert from_session is False
-
-    @pytest.mark.asyncio
-    async def test_returns_user_from_session(self) -> None:
-        session_id: UUID = uuid4()
-        user_id: UUID = uuid4()
-        ctx: MagicMock = _make_ctx(user_id=None)
-
-        session_mock: MagicMock = MagicMock()
-        session_mock.user_id = user_id
-
-        oauth: AsyncMock = AsyncMock()
-        oauth.get_session_by_id = AsyncMock(return_value=session_mock)
-
-        result_id: UUID | None
-        from_session: bool
-        result_id, from_session = await _resolve_authenticated_user_id(
-            ctx, str(session_id), oauth
-        )
-
-        assert result_id == user_id
-        assert from_session is True
-        oauth.get_session_by_id.assert_called_once_with(session_id)
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_no_auth(self) -> None:
-        ctx: MagicMock = _make_ctx(user_id=None)
-        oauth: AsyncMock = AsyncMock()
-
-        result_id: UUID | None
-        from_session: bool
-        result_id, from_session = await _resolve_authenticated_user_id(ctx, None, oauth)
-
-        assert result_id is None
-        assert from_session is False
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_ctx_is_none_and_no_session(self) -> None:
-        oauth: AsyncMock = AsyncMock()
-
-        result_id: UUID | None
-        from_session: bool
-        result_id, from_session = await _resolve_authenticated_user_id(None, None, oauth)
-
-        assert result_id is None
-        assert from_session is False
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_session_has_no_user(self) -> None:
-        session_id: UUID = uuid4()
-        ctx: MagicMock = _make_ctx(user_id=None)
-
-        session_mock: MagicMock = MagicMock()
-        session_mock.user_id = None
-
-        oauth: AsyncMock = AsyncMock()
-        oauth.get_session_by_id = AsyncMock(return_value=session_mock)
-
-        result_id: UUID | None
-        from_session: bool
-        result_id, from_session = await _resolve_authenticated_user_id(
-            ctx, str(session_id), oauth
-        )
-
-        assert result_id is None
-        assert from_session is False
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_session_not_found(self) -> None:
-        session_id: UUID = uuid4()
-        ctx: MagicMock = _make_ctx(user_id=None)
-
-        oauth: AsyncMock = AsyncMock()
-        oauth.get_session_by_id = AsyncMock(return_value=None)
-
-        result_id: UUID | None
-        from_session: bool
-        result_id, from_session = await _resolve_authenticated_user_id(
-            ctx, str(session_id), oauth
-        )
-
-        assert result_id is None
-        assert from_session is False
-
-
-# ---------------------------------------------------------------------------
 # create_mcp_server — verify it returns a FastMCP with registered tools
 # ---------------------------------------------------------------------------
 
@@ -292,7 +189,7 @@ def _build_mcp_and_lifespan() -> tuple[Any, McpLifespanState, MagicMock]:
 
 class TestConnectSourceTool:
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.build_oauth_service")
     async def test_calls_create_connect_session(
         self, mock_build_oauth: MagicMock
     ) -> None:
@@ -332,9 +229,9 @@ class TestConnectSourceTool:
             )
 
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.build_oauth_server_service")
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.build_oauth_server_service")
+    @patch("contactsafe_server.actions.build_source_service")
+    @patch("contactsafe_server.actions.build_oauth_service")
     async def test_mints_tokens_when_already_connected(
         self,
         mock_build_oauth: MagicMock,
@@ -381,7 +278,7 @@ class TestConnectSourceTool:
         mock_oauth_server.mint_tokens_for_user.assert_called_once_with(user_id)
 
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.build_oauth_service")
     async def test_passes_authenticated_user_id(
         self, mock_build_oauth: MagicMock
     ) -> None:
@@ -415,18 +312,9 @@ class TestConnectSourceTool:
 
 class TestListSourcesTool:
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
-    async def test_returns_auth_message_when_no_user(
-        self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
-    ) -> None:
+    async def test_returns_auth_message_when_no_user(self) -> None:
         mcp, lifespan, _app_ctx = _build_mcp_and_lifespan()
         list_sources_fn = _get_tool_fn(mcp, "list_sources")
-
-        mock_resolve.return_value = (None, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         ctx: MagicMock = _make_ctx(user_id=None, lifespan=lifespan)
         result: ListSourcesResult = await list_sources_fn(ctx=ctx)
@@ -435,21 +323,15 @@ class TestListSourcesTool:
         assert "Authentication required" in result.message
 
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.build_source_service")
     async def test_returns_sources_for_authenticated_user(
         self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
         mock_build_source: MagicMock,
     ) -> None:
         mcp, lifespan, _app_ctx = _build_mcp_and_lifespan()
         list_sources_fn = _get_tool_fn(mcp, "list_sources")
 
         user_id: UUID = uuid4()
-        mock_resolve.return_value = (user_id, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         expected: ListSourcesResult = ListSourcesResult(sources=[], message="OK")
         mock_sources: AsyncMock = AsyncMock()
@@ -470,14 +352,10 @@ class TestListSourcesTool:
 
 class TestGetSourceStatusTool:
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.parse_source_id")
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.parse_source_id")
+    @patch("contactsafe_server.actions.build_source_service")
     async def test_with_source_id(
         self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
         mock_build_source: MagicMock,
         mock_parse: MagicMock,
     ) -> None:
@@ -486,8 +364,6 @@ class TestGetSourceStatusTool:
 
         source_uuid: UUID = uuid4()
         mock_parse.return_value = source_uuid
-        mock_resolve.return_value = (None, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         status_result: MagicMock = MagicMock(spec=SourceStatusResult)
         mock_sources: AsyncMock = AsyncMock()
@@ -501,21 +377,15 @@ class TestGetSourceStatusTool:
         mock_sources.get_source_status.assert_called_once_with(source_uuid)
 
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.build_source_service")
     async def test_with_user_id(
         self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
         mock_build_source: MagicMock,
     ) -> None:
         mcp, lifespan, _app_ctx = _build_mcp_and_lifespan()
         fn = _get_tool_fn(mcp, "get_source_status")
 
         user_id: UUID = uuid4()
-        mock_resolve.return_value = (user_id, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         status_result: MagicMock = MagicMock(spec=SourceStatusResult)
         mock_sources: AsyncMock = AsyncMock()
@@ -529,21 +399,9 @@ class TestGetSourceStatusTool:
         mock_sources.get_source_status_for_user.assert_called_once_with(user_id)
 
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
-    async def test_raises_when_no_source_id_or_user(
-        self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
-        mock_build_source: MagicMock,
-    ) -> None:
+    async def test_raises_when_no_source_id_or_user(self) -> None:
         mcp, lifespan, _app_ctx = _build_mcp_and_lifespan()
         fn = _get_tool_fn(mcp, "get_source_status")
-
-        mock_resolve.return_value = (None, False)
-        mock_build_oauth.return_value = AsyncMock()
-        mock_build_source.return_value = AsyncMock()
 
         ctx: MagicMock = _make_ctx(user_id=None, lifespan=lifespan)
         with pytest.raises(ValueError, match="Authentication required"):
@@ -557,14 +415,10 @@ class TestGetSourceStatusTool:
 
 class TestSyncSourceTool:
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.parse_source_id")
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.parse_source_id")
+    @patch("contactsafe_server.actions.build_source_service")
     async def test_with_source_id_calls_request_sync(
         self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
         mock_build_source: MagicMock,
         mock_parse: MagicMock,
     ) -> None:
@@ -573,8 +427,6 @@ class TestSyncSourceTool:
 
         source_uuid: UUID = uuid4()
         mock_parse.return_value = source_uuid
-        mock_resolve.return_value = (None, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         sync_result: MagicMock = MagicMock(spec=SyncSourceResult)
         mock_sources: AsyncMock = AsyncMock()
@@ -588,21 +440,15 @@ class TestSyncSourceTool:
         mock_sources.request_sync.assert_called_once_with(source_uuid)
 
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.build_source_service")
     async def test_without_source_id_calls_request_sync_for_user(
         self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
         mock_build_source: MagicMock,
     ) -> None:
         mcp, lifespan, _app_ctx = _build_mcp_and_lifespan()
         fn = _get_tool_fn(mcp, "sync_source")
 
         user_id: UUID = uuid4()
-        mock_resolve.return_value = (user_id, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         sync_result: MagicMock = MagicMock(spec=SyncSourceResult)
         mock_sources: AsyncMock = AsyncMock()
@@ -616,21 +462,9 @@ class TestSyncSourceTool:
         mock_sources.request_sync_for_user.assert_called_once_with(user_id)
 
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
-    async def test_raises_when_no_auth(
-        self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
-        mock_build_source: MagicMock,
-    ) -> None:
+    async def test_raises_when_no_auth(self) -> None:
         mcp, lifespan, _app_ctx = _build_mcp_and_lifespan()
         fn = _get_tool_fn(mcp, "sync_source")
-
-        mock_resolve.return_value = (None, False)
-        mock_build_oauth.return_value = AsyncMock()
-        mock_build_source.return_value = AsyncMock()
 
         ctx: MagicMock = _make_ctx(user_id=None, lifespan=lifespan)
         with pytest.raises(ValueError, match="Authentication required"):
@@ -644,18 +478,9 @@ class TestSyncSourceTool:
 
 class TestQueryNetworkTool:
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
-    async def test_no_auth_returns_message(
-        self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
-    ) -> None:
+    async def test_no_auth_returns_message(self) -> None:
         mcp, lifespan, _app_ctx = _build_mcp_and_lifespan()
         fn = _get_tool_fn(mcp, "query_network")
-
-        mock_resolve.return_value = (None, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         ctx: MagicMock = _make_ctx(user_id=None, lifespan=lifespan)
         result: QueryNetworkResult = await fn(question="who do I know?", ctx=ctx)
@@ -664,21 +489,15 @@ class TestQueryNetworkTool:
         assert result.question == "who do I know?"
 
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.build_source_service")
     async def test_no_queryable_graph_returns_sync_message(
         self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
         mock_build_source: MagicMock,
     ) -> None:
         mcp, lifespan, _app_ctx = _build_mcp_and_lifespan()
         fn = _get_tool_fn(mcp, "query_network")
 
         user_id: UUID = uuid4()
-        mock_resolve.return_value = (user_id, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         mock_sources: AsyncMock = AsyncMock()
         mock_sources.user_has_queryable_graph = AsyncMock(return_value=False)
@@ -690,15 +509,11 @@ class TestQueryNetworkTool:
         assert "Sync still running" in result.message
 
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.NetworkQueryService")
-    @patch("contactsafe_server.mcp.server.QueryPlanner")
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.NetworkQueryService")
+    @patch("contactsafe_server.actions.QueryPlanner")
+    @patch("contactsafe_server.actions.build_source_service")
     async def test_plans_and_executes_query(
         self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
         mock_build_source: MagicMock,
         mock_planner_cls: MagicMock,
         mock_executor_cls: MagicMock,
@@ -707,8 +522,6 @@ class TestQueryNetworkTool:
         fn = _get_tool_fn(mcp, "query_network")
 
         user_id: UUID = uuid4()
-        mock_resolve.return_value = (user_id, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         mock_sources: AsyncMock = AsyncMock()
         mock_sources.user_has_queryable_graph = AsyncMock(return_value=True)
@@ -740,15 +553,11 @@ class TestQueryNetworkTool:
         assert "1 direct contact" in result.message
 
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.NetworkQueryService")
-    @patch("contactsafe_server.mcp.server.QueryPlanner")
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.NetworkQueryService")
+    @patch("contactsafe_server.actions.QueryPlanner")
+    @patch("contactsafe_server.actions.build_source_service")
     async def test_empty_results_with_filters(
         self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
         mock_build_source: MagicMock,
         mock_planner_cls: MagicMock,
         mock_executor_cls: MagicMock,
@@ -757,8 +566,6 @@ class TestQueryNetworkTool:
         fn = _get_tool_fn(mcp, "query_network")
 
         user_id: UUID = uuid4()
-        mock_resolve.return_value = (user_id, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         mock_sources: AsyncMock = AsyncMock()
         mock_sources.user_has_queryable_graph = AsyncMock(return_value=True)
@@ -781,15 +588,11 @@ class TestQueryNetworkTool:
         assert "No matching contacts" in result.message
 
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.NetworkQueryService")
-    @patch("contactsafe_server.mcp.server.QueryPlanner")
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.NetworkQueryService")
+    @patch("contactsafe_server.actions.QueryPlanner")
+    @patch("contactsafe_server.actions.build_source_service")
     async def test_empty_results_without_filters(
         self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
         mock_build_source: MagicMock,
         mock_planner_cls: MagicMock,
         mock_executor_cls: MagicMock,
@@ -798,8 +601,6 @@ class TestQueryNetworkTool:
         fn = _get_tool_fn(mcp, "query_network")
 
         user_id: UUID = uuid4()
-        mock_resolve.return_value = (user_id, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         mock_sources: AsyncMock = AsyncMock()
         mock_sources.user_has_queryable_graph = AsyncMock(return_value=True)
@@ -828,18 +629,9 @@ class TestQueryNetworkTool:
 
 class TestDescribeGraphTool:
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
-    async def test_no_auth_returns_message(
-        self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
-    ) -> None:
+    async def test_no_auth_returns_message(self) -> None:
         mcp, lifespan, _app_ctx = _build_mcp_and_lifespan()
         fn = _get_tool_fn(mcp, "describe_graph")
-
-        mock_resolve.return_value = (None, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         ctx: MagicMock = _make_ctx(user_id=None, lifespan=lifespan)
         result: DescribeGraphResult = await fn(ctx=ctx)
@@ -847,21 +639,15 @@ class TestDescribeGraphTool:
         assert "Authentication required" in result.message
 
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.build_source_service")
     async def test_no_queryable_graph_returns_sync_message(
         self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
         mock_build_source: MagicMock,
     ) -> None:
         mcp, lifespan, _app_ctx = _build_mcp_and_lifespan()
         fn = _get_tool_fn(mcp, "describe_graph")
 
         user_id: UUID = uuid4()
-        mock_resolve.return_value = (user_id, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         mock_sources: AsyncMock = AsyncMock()
         mock_sources.user_has_queryable_graph = AsyncMock(return_value=False)
@@ -873,14 +659,10 @@ class TestDescribeGraphTool:
         assert "Sync still running" in result.message
 
     @pytest.mark.asyncio
-    @patch("contactsafe_server.mcp.server.GraphSummaryService")
-    @patch("contactsafe_server.mcp.server.build_source_service")
-    @patch("contactsafe_server.mcp.server._resolve_authenticated_user_id")
-    @patch("contactsafe_server.mcp.server.build_oauth_service")
+    @patch("contactsafe_server.actions.GraphSummaryService")
+    @patch("contactsafe_server.actions.build_source_service")
     async def test_returns_summary(
         self,
-        mock_build_oauth: MagicMock,
-        mock_resolve: AsyncMock,
         mock_build_source: MagicMock,
         mock_graph_cls: MagicMock,
     ) -> None:
@@ -888,8 +670,6 @@ class TestDescribeGraphTool:
         fn = _get_tool_fn(mcp, "describe_graph")
 
         user_id: UUID = uuid4()
-        mock_resolve.return_value = (user_id, False)
-        mock_build_oauth.return_value = AsyncMock()
 
         mock_sources: AsyncMock = AsyncMock()
         mock_sources.user_has_queryable_graph = AsyncMock(return_value=True)

@@ -1,115 +1,312 @@
-# ContactGraph
+# ContactGraph REST API
 
-ContactGraph builds a private contact graph from connected **data sources** so your AI agent can answer questions about the user's network — who they know, where people work, and how strong each relationship is.
+ContactGraph builds a private contact graph from Gmail, Google Contacts, and other data sources. This document describes the REST API for terminal-based agents and scripts.
 
-The architecture is **source-agnostic**: Gmail is the first connector; more sources (Calendar, LinkedIn, messaging apps, etc.) plug into the same MCP tools and unified graph.
+## Base URL
 
-**Free forever for consumers.** We never sell your data. You can delete everything anytime.
+| Environment | Base URL |
+|-------------|----------|
+| **Production** | `https://www.contactgraph.ai` |
+| Local dev | `http://localhost:8000` |
 
-## MCP Server
+All REST endpoints are under `/api`. All requests are `POST` with `Content-Type: application/json`.
 
-| Environment | URL |
-|-------------|-----|
-| **Production** | `https://www.contactgraph.ai/mcp` |
-| Local dev | `http://localhost:8000/mcp` |
+## Authentication
 
-Transport: Streamable HTTP (trailing slash OK).
+Every `/api` request requires an OAuth 2.1 Bearer token:
+
+```
+Authorization: Bearer <access_token>
+```
+
+### Obtaining a token
+
+ContactGraph implements OAuth 2.1 with PKCE. The flow for a terminal agent:
+
+1. **Register a client** (once):
+   ```bash
+   curl -s -X POST "$BASE_URL/register" \
+     -H "Content-Type: application/json" \
+     -d '{"client_name":"my-agent","redirect_uris":["http://localhost:9999/callback"]}'
+   ```
+
+2. **Generate PKCE values:**
+   ```bash
+   CODE_VERIFIER=$(openssl rand -base64 64 | tr -d '=+/' | head -c 128)
+   CODE_CHALLENGE=$(printf '%s' "$CODE_VERIFIER" | openssl dgst -sha256 -binary | base64 | tr '+/' '-_' | tr -d '=')
+   STATE=$(openssl rand -hex 16)
+   ```
+
+3. **Direct the user to authorize** (open in browser):
+   ```
+   $BASE_URL/authorize?redirect_uri=http://localhost:9999/callback&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256&state=$STATE&scope=contactsafe:read+contactsafe:write
+   ```
+
+4. **Exchange the authorization code:**
+   ```bash
+   curl -s -X POST "$BASE_URL/token" \
+     -d "grant_type=authorization_code&code=$CODE&redirect_uri=http://localhost:9999/callback&code_verifier=$CODE_VERIFIER"
+   ```
+   Response contains `access_token`, `refresh_token`, `expires_in`.
+
+5. **Refresh when expired:**
+   ```bash
+   curl -s -X POST "$BASE_URL/token" \
+     -d "grant_type=refresh_token&refresh_token=$REFRESH_TOKEN"
+   ```
+
+### Admin impersonation
+
+Tokens with `contactsafe:admin` scope can act on behalf of another user by adding:
+
+```
+X-On-Behalf-Of: user@example.com
+```
+
+The header accepts an email address or a user UUID.
+
+## Setup flow
+
+A typical first-time integration:
+
+```bash
+# 1. Connect Google (returns oauth_url for the user to open)
+curl -s -X POST "$BASE_URL/api/connect-source" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"source_type":"google_mail"}'
+
+# 2. After user completes OAuth, start sync
+curl -s -X POST "$BASE_URL/api/sync-source" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 3. Poll until sync_state is "partial" or "complete" (~30s for partial)
+curl -s -X POST "$BASE_URL/api/get-source-status" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 4. Also sync Google Contacts (get source_id from list-sources first)
+CONTACTS_ID=$(curl -s -X POST "$BASE_URL/api/list-sources" \
+  -H "Authorization: Bearer $TOKEN" | jq -r '.sources[] | select(.source_type=="google_contacts") | .source_id')
+
+curl -s -X POST "$BASE_URL/api/sync-source" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"source_id\":\"$CONTACTS_ID\"}"
+
+# 5. Query the graph
+curl -s -X POST "$BASE_URL/api/query-network" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"question":"Who do I know at Stripe?"}'
+```
+
+## Endpoints
+
+### POST /api/connect-source
+
+Connect a data source. Both `google_mail` and `google_contacts` are auto-created when a user connects Google.
+
+**Request body** (all fields optional):
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `source_type` | string | `"google_mail"` | `"google_mail"` or `"google_contacts"` |
+| `user_token` | string | null | User email to check an existing connection |
+
+**Response** (`ConnectSourceResult`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `connect_session_id` | UUID | Session identifier |
+| `oauth_url` | string | URL for user to open in browser |
+| `status` | string | `"pending"`, `"complete"`, etc. |
+| `already_connected` | bool | True if this source is already linked |
+| `email` | string? | Connected email address |
+| `source_id` | UUID? | Source identifier (if already connected) |
+| `access_token` | string? | Returned if already connected |
+| `refresh_token` | string? | Returned if already connected |
+| `message` | string | Human-readable status |
+
+### POST /api/list-sources
+
+List all connected data sources for the authenticated user. No request body.
+
+**Response** (`ListSourcesResult`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `sources` | array | List of `SourceSummary` objects |
+| `message` | string | Human-readable status |
+
+Each `SourceSummary`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source_id` | UUID | Use with other endpoints |
+| `source_type` | string | `"google_mail"`, `"google_contacts"` |
+| `label` | string | Display name (usually email) |
+| `external_account_id` | string | Google account email |
+| `connection_status` | string | `"pending_oauth"`, `"connected"` |
+| `sync_state` | string | `"pending"`, `"syncing"`, `"partial"`, `"complete"`, `"failed"` |
+| `contacts_found` | int | Raw contacts discovered |
+| `contacts_resolved` | int | Contacts processed |
+| `contacts_pending` | int | Contacts awaiting processing |
+
+### POST /api/get-source-status
+
+Detailed status for a specific source or the user's primary source.
+
+**Request body** (optional):
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `source_id` | string | null | Specific source UUID; omit for user default |
+
+**Response** (`SourceStatusResult`): Same fields as `SourceSummary` plus `email`, `scopes`, `connect_session_id`.
+
+### POST /api/sync-source
+
+Start or restart ingestion. Without `source_id`, syncs all Gmail sources for the user.
+
+**Request body** (optional):
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `source_id` | string | null | Specific source to sync; omit for all Gmail sources |
+
+**Response** (`SyncSourceResult`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source_id` | UUID | Source that was scheduled |
+| `scheduled` | bool | Whether sync was accepted |
+| `sync_state` | string | Current state after scheduling |
+| `email` | string? | Account email |
+| `message` | string | Human-readable status |
+
+### POST /api/query-network
+
+Natural-language search over the contact graph. Wait until sync is `partial` or `complete` before querying.
+
+**Request body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `question` | string | yes | e.g. `"Who do I know at Stripe?"`, `"find VCs"`, `"engineers in SF"` |
+
+**Response** (`QueryNetworkResult`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `question` | string | Echo of the input |
+| `matches` | array | `PersonMatch` objects (first-degree contacts) |
+| `second_degree_matches` | array | Contacts visible via trust list (name/org/role only) |
+| `applied_plan` | object? | The parsed query plan (for debugging) |
+| `message` | string | Human-readable summary |
+
+Each `PersonMatch`:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `person_id` | UUID | Stable identifier |
+| `name` | string | Full name |
+| `emails` | string[] | Known email addresses |
+| `org_name` | string? | Current organization |
+| `current_role` | string? | Job title |
+| `inferred_categories` | string[] | e.g. `["vc", "investor"]` |
+| `social_profiles` | object | e.g. `{"linkedin": "..."}` |
+| `bio_summary` | string? | Short bio |
+| `tie_strength_score` | float | 0.0 to 1.0 |
+| `match_reason` | string | Why this person matched |
+
+### POST /api/describe-graph
+
+High-level summary of the user's contact graph. No request body.
+
+**Response** (`DescribeGraphResult`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total_contacts` | int | All contacts |
+| `human_contacts` | int | Real people (not mailing lists) |
+| `broadcast_contacts` | int | Newsletters, mailing lists |
+| `automated_contacts` | int | Automated senders |
+| `queryable_contacts` | int | Contacts available for search |
+| `top_categories` | array | `[{"category": "vc", "count": 12}, ...]` |
+| `top_orgs` | array | `[{"org_name": "Google", "count": 8}, ...]` |
+| `strongest_ties` | array | Top `PersonMatch` objects by tie strength |
+| `message` | string | Human-readable summary |
+
+### POST /api/view-trusted-users
+
+View the trust list: active members, pending outbound invites, and inbound invites awaiting response. No request body.
+
+**Response** (`ViewTrustedUsersResult`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `members` | array | Active trust list members |
+| `outbound_invites` | array | Invites you've sent |
+| `inbound_invites` | array | Invites awaiting your response |
+| `max_members` | int | Maximum allowed (20) |
+| `message` | string | Human-readable status |
+
+### POST /api/edit-trusted-users
+
+Manage the trust list (max 20 mutual connections). Trust list members can see each other's contacts (name, org, role) in query results.
+
+**Request body** (all fields optional):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `add` | string[] | Email addresses to invite |
+| `remove` | string[] | Email addresses to remove |
+| `accept` | string[] | Invite IDs to accept |
+| `decline` | string[] | Invite IDs to decline |
+| `set_privacy` | object[] | `[{"person_id": "...", "label": "private"}]` to hide contacts |
+
+**Response** (`EditTrustedUsersResult`):
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `added` | string[] | Successfully invited |
+| `removed` | string[] | Successfully removed |
+| `accepted` | string[] | Successfully accepted |
+| `declined` | string[] | Successfully declined |
+| `privacy_updated` | string[] | Contacts whose privacy was changed |
+| `invite_copy` | string? | Suggested invite text for users not yet on ContactGraph |
+| `message` | string | Human-readable summary |
+
+## Error responses
+
+All errors return JSON with `detail`:
+
+```json
+{"detail": "Bearer token required"}
+```
+
+| Status | Meaning |
+|--------|---------|
+| 401 | Missing or invalid Bearer token |
+| 403 | `X-On-Behalf-Of` used without admin scope |
+| 404 | User not found (admin impersonation) |
+| 422 | Invalid request body |
 
 ## Data sources
 
 | `source_type` | Status |
 |---------------|--------|
-| `google_mail` | **Available** — Gmail metadata → contacts, orgs, tie strength |
-| `google_contacts` | **Available** — Google Contacts / People API → names, phone numbers, orgs |
+| `google_mail` | Available — Gmail metadata (contacts, orgs, tie strength) |
+| `google_contacts` | Available — Google Contacts (names, phones, orgs) |
 | `google_calendar` | Planned |
-| Others | Roadmap |
 
-Call `connect_source` with the appropriate `source_type`. Both `google_mail` and `google_contacts` are available; additional types will use the same tool surface. When a user connects Google, both sources are auto-created — call `sync_source` on whichever you want to import.
+Both Google sources share one OAuth consent. Connecting either auto-creates both.
 
-**Multiple Gmail accounts:** A user can connect 2nd/3rd Gmail accounts by calling `connect_source` while already authenticated with a Bearer token. Each Google account gets its own sources and credentials; all contacts merge into one unified graph.
-
-## Setup flow (OAuth 2.1)
-
-1. Obtain a Bearer token via OAuth 2.1 PKCE (`/.well-known/oauth-protected-resource`).
-2. `connect_source(source_type="google_mail")` — returns `oauth_url` if the user has not connected Google yet. Ask the user to open it and consent. This also creates a `google_contacts` source automatically.
-3. `sync_source` — starts Gmail import (no browser step). To also import phone contacts, call `sync_source` with the `google_contacts` source_id from `list_sources`.
-4. Poll `get_source_status` until `sync_state` is `partial` or `complete`. During sync, counts update every few seconds; `partial` usually arrives within ~30s.
-5. `describe_graph` for a high-level overview, or `query_network(question="...")` for filtered search.
-
-Re-run `sync_source` after ContactGraph upgrades or schema changes.
-
-Legacy `connect_session_id` parameters still work but are deprecated.
-
-## Tools
-
-### `connect_source`
-
-Connect a data source. To add another Gmail account to the same user, call this while authenticated with a Bearer token — the new Google account will be linked automatically.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `source_type` | string | No | Default `google_mail`. Also: `google_contacts`, future: `google_calendar`, etc. |
-| `user_token` | string | No | User email if checking an existing connection |
-
-**Returns:** `oauth_url`, `status`, `message`, `already_connected`, `email`, `source_id`, optional `access_token` if already connected
-
-### `list_sources`
-
-List connected sources. **Requires Bearer token** (or deprecated `connect_session_id`).
-
-### `sync_source`
-
-Start or restart ingestion for a connected source. When called without `source_id`, syncs all connected Gmail sources for the user.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `source_id` | string | No* | From `list_sources` |
-| `connect_session_id` | string | No* | Deprecated |
-
-**Returns:** `scheduled`, `sync_state`, `source_id`, `message`
-
-### `get_source_status`
-
-Connection and sync progress.
-
-**Returns:** `connection_status`, `sync_state` (`pending` \| `syncing` \| `partial` \| `complete` \| `failed`), contact counts, `email`, `message`
-
-### `query_network`
-
-Natural-language search over the user's graph.
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `question` | string | Yes | e.g. "Who do I know at Stripe?" |
-| `source_id` | string | No | Scope to a user resolved via source |
-| `connect_session_id` | string | No | Deprecated |
-
-Wait until sync is `partial` or `complete` before querying.
-
-### `describe_graph`
-
-High-level graph summary for broad questions like "who do I know?" or "summarize my network".
-
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `source_id` | string | No | Scope to a user resolved via source |
-| `connect_session_id` | string | No | Deprecated |
-
-**Returns:** contact counts (total, human, broadcast, automated, queryable), `top_categories`, `top_orgs`, `strongest_ties`, and a short `message`. Follow up with `query_network` for filtered lists.
-
-## Agent pitch (suggested)
-
-> I can search your personal network if we connect your email. ContactGraph builds a private contact graph from Gmail (more sources coming) — read-only, you stay in control. Want me to set it up?
-
-## OAuth scopes
-
-- `gmail.readonly` — contact graph from email metadata (no long-term body storage)
-- `contacts.readonly` — import contacts from Google Contacts (names, phone numbers, orgs)
-- `calendar.readonly` — requested for the upcoming Calendar connector; not ingested yet
-- `openid`, `email`, `profile` — identity only
+Multiple Gmail accounts can be linked by calling `connect-source` while authenticated — each account gets its own sources; all contacts merge into one graph.
 
 ## Privacy
 
 - Raw email bodies are not stored long-term.
 - Tokens are encrypted at rest.
-- Per-user data isolation; no cross-user access without explicit Trust List consent (future).
+- Per-user data isolation; no cross-user access without explicit trust list consent.
+- Free forever for consumers. Your data is never sold. Delete everything anytime.

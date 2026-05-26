@@ -8,9 +8,10 @@ from fastapi.responses import FileResponse, HTMLResponse
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
 
+from contactsafe_server.api.router import router as api_router
 from contactsafe_server.config import Settings, get_settings
 from contactsafe_server.db.connection import init_db, shutdown_db
-from contactsafe_server.deps import build_app_context, build_jwt_service
+from contactsafe_server.deps import AppContext, build_app_context, build_jwt_service
 from contactsafe_server.mcp.auth_middleware import McpAuthMiddleware
 from contactsafe_server.mcp.path_middleware import NormalizeMcpPathMiddleware
 from contactsafe_server.mcp.server import create_mcp_server
@@ -38,7 +39,8 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def app_lifespan(_app: FastAPI) -> AsyncGenerator[None, None]:
-        build_app_context()
+        ctx: AppContext = build_app_context()
+        _app.state.app_context = ctx
         await init_db(settings)
         # Mounted Starlette apps do not run their own lifespan under FastAPI; start MCP here.
         async with mcp_server.session_manager.run():
@@ -67,6 +69,7 @@ def create_app() -> FastAPI:
 
     app.include_router(oauth_router)
     app.include_router(well_known_router)
+    app.include_router(api_router, prefix="/api")
     app.mount(settings.mcp_path, mcp_http_app)
 
     @app.get("/health")  # pyright: ignore[reportUnusedFunction]
