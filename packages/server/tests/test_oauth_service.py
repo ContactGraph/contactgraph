@@ -458,19 +458,28 @@ class TestCompleteOauth:
         assert contacts_source.external_account_id == "contacts@example.com"
 
     async def test_session_references_nonexistent_user_raises(self, db_session: AsyncSession) -> None:
+        """The DB FK constraint prevents a session from referencing a
+        non-existent user, so _resolve_or_create_user raising ValueError
+        for this case is tested via a mock session below."""
         fake_id: uuid.UUID = uuid.uuid4()
         google: AsyncMock = _mock_google()
         google.exchange_code = AsyncMock(return_value=_make_tokens())
         google.fetch_userinfo = AsyncMock(return_value=_make_userinfo(email="orphan@example.com"))
 
         svc: OAuthService = _build_service(db_session, google=google)
-        result: ConnectSourceResult = await svc.create_connect_session()
-        session: ConnectSession | None = await svc.get_session_by_id(result.connect_session_id)
-        assert session is not None
-        session.user_id = fake_id
+
+        mock_session: MagicMock = MagicMock(spec=ConnectSession)
+        mock_session.user_id = fake_id
+        mock_session.state = "mock-state"
+        mock_session.status = SessionStatus.PENDING.value
 
         with pytest.raises(ValueError, match="non-existent user"):
-            await svc.complete_oauth(session, "code")
+            async with db_session.no_autoflush:
+                await svc._resolve_or_create_user(
+                    "orphan@example.com",
+                    _make_userinfo(email="orphan@example.com"),
+                    mock_session,
+                )
 
 
 # ===================================================================
@@ -659,20 +668,18 @@ class TestResolveOrCreateUser:
         assert identity.is_primary is True
 
     async def test_session_references_deleted_user_raises(self, db_session: AsyncSession) -> None:
+        """FK constraint prevents inserting a session with a non-existent user_id.
+        Test the ValueError path via a mock session with a fake user_id."""
         svc: OAuthService = _build_service(db_session)
         fake_id: uuid.UUID = uuid.uuid4()
-        session: ConnectSession = ConnectSession(
-            state="s4", status=SessionStatus.PENDING.value,
-            requested_scopes=["openid"], user_id=None,
-        )
-        db_session.add(session)
-        await db_session.flush()
-        session.user_id = fake_id
+
+        mock_session: MagicMock = MagicMock(spec=ConnectSession)
+        mock_session.user_id = fake_id
 
         userinfo: GoogleUserInfo = _make_userinfo(email="orphan@example.com")
 
         with pytest.raises(ValueError, match="non-existent user"):
-            await svc._resolve_or_create_user("orphan@example.com", userinfo, session)
+            await svc._resolve_or_create_user("orphan@example.com", userinfo, mock_session)
 
 
 # ===================================================================
