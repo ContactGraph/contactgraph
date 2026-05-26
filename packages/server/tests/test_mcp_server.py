@@ -232,7 +232,7 @@ class TestConnectSourceTool:
     @patch("contactsafe_server.actions.build_oauth_server_service")
     @patch("contactsafe_server.actions.build_source_service")
     @patch("contactsafe_server.actions.build_oauth_service")
-    async def test_mints_tokens_when_already_connected(
+    async def test_does_not_mint_tokens_when_unauthenticated_already_connected(
         self,
         mock_build_oauth: MagicMock,
         mock_build_source: MagicMock,
@@ -268,6 +268,56 @@ class TestConnectSourceTool:
         mock_build_oauth_server.return_value = mock_oauth_server
 
         ctx: MagicMock = _make_ctx(user_id=None, lifespan=lifespan)
+        result: ConnectSourceResult = await connect_source_fn(
+            source_type="google_mail", user_token=None, ctx=ctx
+        )
+
+        assert result.access_token is None
+        assert result.refresh_token is None
+        mock_sources.resolve_user_id.assert_called_once_with(source_id=source_id)
+        mock_oauth_server.mint_tokens_for_user.assert_not_called()
+
+
+    @pytest.mark.asyncio
+    @patch("contactsafe_server.actions.build_oauth_server_service")
+    @patch("contactsafe_server.actions.build_source_service")
+    @patch("contactsafe_server.actions.build_oauth_service")
+    async def test_mints_tokens_when_authenticated_user_matches_source_owner(
+        self,
+        mock_build_oauth: MagicMock,
+        mock_build_source: MagicMock,
+        mock_build_oauth_server: MagicMock,
+    ) -> None:
+        mcp, lifespan, _app_ctx = _build_mcp_and_lifespan()
+        connect_source_fn = _get_tool_fn(mcp, "connect_source")
+
+        source_id: UUID = uuid4()
+        user_id: UUID = uuid4()
+
+        connect_result: ConnectSourceResult = ConnectSourceResult(
+            connect_session_id=uuid4(),
+            oauth_url="http://testserver/oauth/start",
+            status="pending",  # type: ignore[arg-type]
+            message="Already connected",
+            already_connected=True,
+            source_id=source_id,
+        )
+        mock_oauth: AsyncMock = AsyncMock()
+        mock_oauth.create_connect_session = AsyncMock(return_value=connect_result)
+        mock_build_oauth.return_value = mock_oauth
+
+        mock_sources: AsyncMock = AsyncMock()
+        mock_sources.resolve_user_id = AsyncMock(return_value=user_id)
+        mock_build_source.return_value = mock_sources
+
+        token_response: MagicMock = MagicMock()
+        token_response.access_token = "access-tok"
+        token_response.refresh_token = "refresh-tok"
+        mock_oauth_server: AsyncMock = AsyncMock()
+        mock_oauth_server.mint_tokens_for_user = AsyncMock(return_value=token_response)
+        mock_build_oauth_server.return_value = mock_oauth_server
+
+        ctx: MagicMock = _make_ctx(user_id=user_id, lifespan=lifespan)
         result: ConnectSourceResult = await connect_source_fn(
             source_type="google_mail", user_token=None, ctx=ctx
         )

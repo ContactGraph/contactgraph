@@ -66,15 +66,25 @@ async def connect_source(
         if result.already_connected and result.source_id is not None:
             sources: SourceService = build_source_service(db)
             resolved_uid: UUID = await sources.resolve_user_id(source_id=result.source_id)
-            token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
-                resolved_uid
-            )
-            result = result.model_copy(
-                update={
-                    "access_token": token_response.access_token,
-                    "refresh_token": token_response.refresh_token,
-                }
-            )
+            if user_id is not None and resolved_uid == user_id:
+                token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
+                    resolved_uid
+                )
+                result = result.model_copy(
+                    update={
+                        "access_token": token_response.access_token,
+                        "refresh_token": token_response.refresh_token,
+                    }
+                )
+            else:
+                logger.warning(
+                    "Suppressing token mint for already-connected source due to unauthenticated or mismatched user",
+                    extra={
+                        "authenticated_user_id": str(user_id) if user_id is not None else None,
+                        "resolved_user_id": str(resolved_uid),
+                        "source_id": str(result.source_id),
+                    },
+                )
         await db.commit()
         return result
 
