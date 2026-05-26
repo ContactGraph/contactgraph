@@ -290,8 +290,21 @@ class GoogleContactsImportService:
             select(OAuthCredential).where(
                 OAuthCredential.user_id == source.user_id,
                 OAuthCredential.provider == OAuthProvider.GOOGLE.value,
+                OAuthCredential.external_account_id == source.external_account_id,
                 OAuthCredential.is_valid.is_(True),
             )
+        )
+        cred = result.scalar_one_or_none()
+        if cred is not None:
+            return cred
+        result = await self._db.execute(
+            select(OAuthCredential)
+            .where(
+                OAuthCredential.user_id == source.user_id,
+                OAuthCredential.provider == OAuthProvider.GOOGLE.value,
+                OAuthCredential.is_valid.is_(True),
+            )
+            .limit(1)
         )
         return result.scalar_one_or_none()
 

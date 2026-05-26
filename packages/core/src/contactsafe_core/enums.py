@@ -32,3 +32,9 @@ class SyncState(StrEnum):
     PARTIAL = "partial"
     COMPLETE = "complete"
     FAILED = "failed"
+
+
+class IdentityKind(StrEnum):
+    EMAIL = "email"
+    PHONE = "phone"
+    GOOGLE_SUB = "google_sub"

@@ -55,6 +55,8 @@ def create_mcp_server(settings: Settings) -> FastMCP:
             "Authenticate with OAuth 2.1 Bearer tokens (see /.well-known/oauth-protected-resource). "
             "Available source types: google_mail (Gmail metadata), google_contacts (Google Contacts / People API). "
             "Both share one Google OAuth consent — connecting either auto-creates both sources. "
+            "Multiple Gmail accounts can be linked to a single user: call connect_source "
+            "while authenticated to add another Google account. All contacts merge into one graph. "
             "Use connect_source to start OAuth, list_sources to see connections, "
             "sync_source to (re)start ingestion, get_source_status for progress, "
             "describe_graph for a high-level graph summary, "
@@ -78,6 +80,9 @@ def create_mcp_server(settings: Settings) -> FastMCP:
         Both share one Google OAuth consent flow. Connecting either auto-creates both
         sources. Returns oauth_url when browser authorization is needed, or
         access_token when the account is already connected.
+
+        To add a second/third Gmail account, call this while authenticated with a
+        Bearer token. The new Google account will be linked to the existing user.
         """
         lifespan: McpLifespanState = _require_lifespan(ctx)
         try:
@@ -87,9 +92,13 @@ def create_mcp_server(settings: Settings) -> FastMCP:
 
         async with lifespan.app_context.session_factory() as db:
             oauth: OAuthService = build_oauth_service(db, lifespan.app_context)
+            authenticated_user_id: UUID | None = None
+            if ctx is not None:
+                authenticated_user_id = _get_user_id_from_ctx(ctx)
             result: ConnectSourceResult = await oauth.create_connect_session(
                 user_token,
                 source_type=parsed_type,
+                authenticated_user_id=authenticated_user_id,
             )
             if result.already_connected and result.source_id is not None:
                 sources: SourceService = build_source_service(db)
@@ -153,7 +162,10 @@ def create_mcp_server(settings: Settings) -> FastMCP:
         source_id: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> SyncSourceResult:
-        """Start or restart ingestion for a connected source (no browser step)."""
+        """Start or restart ingestion for a connected source (no browser step).
+
+        When called without source_id, syncs all connected Gmail sources for the user.
+        """
         lifespan: McpLifespanState = _require_lifespan(ctx)
         async with lifespan.app_context.session_factory() as db:
             oauth: OAuthService = build_oauth_service(db, lifespan.app_context)

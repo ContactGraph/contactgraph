@@ -8,13 +8,14 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from contactsafe_core.enums import OAuthProvider, SourceConnectionStatus, SourceType, SyncState
+from contactsafe_core.enums import IdentityKind, OAuthProvider, SourceConnectionStatus, SourceType, SyncState
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import (
     OAuthCredential,
     Person,
     Source,
     User,
+    UserIdentity,
     UserPersonObservation,
     UserRelationshipObservation,
 )
@@ -101,9 +102,10 @@ class ImportService:
 
             resolver = EntityResolver(self._db)
 
+            source_email: str = source.external_account_id or user.email
             contacts, person_pair_counts, upserted_emails = await self._scan_and_ingest_gmail(
                 access_token=access_token,
-                user_email=user.email,
+                user_email=source_email,
                 user_id=user_id,
                 source=source,
                 resolver=resolver,
@@ -123,7 +125,7 @@ class ImportService:
                     continue
                 await self._upsert_person(
                     user_id,
-                    user.email,
+                    source_email,
                     accumulator,
                     source_id=source.id,
                     resolver=resolver,
@@ -169,15 +171,16 @@ class ImportService:
     async def run_import(self, user_id: uuid.UUID) -> None:
         """Deprecated: use run_sync with the user's google_mail source_id."""
         result = await self._db.execute(
-            select(Source).where(
+            select(Source)
+            .where(
                 Source.user_id == user_id,
                 Source.source_type == SourceType.GOOGLE_MAIL.value,
             )
+            .order_by(Source.created_at)
         )
-        source: Source | None = result.scalar_one_or_none()
-        if source is None:
-            return
-        await self.run_sync(source.id)
+        sources: list[Source] = list(result.scalars().all())
+        for source in sources:
+            await self.run_sync(source.id)
 
     async def _commit_progress(self, source: Source) -> None:
         await self._db.commit()
@@ -725,6 +728,14 @@ class ImportService:
         emails: set[str] = {user_email.strip().lower()}
         if source.external_account_id:
             emails.add(source.external_account_id.strip().lower())
+        result = await self._db.execute(
+            select(UserIdentity.value).where(
+                UserIdentity.user_id == source.user_id,
+                UserIdentity.kind == IdentityKind.EMAIL.value,
+            )
+        )
+        for row_value in result.scalars().all():
+            emails.add(str(row_value).strip().lower())
         local_parts: set[str] = {email_local_part(email) for email in emails}
         return emails, local_parts
 
@@ -742,8 +753,21 @@ class ImportService:
             select(OAuthCredential).where(
                 OAuthCredential.user_id == source.user_id,
                 OAuthCredential.provider == OAuthProvider.GOOGLE.value,
+                OAuthCredential.external_account_id == source.external_account_id,
                 OAuthCredential.is_valid.is_(True),
             )
+        )
+        cred = result.scalar_one_or_none()
+        if cred is not None:
+            return cred
+        result = await self._db.execute(
+            select(OAuthCredential)
+            .where(
+                OAuthCredential.user_id == source.user_id,
+                OAuthCredential.provider == OAuthProvider.GOOGLE.value,
+                OAuthCredential.is_valid.is_(True),
+            )
+            .limit(1)
         )
         return result.scalar_one_or_none()
 

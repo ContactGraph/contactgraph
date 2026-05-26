@@ -73,6 +73,7 @@ async def _connected_gmail_source(db_session: AsyncSession) -> tuple:
         user_id=user.id,
         source_id=source.id,
         provider=OAuthProvider.GOOGLE.value,
+        external_account_id=user.email,
         access_token_encrypted=encryptor.encrypt("access"),
         refresh_token_encrypted=encryptor.encrypt("refresh"),
         token_expires_at=datetime.now(tz=UTC) + timedelta(hours=1),
