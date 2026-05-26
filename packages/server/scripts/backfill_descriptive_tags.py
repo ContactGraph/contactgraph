@@ -112,15 +112,16 @@ async def main(batch_size: int, limit: int, dry_run: bool) -> None:
     session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(engine, expire_on_commit=False)
 
     async with session_factory() as session:
+        empty_array: list[str] = []
         count_result = await session.execute(
-            select(func.count(Person.id)).where(Person.descriptive_tags == cast([], list[str]))
+            select(func.count(Person.id)).where(Person.descriptive_tags == empty_array)
         )
         total: int = count_result.scalar() or 0
         logger.info("Found %d persons with empty descriptive_tags (limit=%d)", total, limit)
 
         stmt = (
             select(Person)
-            .where(Person.descriptive_tags == cast([], list[str]))
+            .where(Person.descriptive_tags == empty_array)
             .order_by(Person.updated_at.desc())
             .limit(limit)
         )
