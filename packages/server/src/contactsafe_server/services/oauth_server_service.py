@@ -60,9 +60,19 @@ def verify_pkce(code_verifier: str, code_challenge: str, method: str) -> bool:
     return secrets.compare_digest(computed, code_challenge)
 
 
-def parse_scopes_param(scope: str) -> list[str]:
+def parse_scopes_param(scope: str, *, allow_admin: bool = False) -> list[str]:
     scopes: list[str] = [s for s in scope.split() if s]
-    return scopes if scopes else list(DEFAULT_MCP_SCOPES)
+    requested: list[str] = scopes if scopes else list(DEFAULT_MCP_SCOPES)
+
+    allowed_scopes: set[str] = set(DEFAULT_MCP_SCOPES)
+    if allow_admin:
+        allowed_scopes.add("contactsafe:admin")
+
+    invalid: list[str] = [s for s in requested if s not in allowed_scopes]
+    if invalid:
+        raise ValueError(f"Unsupported scope(s): {' '.join(sorted(set(invalid)))}")
+
+    return requested
 
 
 class OAuthServerService:
