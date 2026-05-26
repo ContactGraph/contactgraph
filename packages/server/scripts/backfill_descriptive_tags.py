@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sess
 os.environ.setdefault("APP_ENV", "development")
 
 from contactsafe_server.config import get_settings  # noqa: E402
-from contactsafe_server.db.models import Person, PersonAttributeClaim  # noqa: E402
+from contactsafe_server.db.models import Person, PersonAttributeClaim, UserPersonObservation  # noqa: E402
 from contactsafe_server.services.claim_writer import record_person_attribute  # noqa: E402
 from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute  # noqa: E402
 from contactsafe_server.services.openai_json import content_from_chat_completion, parse_json_object  # noqa: E402
@@ -113,16 +113,38 @@ async def main(batch_size: int, limit: int, dry_run: bool) -> None:
 
     async with session_factory() as session:
         empty_array: list[str] = []
+        # Only backfill contacts classified as human with genuine interactions
+        genuine_person_ids = (
+            select(UserPersonObservation.person_id)
+            .where(
+                UserPersonObservation.is_human.is_(True),
+                UserPersonObservation.is_broadcast.is_(False),
+                UserPersonObservation.is_automated.is_(False),
+                UserPersonObservation.last_genuine_interaction_at.isnot(None),
+            )
+            .distinct()
+            .subquery()
+        )
+
+        base_filter = (
+            Person.descriptive_tags == empty_array,
+            Person.id.in_(select(genuine_person_ids.c.person_id)),
+        )
+
         count_result = await session.execute(
-            select(func.count(Person.id)).where(Person.descriptive_tags == empty_array)
+            select(func.count(Person.id)).where(*base_filter)
         )
         total: int = count_result.scalar() or 0
-        logger.info("Found %d persons with empty descriptive_tags (limit=%d)", total, limit)
+        logger.info("Found %d human contacts with empty descriptive_tags (limit=%d)", total, limit)
 
         stmt = (
             select(Person)
-            .where(Person.descriptive_tags == empty_array)
-            .order_by(Person.updated_at.desc())
+            .join(
+                UserPersonObservation,
+                UserPersonObservation.person_id == Person.id,
+            )
+            .where(*base_filter)
+            .order_by(UserPersonObservation.tie_strength_score.desc())
             .limit(limit)
         )
         result = await session.execute(stmt)
