@@ -43,7 +43,7 @@ async def test_manifesto_page(client: AsyncClient) -> None:
 async def test_skill_md(client: AsyncClient) -> None:
     response = await client.get("/skill.md")
     assert response.status_code == 200
-    assert "connect_source" in response.text
+    assert "connect-source" in response.text
 
 
 @pytest.mark.asyncio
