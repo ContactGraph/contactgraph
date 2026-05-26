@@ -8,6 +8,8 @@ from contactsafe_core.enums import (
     SourceConnectionStatus,
     SourceType,
     SyncState,
+    TrustListInviteStatus,
+    TrustListMembershipStatus,
 )
 from contactsafe_core.query_plan import QueryPlan
 
@@ -56,6 +58,7 @@ class SourceSummary(BaseModel):
 class ListSourcesResult(BaseModel):
     sources: list[SourceSummary] = Field(default_factory=lambda: list[SourceSummary]())
     message: str
+    system_messages: list[str] = Field(default_factory=list)
 
 
 class ConnectSourceResult(BaseModel):
@@ -71,6 +74,7 @@ class ConnectSourceResult(BaseModel):
     source_id: UUID | None = None
     access_token: str | None = None
     refresh_token: str | None = None
+    system_messages: list[str] = Field(default_factory=list)
 
 
 class SourceStatusResult(BaseModel):
@@ -87,6 +91,7 @@ class SourceStatusResult(BaseModel):
     contacts_resolved: int = 0
     contacts_pending: int = 0
     message: str
+    system_messages: list[str] = Field(default_factory=list)
 
 
 class SyncSourceResult(BaseModel):
@@ -97,6 +102,7 @@ class SyncSourceResult(BaseModel):
     sync_state: SyncState
     email: str | None = None
     message: str
+    system_messages: list[str] = Field(default_factory=list)
 
 
 class PersonMatch(BaseModel):
@@ -137,10 +143,75 @@ class DescribeGraphResult(BaseModel):
     top_orgs: list[OrgCount] = Field(default_factory=lambda: list[OrgCount]())
     strongest_ties: list[PersonMatch] = Field(default_factory=lambda: list[PersonMatch]())
     message: str
+    system_messages: list[str] = Field(default_factory=list)
+
+
+class SecondDegreeMatch(BaseModel):
+    """A contact found via a trust-list member's graph (identity-level only)."""
+
+    holder_name: str
+    holder_user_id: UUID
+    person_id: UUID
+    person_name: str
+    person_org: str | None = None
+    person_role: str | None = None
+    person_categories: list[str] = Field(default_factory=list)
+    person_location: str | None = None
+    match_reason: str = ""
 
 
 class QueryNetworkResult(BaseModel):
     question: str
     matches: list[PersonMatch] = Field(default_factory=lambda: list[PersonMatch]())
+    second_degree_matches: list[SecondDegreeMatch] = Field(default_factory=list)
     message: str
     applied_plan: QueryPlan | None = None
+    system_messages: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Trust List schemas
+# ---------------------------------------------------------------------------
+
+
+class TrustListMemberSummary(BaseModel):
+    membership_id: UUID
+    user_id: UUID
+    email: str
+    name: str | None = None
+    status: TrustListMembershipStatus
+    established_at: datetime
+
+
+class TrustListInviteSummary(BaseModel):
+    invite_id: UUID
+    invitee_email: str
+    status: TrustListInviteStatus
+    created_at: datetime
+
+
+class PendingInboundInvite(BaseModel):
+    invite_id: UUID
+    inviter_email: str
+    inviter_name: str | None = None
+    created_at: datetime
+
+
+class ViewTrustedUsersResult(BaseModel):
+    members: list[TrustListMemberSummary] = Field(default_factory=list)
+    outbound_invites: list[TrustListInviteSummary] = Field(default_factory=list)
+    inbound_invites: list[PendingInboundInvite] = Field(default_factory=list)
+    max_members: int = 20
+    message: str
+    system_messages: list[str] = Field(default_factory=list)
+
+
+class EditTrustedUsersResult(BaseModel):
+    added: list[str] = Field(default_factory=list)
+    removed: list[str] = Field(default_factory=list)
+    accepted: list[str] = Field(default_factory=list)
+    declined: list[str] = Field(default_factory=list)
+    privacy_updated: list[str] = Field(default_factory=list)
+    invite_copy: str | None = None
+    message: str
+    system_messages: list[str] = Field(default_factory=list)

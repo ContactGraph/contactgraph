@@ -1,24 +1,28 @@
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from contactsafe_core.enums import SourceType
+from contactsafe_core.schemas import (
+    ConnectSourceResult,
+    DescribeGraphResult,
+    EditTrustedUsersResult,
+    ListSourcesResult,
+    PersonMatch,
+    QueryNetworkResult,
+    SecondDegreeMatch,
+    SourceStatusResult,
+    SyncSourceResult,
+    ViewTrustedUsersResult,
+)
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.requests import Request
 
-from contactsafe_core.enums import SourceType
 from contactsafe_server.config import Settings
-from contactsafe_core.schemas import (
-    ConnectSourceResult,
-    DescribeGraphResult,
-    ListSourcesResult,
-    PersonMatch,
-    QueryNetworkResult,
-    SourceStatusResult,
-    SyncSourceResult,
-)
 from contactsafe_server.deps import (
     AppContext,
     build_app_context,
@@ -28,10 +32,13 @@ from contactsafe_server.deps import (
 )
 from contactsafe_server.services.graph_summary_service import GraphSummaryService
 from contactsafe_server.services.network_query_service import NetworkQueryService
-from contactsafe_server.services.query_planner import QueryPlanner
 from contactsafe_server.services.oauth_service import OAuthService
+from contactsafe_server.services.query_planner import QueryPlanner
 from contactsafe_server.services.source_service import SourceService
+from contactsafe_server.services.trust_list_service import TrustListService
 from contactsafe_server.utils import parse_source_id
+
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 
@@ -51,16 +58,24 @@ def create_mcp_server(settings: Settings) -> FastMCP:
     mcp: FastMCP = FastMCP(
         "ContactGraph",
         instructions=(
-            "ContactGraph builds a private contact graph from connected data sources. "
-            "Authenticate with OAuth 2.1 Bearer tokens (see /.well-known/oauth-protected-resource). "
-            "Available source types: google_mail (Gmail metadata), google_contacts (Google Contacts / People API). "
-            "Both share one Google OAuth consent — connecting either auto-creates both sources. "
-            "Multiple Gmail accounts can be linked to a single user: call connect_source "
-            "while authenticated to add another Google account. All contacts merge into one graph. "
-            "Use connect_source to start OAuth, list_sources to see connections, "
-            "sync_source to (re)start ingestion, get_source_status for progress, "
+            "ContactGraph builds a private contact graph from connected data "
+            "sources. Authenticate with OAuth 2.1 Bearer tokens "
+            "(see /.well-known/oauth-protected-resource). "
+            "Available source types: google_mail (Gmail metadata), "
+            "google_contacts (Google Contacts / People API). "
+            "Both share one Google OAuth consent — connecting either "
+            "auto-creates both sources. "
+            "Multiple Gmail accounts can be linked to a single user: call "
+            "connect_source while authenticated to add another Google account. "
+            "All contacts merge into one graph. "
+            "Use connect_source to start OAuth, list_sources to see "
+            "connections, sync_source to (re)start ingestion, "
+            "get_source_status for progress, "
             "describe_graph for a high-level graph summary, "
-            "and query_network to search contacts."
+            "query_network to search contacts (includes 2nd-degree results "
+            "from trusted connections), "
+            "view_trusted_users / edit_trusted_users to manage your "
+            "trust list."
         ),
         json_response=True,
         stateless_http=True,
@@ -188,7 +203,12 @@ def create_mcp_server(settings: Settings) -> FastMCP:
         question: str,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> QueryNetworkResult:
-        """Search the user's contact graph using a natural-language question."""
+        """Search the user's contact graph using a natural-language question.
+
+        Results include both first-degree contacts (full detail) and second-degree
+        contacts visible through your trust list (name, org, role only). For
+        second-degree matches, ask your trusted connection for contact info directly.
+        """
         lifespan: McpLifespanState = _require_lifespan(ctx)
         async with lifespan.app_context.session_factory() as db:
             oauth: OAuthService = build_oauth_service(db, lifespan.app_context)
@@ -217,7 +237,24 @@ def create_mcp_server(settings: Settings) -> FastMCP:
                 user_id=user_id,
                 plan=plan,
             )
-            if not matches:
+
+            trust_svc = TrustListService(db, lifespan.app_context.settings.base_url)
+            try:
+                second_degree: list[SecondDegreeMatch] = await executor.execute_second_degree(
+                    user_id=user_id,
+                    plan=plan,
+                    trust_list_service=trust_svc,
+                )
+            except Exception:
+                logger.debug("2nd-degree query failed, returning first-degree only", exc_info=True)
+                second_degree = []
+
+            try:
+                system_messages: list[str] = await trust_svc.get_system_messages(user_id)
+            except Exception:
+                system_messages = []
+
+            if not matches and not second_degree:
                 has_filters: bool = bool(
                     plan.name_tokens
                     or plan.org_names
@@ -239,14 +276,26 @@ def create_mcp_server(settings: Settings) -> FastMCP:
                 return QueryNetworkResult(
                     question=question,
                     matches=[],
+                    second_degree_matches=[],
                     applied_plan=plan,
                     message=message,
+                    system_messages=system_messages,
+                )
+
+            parts: list[str] = []
+            if matches:
+                parts.append(f"{len(matches)} direct contact(s)")
+            if second_degree:
+                parts.append(
+                    f"{len(second_degree)} contact(s) via trusted connections"
                 )
             return QueryNetworkResult(
                 question=question,
                 matches=matches,
+                second_degree_matches=second_degree,
                 applied_plan=plan,
-                message=f"Found {len(matches)} matching contact(s).",
+                message=f"Found {' and '.join(parts)}.",
+                system_messages=system_messages,
             )
 
     @mcp.tool()  # pyright: ignore[reportUnusedFunction]
@@ -277,7 +326,80 @@ def create_mcp_server(settings: Settings) -> FastMCP:
                     ),
                 )
 
-            return await GraphSummaryService(db).describe(user_id)
+            result = await GraphSummaryService(db).describe(user_id)
+            try:
+                trust_svc = TrustListService(db, lifespan.app_context.settings.base_url)
+                result.system_messages = await trust_svc.get_system_messages(user_id)
+            except Exception:
+                pass
+            return result
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def view_trusted_users(
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> ViewTrustedUsersResult:
+        """View your trust list: active members, pending invites you've sent, and
+        invites waiting for your response.
+
+        Trust list members can see each other's contacts (name, org, role) in
+        query_network results. Max 20 members.
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        async with lifespan.app_context.session_factory() as db:
+            oauth: OAuthService = build_oauth_service(db, lifespan.app_context)
+            user_id, _ = await _resolve_authenticated_user_id(ctx, None, oauth)
+
+            if user_id is None:
+                return ViewTrustedUsersResult(
+                    message="Authentication required. Provide a Bearer token.",
+                )
+
+            trust_svc = TrustListService(db, lifespan.app_context.settings.base_url)
+            return await trust_svc.view(user_id)
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def edit_trusted_users(
+        add: list[str] | None = None,
+        remove: list[str] | None = None,
+        accept: list[str] | None = None,
+        decline: list[str] | None = None,
+        set_privacy: list[dict[str, str]] | None = None,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> EditTrustedUsersResult:
+        """Manage your trust list (max 20 mutual connections).
+
+        Parameters:
+          add: Email addresses to invite to your trust list.
+          remove: Email addresses to remove from your trust list.
+          accept: Invite IDs to accept (from view_trusted_users inbound_invites).
+          decline: Invite IDs to decline.
+          set_privacy: List of {"person_id": "...", "label": "private"|"standard"}
+                       to hide/unhide specific contacts from trust list queries.
+
+        When adding someone not yet on ContactGraph, returns suggested invite copy
+        you can send them via text or email.
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        async with lifespan.app_context.session_factory() as db:
+            oauth: OAuthService = build_oauth_service(db, lifespan.app_context)
+            user_id, _ = await _resolve_authenticated_user_id(ctx, None, oauth)
+
+            if user_id is None:
+                return EditTrustedUsersResult(
+                    message="Authentication required. Provide a Bearer token.",
+                )
+
+            trust_svc = TrustListService(db, lifespan.app_context.settings.base_url)
+            result: EditTrustedUsersResult = await trust_svc.edit(
+                user_id,
+                add=add,
+                remove=remove,
+                accept=accept,
+                decline=decline,
+                set_privacy=set_privacy,
+            )
+            await db.commit()
+            return result
 
     return mcp
 

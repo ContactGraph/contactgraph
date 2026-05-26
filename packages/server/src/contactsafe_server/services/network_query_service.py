@@ -1,25 +1,31 @@
 import logging
 import re
 import uuid
+from typing import TYPE_CHECKING
 
+from contactsafe_core.query_plan import QueryIntent, QueryPlan, QuerySortBy
+from contactsafe_core.schemas import PersonMatch, SecondDegreeMatch
 from sqlalchemy import Text, cast, func, literal, or_, select
-from sqlalchemy.dialects.postgresql import ARRAY, array as pg_array
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import array as pg_array
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute
 from sqlalchemy.sql.elements import ColumnElement
 
-from contactsafe_core.query_plan import QueryIntent, QueryPlan, QuerySortBy
-from contactsafe_core.schemas import PersonMatch
 from contactsafe_server.db.models import (
     EmploymentClaim,
     InteractionExcerpt,
     Org,
     Person,
     PersonAlias,
+    User,
     UserPersonObservation,
     UserRelationshipObservation,
 )
 from contactsafe_server.services.org_search import expand_org_search_terms
+
+if TYPE_CHECKING:
+    from contactsafe_server.services.trust_list_service import TrustListService
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -185,6 +191,55 @@ class NetworkQueryService:
             return await self._execute_plan(user_id, relaxed)
         return []
 
+    async def execute_second_degree(
+        self,
+        *,
+        user_id: uuid.UUID,
+        plan: QueryPlan,
+        trust_list_service: "TrustListService",
+    ) -> list[SecondDegreeMatch]:
+        """Search trust-list members' graphs and return identity-level matches."""
+
+        if not _plan_has_substantive_filters(plan):
+            return []
+
+        member_ids: list[uuid.UUID] = await trust_list_service.get_trust_member_user_ids(user_id)
+        if not member_ids:
+            return []
+
+        second_degree_matches: list[SecondDegreeMatch] = []
+        for member_id in member_ids:
+            private_ids: set[uuid.UUID] = await trust_list_service.get_private_person_ids(member_id)
+            matches: list[tuple[Person, UserPersonObservation]] = await self._execute_plan_raw(
+                member_id, plan
+            )
+            if not matches:
+                continue
+
+            member_user: User | None = await self._db.get(User, member_id)
+            holder_name: str = (
+                member_user.google_profile_name or member_user.email
+                if member_user
+                else "Unknown"
+            )
+
+            for person, _obs in matches:
+                if person.id in private_ids:
+                    continue
+                second_degree_matches.append(SecondDegreeMatch(
+                    holder_name=holder_name,
+                    holder_user_id=member_id,
+                    person_id=person.id,
+                    person_name=person.canonical_name,
+                    person_org=person.current_org_name,
+                    person_role=person.current_role,
+                    person_categories=list(person.inferred_categories or []),
+                    person_location=person.location,
+                    match_reason=f"Known by {holder_name}",
+                ))
+
+        return second_degree_matches[:20]
+
     @staticmethod
     def _relax_plan(plan: QueryPlan) -> QueryPlan | None:
         """Drop the most restrictive optional filters for a retry."""
@@ -209,6 +264,18 @@ class NetworkQueryService:
         user_id: uuid.UUID,
         plan: QueryPlan,
     ) -> list[PersonMatch]:
+        rows: list[tuple[Person, UserPersonObservation]] = await self._execute_plan_raw(user_id, plan)
+        matches: list[PersonMatch] = []
+        for person, obs in rows:
+            aliases: list[str] = await self._load_also_known_as(person.id)
+            matches.append(self._to_person_match(person, obs, plan, also_known_as=aliases))
+        return matches
+
+    async def _execute_plan_raw(
+        self,
+        user_id: uuid.UUID,
+        plan: QueryPlan,
+    ) -> list[tuple[Person, UserPersonObservation]]:
         stmt = (
             select(Person, UserPersonObservation)
             .join(
@@ -296,12 +363,7 @@ class NetworkQueryService:
         stmt = stmt.limit(min(plan.limit, 100))
         result = await self._db.execute(stmt)
         rows: list[tuple[Person, UserPersonObservation]] = list(result.unique().all())
-
-        matches: list[PersonMatch] = []
-        for person, obs in rows:
-            aliases: list[str] = await self._load_also_known_as(person.id)
-            matches.append(self._to_person_match(person, obs, plan, also_known_as=aliases))
-        return matches
+        return rows
 
     async def _semantic_search(
         self,

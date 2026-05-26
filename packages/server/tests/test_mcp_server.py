@@ -728,6 +728,7 @@ class TestQueryNetworkTool:
         ]
         mock_executor: AsyncMock = AsyncMock()
         mock_executor.execute = AsyncMock(return_value=matches)
+        mock_executor.execute_second_degree = AsyncMock(return_value=[])
         mock_executor_cls.return_value = mock_executor
 
         ctx: MagicMock = _make_ctx(user_id=user_id, lifespan=lifespan)
@@ -736,7 +737,7 @@ class TestQueryNetworkTool:
         assert len(result.matches) == 1
         assert result.matches[0].name == "Alice Smith"
         assert result.applied_plan == plan
-        assert "1 matching contact" in result.message
+        assert "1 direct contact" in result.message
 
     @pytest.mark.asyncio
     @patch("contactsafe_server.mcp.server.NetworkQueryService")
@@ -770,6 +771,7 @@ class TestQueryNetworkTool:
 
         mock_executor: AsyncMock = AsyncMock()
         mock_executor.execute = AsyncMock(return_value=[])
+        mock_executor.execute_second_degree = AsyncMock(return_value=[])
         mock_executor_cls.return_value = mock_executor
 
         ctx: MagicMock = _make_ctx(user_id=user_id, lifespan=lifespan)
@@ -810,8 +812,8 @@ class TestQueryNetworkTool:
 
         mock_executor: AsyncMock = AsyncMock()
         mock_executor.execute = AsyncMock(return_value=[])
+        mock_executor.execute_second_degree = AsyncMock(return_value=[])
         mock_executor_cls.return_value = mock_executor
-
         ctx: MagicMock = _make_ctx(user_id=user_id, lifespan=lifespan)
         result: QueryNetworkResult = await fn(question="blah", ctx=ctx)
 
