@@ -10,13 +10,16 @@ from __future__ import annotations
 import logging
 from uuid import UUID
 
-from contactsafe_core.enums import SourceType
+from datetime import UTC, datetime
+
+from contactsafe_core.enums import SessionStatus, SourceType
 from contactsafe_core.schemas import (
     ConnectSourceResult,
     DescribeGraphResult,
     EditTrustedUsersResult,
     ListSourcesResult,
     PersonMatch,
+    PollConnectResult,
     QueryNetworkResult,
     SecondDegreeMatch,
     SourceStatusResult,
@@ -24,6 +27,7 @@ from contactsafe_core.schemas import (
     ViewTrustedUsersResult,
 )
 
+from contactsafe_server.db.models import ConnectSession, User
 from contactsafe_server.deps import (
     AppContext,
     build_oauth_server_service,
@@ -284,3 +288,53 @@ async def edit_trusted_users(
         )
         await db.commit()
         return result
+
+
+async def poll_connect(
+    ctx: AppContext,
+    *,
+    connect_session_id: UUID,
+) -> PollConnectResult:
+    async with ctx.session_factory() as db:
+        session: ConnectSession | None = await db.get(ConnectSession, connect_session_id)
+        if session is None:
+            raise ValueError(f"Unknown connect_session_id: {connect_session_id}")
+
+        status: str = session.status
+        if status == SessionStatus.PENDING.value:
+            return PollConnectResult(
+                status="pending",
+                message="Waiting for user to complete OAuth in their browser...",
+            )
+
+        if status == SessionStatus.FAILED.value:
+            return PollConnectResult(status="failed", message="OAuth flow failed.")
+
+        if session.user_id is None:
+            return PollConnectResult(
+                status="pending",
+                message="OAuth callback received but user not yet created.",
+            )
+
+        if session.token_dispensed_at is not None:
+            return PollConnectResult(
+                status="connected",
+                message="Tokens already dispensed. Use refresh_token to get new access tokens via POST /oauth/token.",
+            )
+
+        token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
+            session.user_id
+        )
+        session.token_dispensed_at = datetime.now(tz=UTC)
+        await db.commit()
+
+        user: User | None = await db.get(User, session.user_id)
+        email: str | None = user.email if user else None
+
+        return PollConnectResult(
+            status="connected",
+            access_token=token_response.access_token,
+            refresh_token=token_response.refresh_token,
+            email=email,
+            message="Connected! Use the access_token as your Bearer token.",
+        )

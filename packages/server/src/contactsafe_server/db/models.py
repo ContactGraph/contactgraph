@@ -125,6 +125,7 @@ class ConnectSession(Base):
     oauth_client_state: Mapped[str | None] = mapped_column(Text, nullable=True)
     code_challenge: Mapped[str | None] = mapped_column(Text, nullable=True)
     code_challenge_method: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    token_dispensed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 

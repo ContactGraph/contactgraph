@@ -218,6 +218,19 @@ class EditTrustedUsersResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Poll-connect (unauthenticated token dispensing)
+# ---------------------------------------------------------------------------
+
+
+class PollConnectResult(BaseModel):
+    status: str
+    access_token: str | None = None
+    refresh_token: str | None = None
+    email: str | None = None
+    message: str
+
+
+# ---------------------------------------------------------------------------
 # REST API request bodies
 # ---------------------------------------------------------------------------
 
