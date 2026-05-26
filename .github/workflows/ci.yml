@@ -59,4 +59,4 @@ jobs:
         run: uv run --package contactsafe-server alembic -c migrations/alembic.ini upgrade head
 
       - name: Run tests
-        run: uv run --package contactsafe-server --extra dev pytest packages/server/tests -q
+        run: uv run --package contactsafe-server --extra dev pytest packages/server/tests --cov --cov-report=term-missing -q

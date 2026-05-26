@@ -37,6 +37,7 @@ contactsafe-core = { workspace = true }
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.25.0",
+    "pytest-cov>=6.0.0",
     "httpx>=0.28.0",
 ]
 
@@ -45,3 +46,13 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]
+
+[tool.coverage.run]
+source = ["contactsafe_server"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+skip_empty = true
+precision = 1
+fail_under = 0
