@@ -13,7 +13,7 @@ from contactsafe_server.config import get_settings
 from contactsafe_server.deps import build_jwt_service
 from contactsafe_server.mcp.auth_middleware import McpAuthMiddleware
 from contactsafe_server.services.jwt_service import JWTService
-from contactsafe_server.services.oauth_server_service import OAuthServerService
+from contactsafe_server.services.oauth_server_service import OAuthServerService, parse_scopes_param
 
 
 async def _ok_handler(_request: object) -> PlainTextResponse:
@@ -142,3 +142,19 @@ async def test_oauth_token_rejects_invalid_grant(
             redirect_uri="http://localhost/callback",
             code_verifier="verifier",
         )
+
+
+def test_parse_scopes_param_rejects_admin_by_default() -> None:
+    with pytest.raises(ValueError, match="Unsupported scope"):
+        parse_scopes_param("contactsafe:read contactsafe:admin")
+
+
+def test_parse_scopes_param_allows_default_scopes() -> None:
+    assert parse_scopes_param("") == ["contactsafe:read", "contactsafe:write"]
+
+
+def test_parse_scopes_param_allow_admin_flag() -> None:
+    assert parse_scopes_param("contactsafe:read contactsafe:admin", allow_admin=True) == [
+        "contactsafe:read",
+        "contactsafe:admin",
+    ]
