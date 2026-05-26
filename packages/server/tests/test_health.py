@@ -21,8 +21,8 @@ async def test_landing_page(client: AsyncClient) -> None:
     assert 'href="/mcp"' in response.text
     assert "https://github.com/ContactGraph/contactgraph" in response.text
     assert 'href="/manifesto"' in response.text
-    assert "for agents" not in response.text.lower()
-    assert "for humans" not in response.text.lower()
+    assert "agent-first" in response.text.lower()
+    assert "open source" in response.text.lower()
 
 
 @pytest.mark.asyncio
