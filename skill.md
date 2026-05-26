@@ -25,7 +25,7 @@ ContactGraph implements OAuth 2.1 with PKCE. The flow for a terminal agent:
 
 1. **Register a client** (once):
    ```bash
-   curl -s -X POST "$BASE_URL/register" \
+   curl -s -X POST "$BASE_URL/oauth/register" \
      -H "Content-Type: application/json" \
      -d '{"client_name":"my-agent","redirect_uris":["http://localhost:9999/callback"]}'
    ```
@@ -39,19 +39,19 @@ ContactGraph implements OAuth 2.1 with PKCE. The flow for a terminal agent:
 
 3. **Direct the user to authorize** (open in browser):
    ```
-   $BASE_URL/authorize?redirect_uri=http://localhost:9999/callback&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256&state=$STATE&scope=contactsafe:read+contactsafe:write
+   $BASE_URL/oauth/authorize?redirect_uri=http://localhost:9999/callback&code_challenge=$CODE_CHALLENGE&code_challenge_method=S256&state=$STATE&scope=contactsafe:read+contactsafe:write
    ```
 
 4. **Exchange the authorization code:**
    ```bash
-   curl -s -X POST "$BASE_URL/token" \
+   curl -s -X POST "$BASE_URL/oauth/token" \
      -d "grant_type=authorization_code&code=$CODE&redirect_uri=http://localhost:9999/callback&code_verifier=$CODE_VERIFIER"
    ```
    Response contains `access_token`, `refresh_token`, `expires_in`.
 
 5. **Refresh when expired:**
    ```bash
-   curl -s -X POST "$BASE_URL/token" \
+   curl -s -X POST "$BASE_URL/oauth/token" \
      -d "grant_type=refresh_token&refresh_token=$REFRESH_TOKEN"
    ```
 
