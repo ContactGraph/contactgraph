@@ -474,12 +474,11 @@ class TestCompleteOauth:
         mock_session.status = SessionStatus.PENDING.value
 
         with pytest.raises(ValueError, match="non-existent user"):
-            async with db_session.no_autoflush:
-                await svc._resolve_or_create_user(
-                    "orphan@example.com",
-                    _make_userinfo(email="orphan@example.com"),
-                    mock_session,
-                )
+            await svc._resolve_or_create_user(
+                "orphan@example.com",
+                _make_userinfo(email="orphan@example.com"),
+                mock_session,
+            )
 
 
 # ===================================================================
