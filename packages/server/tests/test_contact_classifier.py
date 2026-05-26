@@ -109,3 +109,65 @@ def test_info_mailbox_is_broadcast() -> None:
     classification = classify_contact(acc)
     assert classification.is_broadcast is True
     assert classification.is_human is False
+
+
+def test_list_unsubscribe_marks_as_broadcast() -> None:
+    """A sender with List-Unsubscribe header is broadcast, even from a personal-looking address."""
+    acc = ContactAccumulator(
+        email="gergely@pragmaticengineer.com",
+        display_name="Gergely Orosz",
+        message_count=10,
+        outbound_count=0,
+        inbound_count=10,
+        list_unsubscribe_count=8,
+    )
+    classification = classify_contact(acc)
+    assert classification.is_broadcast is True
+    assert classification.is_human is False
+
+
+def test_list_unsubscribe_single_message_still_broadcast() -> None:
+    """Even a single List-Unsubscribe hit is enough to classify as broadcast."""
+    acc = ContactAccumulator(
+        email="james@jamesclear.com",
+        display_name="James Clear",
+        message_count=3,
+        outbound_count=0,
+        inbound_count=3,
+        list_unsubscribe_count=1,
+    )
+    classification = classify_contact(acc)
+    assert classification.is_broadcast is True
+    assert classification.is_human is False
+
+
+def test_list_unsubscribe_does_not_override_bidirectional() -> None:
+    """If you actually email someone back, they might still have List-Unsubscribe
+    on their messages (e.g. mailing list you participate in). The header still
+    triggers broadcast classification since it's checked before volume heuristics."""
+    acc = ContactAccumulator(
+        email="discussion@googlegroups.com",
+        display_name="Team Discussion",
+        message_count=20,
+        outbound_count=5,
+        inbound_count=15,
+        list_unsubscribe_count=12,
+    )
+    classification = classify_contact(acc)
+    assert classification.is_broadcast is True
+    assert classification.is_human is False
+
+
+def test_no_list_unsubscribe_human_unchanged() -> None:
+    """Without List-Unsubscribe, a real personal contact stays human."""
+    acc = ContactAccumulator(
+        email="sarah@startup.io",
+        display_name="Sarah Chen",
+        message_count=8,
+        outbound_count=4,
+        inbound_count=4,
+        list_unsubscribe_count=0,
+    )
+    classification = classify_contact(acc)
+    assert classification.is_human is True
+    assert classification.is_broadcast is False

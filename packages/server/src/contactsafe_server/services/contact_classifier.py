@@ -116,6 +116,8 @@ def _is_automated_contact(accumulator: ContactAccumulator) -> bool:
 
 
 def _is_broadcast_contact(accumulator: ContactAccumulator) -> bool:
+    if accumulator.list_unsubscribe_count > 0:
+        return True
     if is_likely_broadcast_contact(accumulator):
         return True
     local, domain = accumulator.email.rsplit("@", 1)
