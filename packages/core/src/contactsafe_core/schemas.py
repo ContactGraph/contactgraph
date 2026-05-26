@@ -215,3 +215,33 @@ class EditTrustedUsersResult(BaseModel):
     invite_copy: str | None = None
     message: str
     system_messages: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# REST API request bodies
+# ---------------------------------------------------------------------------
+
+
+class ConnectSourceRequest(BaseModel):
+    source_type: str = "google_mail"
+    user_token: str | None = None
+
+
+class GetSourceStatusRequest(BaseModel):
+    source_id: str | None = None
+
+
+class SyncSourceRequest(BaseModel):
+    source_id: str | None = None
+
+
+class QueryNetworkRequest(BaseModel):
+    question: str
+
+
+class EditTrustedUsersRequest(BaseModel):
+    add: list[str] | None = None
+    remove: list[str] | None = None
+    accept: list[str] | None = None
+    decline: list[str] | None = None
+    set_privacy: list[dict[str, str]] | None = None
