@@ -42,12 +42,15 @@ jobs:
           DO $$
           BEGIN
             IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'contactsafe') THEN
-              CREATE ROLE contactsafe LOGIN PASSWORD 'contactsafe' CREATEDB;
+              CREATE ROLE contactsafe LOGIN PASSWORD 'contactsafe' CREATEDB SUPERUSER;
             END IF;
           END
           $$;
           SELECT 'CREATE DATABASE contactsafe OWNER contactsafe'
             WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'contactsafe')\gexec
+          \c contactsafe
+          CREATE EXTENSION IF NOT EXISTS vector;
+          CREATE EXTENSION IF NOT EXISTS pg_trgm;
           SQL
 
           PG_HBA="/etc/postgresql/16/main/pg_hba.conf"
