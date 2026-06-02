@@ -69,6 +69,7 @@ class ParsedContact:
 class ContactAccumulator:
     email: str
     display_name: str
+    first_seen_at: datetime | None = None
     last_seen_at: datetime | None = None
     message_count: int = 0
     outbound_count: int = 0
@@ -76,6 +77,7 @@ class ContactAccumulator:
     pitch_outbound_count: int = 0
     list_unsubscribe_count: int = 0
     inbound_snippets: list[str] | None = None
+    from_google_contacts: bool = False
 
     def observe(
         self,
@@ -100,8 +102,27 @@ class ContactAccumulator:
                     self.inbound_snippets.append(snippet.strip())
         if display_name and (not self.display_name or self.display_name == self.email):
             self.display_name = display_name
-        if seen_at is not None and (self.last_seen_at is None or seen_at > self.last_seen_at):
-            self.last_seen_at = seen_at
+        if seen_at is not None:
+            if self.first_seen_at is None or seen_at < self.first_seen_at:
+                self.first_seen_at = seen_at
+            if self.last_seen_at is None or seen_at > self.last_seen_at:
+                self.last_seen_at = seen_at
+
+    def apply_timeline(
+        self,
+        *,
+        earliest_date: datetime | None,
+        latest_date: datetime | None,
+        estimated_count: int,
+    ) -> None:
+        if earliest_date is not None:
+            if self.first_seen_at is None or earliest_date < self.first_seen_at:
+                self.first_seen_at = earliest_date
+        if latest_date is not None:
+            if self.last_seen_at is None or latest_date > self.last_seen_at:
+                self.last_seen_at = latest_date
+        if estimated_count > self.message_count:
+            self.message_count = estimated_count
 
 
 def normalize_email(value: str) -> str | None:

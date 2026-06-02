@@ -90,6 +90,23 @@ def _make_service(
     )
 
 
+def _mock_phased_import(
+    svc: ImportService,
+    *,
+    phase2_side_effect: object | None = None,
+    phase3_side_effect: object | None = None,
+    phase_error: Exception | None = None,
+) -> None:
+    svc._load_user_identity = AsyncMock(  # type: ignore[method-assign]
+        return_value=({"user@example.com"}, {"user"}),
+    )
+    if phase_error is not None:
+        svc._phase1_google_contacts_seed = AsyncMock(side_effect=phase_error)  # type: ignore[method-assign]
+    else:
+        svc._phase1_google_contacts_seed = AsyncMock()  # type: ignore[method-assign]
+    svc._phase2_sent_mail_scan = AsyncMock(side_effect=phase2_side_effect)  # type: ignore[method-assign]
+    svc._phase3_contact_timelines = AsyncMock(side_effect=phase3_side_effect)  # type: ignore[method-assign]
+
 # ---------------------------------------------------------------------------
 # run_sync – success path
 # ---------------------------------------------------------------------------
@@ -146,7 +163,7 @@ class TestRunSync:
 
         svc: ImportService = _make_service(db=db, gmail=gmail, encryptor=encryptor)
         svc._get_credential_for_source = AsyncMock(return_value=_make_cred())  # type: ignore[method-assign]
-        svc._scan_and_ingest_gmail = AsyncMock(return_value=({}, {}, set()))  # type: ignore[method-assign]
+        _mock_phased_import(svc)
         svc._upsert_person_pair_observations = AsyncMock()  # type: ignore[method-assign]
         svc._rebuild_user_org_observations = AsyncMock()  # type: ignore[method-assign]
         svc._commit_progress = AsyncMock()  # type: ignore[method-assign]
@@ -159,7 +176,9 @@ class TestRunSync:
         assert source.sync_state == SyncState.COMPLETE.value
         assert source.connection_status == SourceConnectionStatus.CONNECTED.value
         assert source.contacts_pending == 0
-        svc._scan_and_ingest_gmail.assert_awaited_once()
+        svc._phase1_google_contacts_seed.assert_awaited_once()
+        svc._phase2_sent_mail_scan.assert_awaited_once()
+        svc._phase3_contact_timelines.assert_awaited_once()
 
     @patch("contactsafe_server.services.import_service.InteractionExcerptService")
     @patch("contactsafe_server.services.import_service.IngestEnrichmentService")
@@ -170,7 +189,7 @@ class TestRunSync:
         mock_enricher_cls: MagicMock,
         mock_excerpt_cls: MagicMock,
     ) -> None:
-        """Contacts returned by _scan_and_ingest_gmail but not yet in upserted_emails get upserted."""
+        """Contacts discovered during import but not yet upserted get upserted in final pass."""
         user_id: uuid.UUID = uuid.uuid4()
         source: MagicMock = _make_source(user_id=user_id)
         user: MagicMock = _make_user(user_id)
@@ -185,14 +204,16 @@ class TestRunSync:
         )
         acc.message_count = 3
 
+        async def add_contact(**kwargs: object) -> None:
+            contacts: dict[str, ContactAccumulator] = kwargs["contacts"]  # type: ignore[assignment]
+            contacts["new@example.com"] = acc
+
         gmail: MagicMock = MagicMock()
         gmail.get_valid_access_token = AsyncMock(return_value=("token", None))
 
         svc: ImportService = _make_service(db=db, gmail=gmail)
         svc._get_credential_for_source = AsyncMock(return_value=_make_cred())  # type: ignore[method-assign]
-        svc._scan_and_ingest_gmail = AsyncMock(  # type: ignore[method-assign]
-            return_value=({"new@example.com": acc}, {}, set())
-        )
+        _mock_phased_import(svc, phase2_side_effect=add_contact)
         svc._upsert_person = AsyncMock()  # type: ignore[method-assign]
         svc._upsert_person_pair_observations = AsyncMock()  # type: ignore[method-assign]
         svc._rebuild_user_org_observations = AsyncMock()  # type: ignore[method-assign]
@@ -228,14 +249,18 @@ class TestRunSync:
             last_seen_at=datetime(2025, 1, 1, tzinfo=UTC),
         )
 
+        async def mark_upserted(**kwargs: object) -> None:
+            contacts: dict[str, ContactAccumulator] = kwargs["contacts"]  # type: ignore[assignment]
+            upserted: set[str] = kwargs["upserted_emails"]  # type: ignore[assignment]
+            contacts["done@example.com"] = acc
+            upserted.add("done@example.com")
+
         gmail: MagicMock = MagicMock()
         gmail.get_valid_access_token = AsyncMock(return_value=("token", None))
 
         svc: ImportService = _make_service(db=db, gmail=gmail)
         svc._get_credential_for_source = AsyncMock(return_value=_make_cred())  # type: ignore[method-assign]
-        svc._scan_and_ingest_gmail = AsyncMock(  # type: ignore[method-assign]
-            return_value=({"done@example.com": acc}, {}, {"done@example.com"})
-        )
+        _mock_phased_import(svc, phase3_side_effect=mark_upserted)
         svc._upsert_person = AsyncMock()  # type: ignore[method-assign]
         svc._upsert_person_pair_observations = AsyncMock()  # type: ignore[method-assign]
         svc._rebuild_user_org_observations = AsyncMock()  # type: ignore[method-assign]
@@ -278,7 +303,7 @@ class TestRunSync:
 
         svc: ImportService = _make_service(db=db, gmail=gmail)
         svc._get_credential_for_source = AsyncMock(return_value=_make_cred())  # type: ignore[method-assign]
-        svc._scan_and_ingest_gmail = AsyncMock(side_effect=RuntimeError("gmail down"))  # type: ignore[method-assign]
+        _mock_phased_import(svc, phase_error=RuntimeError("gmail down"))
 
         with pytest.raises(RuntimeError, match="gmail down"):
             await svc.run_sync(source.id)
@@ -314,7 +339,7 @@ class TestRunSync:
         cred: MagicMock = _make_cred()
         svc._get_credential_for_source = AsyncMock(return_value=cred)  # type: ignore[method-assign]
         svc._persist_tokens = AsyncMock()  # type: ignore[method-assign]
-        svc._scan_and_ingest_gmail = AsyncMock(return_value=({}, {}, set()))  # type: ignore[method-assign]
+        _mock_phased_import(svc)
         svc._upsert_person_pair_observations = AsyncMock()  # type: ignore[method-assign]
         svc._rebuild_user_org_observations = AsyncMock()  # type: ignore[method-assign]
         svc._commit_progress = AsyncMock()  # type: ignore[method-assign]

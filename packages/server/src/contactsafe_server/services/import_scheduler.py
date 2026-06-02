@@ -85,11 +85,13 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
                     logger.exception("Google Contacts sync failed for source %s", source_id)
             else:
                 gmail = GmailClient(ctx.settings, google_client)
+                people = PeopleApiClient(ctx.settings, google_client)
                 service = ImportService(
                     db=db,
                     settings=ctx.settings,
                     encryptor=ctx.encryptor,
                     gmail=gmail,
+                    people_client=people,
                 )
                 try:
                     await service.run_sync(source_id)

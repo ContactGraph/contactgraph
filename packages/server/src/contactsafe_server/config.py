@@ -80,13 +80,17 @@ class Settings(BaseSettings):
         default=25,
         description="Commit scan/upsert progress to the DB every N Gmail messages",
     )
-    import_max_messages: int = Field(
-        default=2000,
-        description="Max Gmail messages scanned per import run",
+    import_sent_max_messages: int = Field(
+        default=10000,
+        description="Max sent-mail messages scanned during Phase 2 import",
     )
-    import_gmail_query: str = Field(
-        default="newer_than:2y",
-        description="Gmail search query for import",
+    import_timeline_max_contacts: int = Field(
+        default=1000,
+        description="Max contacts to fetch Gmail timelines for in Phase 3",
+    )
+    import_timeline_max_pages: int = Field(
+        default=10,
+        description="Max pagination depth when finding earliest message per contact",
     )
 
     import_contacts_max_results: int = Field(
