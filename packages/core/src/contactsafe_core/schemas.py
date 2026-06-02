@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from contactsafe_core.enums import (
+    EnrichmentRunState,
     SessionStatus,
     SourceConnectionStatus,
     SourceType,
@@ -247,6 +248,40 @@ class GetSourceStatusRequest(BaseModel):
 
 class SyncSourceRequest(BaseModel):
     source_id: str | None = None
+
+
+class StartEnrichmentResult(BaseModel):
+    run_id: UUID | None = None
+    scheduled: bool
+    state: EnrichmentRunState
+    message: str
+    system_messages: list[str] = Field(default_factory=list)
+
+
+class EnrichmentStatusResult(BaseModel):
+    run_id: UUID | None = None
+    state: EnrichmentRunState
+    contacts_total: int = 0
+    contacts_enriched: int = 0
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    error: str | None = None
+    message: str
+    system_messages: list[str] = Field(default_factory=list)
+
+
+class UploadSourceRequest(BaseModel):
+    source_type: str
+    filename: str
+    content: str
+
+
+class UploadSourceResult(BaseModel):
+    source_id: UUID
+    scheduled: bool
+    sync_state: SyncState
+    message: str
+    system_messages: list[str] = Field(default_factory=list)
 
 
 class QueryNetworkRequest(BaseModel):

@@ -926,7 +926,7 @@ async def test_request_sync_unknown_source(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_request_sync_unsyncable_type(db_session: AsyncSession) -> None:
+async def test_request_sync_upload_requires_payload(db_session: AsyncSession) -> None:
     user: User = User(email="unsyncable@example.com")
     db_session.add(user)
     await db_session.flush()
@@ -937,7 +937,8 @@ async def test_request_sync_unsyncable_type(db_session: AsyncSession) -> None:
         label="LinkedIn",
         external_account_id="linkedin",
         connection_status=SourceConnectionStatus.CONNECTED.value,
-        sync_state=SyncState.PENDING.value,
+        sync_state=SyncState.COMPLETE.value,
+        upload_payload=None,
     )
     db_session.add(source)
     await db_session.flush()
@@ -946,7 +947,7 @@ async def test_request_sync_unsyncable_type(db_session: AsyncSession) -> None:
     result: SyncSourceResult = await svc.request_sync(source.id)
 
     assert result.scheduled is False
-    assert "not implemented" in result.message.lower()
+    assert "upload" in result.message.lower()
 
 
 @pytest.mark.asyncio
@@ -1129,7 +1130,7 @@ async def test_user_has_queryable_graph_complete(db_session: AsyncSession) -> No
 
 
 @pytest.mark.asyncio
-async def test_user_has_queryable_graph_requires_google_mail_source(
+async def test_user_has_queryable_graph_calendar_source(
     db_session: AsyncSession,
 ) -> None:
     user: User = User(email="ctgraph@example.com")
@@ -1137,11 +1138,11 @@ async def test_user_has_queryable_graph_requires_google_mail_source(
     await db_session.flush()
 
     svc: SourceService = SourceService(db_session)
-    source: Source = await svc.ensure_google_contacts_source(user.id, user.email)
+    source: Source = await svc.ensure_google_calendar_source(user.id, user.email)
     source.sync_state = SyncState.PARTIAL.value
     await db_session.flush()
 
-    assert await svc.user_has_queryable_graph(user.id) is False
+    assert await svc.user_has_queryable_graph(user.id) is True
 
 
 # ---------------------------------------------------------------------------

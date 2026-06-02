@@ -18,18 +18,21 @@ from contactsafe_core.contact_schemas import (
     OrgDetailResult,
     PersonDetailResult,
 )
-from contactsafe_core.enums import SessionStatus, SourceType
+from contactsafe_core.enums import SessionStatus, SourceType, EnrichmentRunState
 from contactsafe_core.schemas import (
     ConnectSourceResult,
     DescribeGraphResult,
     EditTrustedUsersResult,
+    EnrichmentStatusResult,
     ListSourcesResult,
     PersonMatch,
     PollConnectResult,
     QueryNetworkResult,
     SecondDegreeMatch,
     SourceStatusResult,
+    StartEnrichmentResult,
     SyncSourceResult,
+    UploadSourceResult,
     ViewTrustedUsersResult,
 )
 
@@ -38,6 +41,7 @@ from contactsafe_server.deps import (
     AppContext,
     build_oauth_server_service,
     build_oauth_service,
+    build_enrichment_service,
     build_source_service,
 )
 from contactsafe_server.services.contacts_service import ContactsService
@@ -150,6 +154,78 @@ async def sync_source(
             raise ValueError("Authentication required (Bearer token) or provide source_id")
         await db.commit()
         return result
+
+
+async def start_enrichment(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> StartEnrichmentResult:
+    if user_id is None:
+        return StartEnrichmentResult(
+            run_id=None,
+            scheduled=False,
+            state=EnrichmentRunState.PENDING,
+            message="Authentication required. Provide a Bearer token.",
+        )
+    async with ctx.session_factory() as db:
+        enrichment = build_enrichment_service(db)
+        result: StartEnrichmentResult = await enrichment.start_enrichment(user_id)
+        await db.commit()
+        return result
+
+
+async def get_enrichment_status(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> EnrichmentStatusResult:
+    if user_id is None:
+        return EnrichmentStatusResult(
+            run_id=None,
+            state=EnrichmentRunState.PENDING,
+            message="Authentication required. Provide a Bearer token.",
+        )
+    async with ctx.session_factory() as db:
+        enrichment = build_enrichment_service(db)
+        return await enrichment.get_enrichment_status(user_id)
+
+
+async def upload_source(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    source_type: str,
+    filename: str,
+    content: str,
+) -> UploadSourceResult:
+    if user_id is None:
+        raise ValueError("Authentication required. Provide a Bearer token.")
+    try:
+        parsed_type: SourceType = SourceType(source_type)
+    except ValueError as exc:
+        raise ValueError(f"Unknown source_type: {source_type}") from exc
+
+    if parsed_type not in {
+        SourceType.PHONE_CONTACTS_UPLOAD,
+        SourceType.LINKEDIN_CONNECTIONS_UPLOAD,
+    }:
+        raise ValueError(f"upload_source not supported for {source_type}")
+
+    async with ctx.session_factory() as db:
+        sources: SourceService = build_source_service(db)
+        source = await sources.ensure_upload_source(
+            user_id,
+            source_type=parsed_type,
+            filename=filename,
+            content=content,
+        )
+        sync_result: SyncSourceResult = await sources.request_sync(source.id)
+        await db.commit()
+        return UploadSourceResult(
+            source_id=source.id,
+            scheduled=sync_result.scheduled,
+            sync_state=sync_result.sync_state,
+            message=sync_result.message,
+        )
 
 
 async def query_network(

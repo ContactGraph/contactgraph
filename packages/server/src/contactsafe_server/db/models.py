@@ -106,11 +106,27 @@ class Source(Base):
     sync_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     sync_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    upload_payload: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     user: Mapped["User"] = relationship(back_populates="sources")
     oauth_credential: Mapped["OAuthCredential | None"] = relationship(back_populates="source", uselist=False)
+
+
+class EnrichmentRun(Base):
+    __tablename__ = "enrichment_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    contacts_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    contacts_enriched: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class ConnectSession(Base):
@@ -377,6 +393,7 @@ class UserPersonObservation(Base):
     is_automated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     relationship_types: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    import_snippets: Mapped[list[str] | None] = mapped_column(ARRAY(Text), nullable=True)
     source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("sources.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

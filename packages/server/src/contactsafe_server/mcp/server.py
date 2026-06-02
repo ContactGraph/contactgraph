@@ -10,10 +10,13 @@ from contactsafe_core.schemas import (
     ConnectSourceResult,
     DescribeGraphResult,
     EditTrustedUsersResult,
+    EnrichmentStatusResult,
     ListSourcesResult,
     QueryNetworkResult,
     SourceStatusResult,
+    StartEnrichmentResult,
     SyncSourceResult,
+    UploadSourceResult,
     ViewTrustedUsersResult,
 )
 from mcp.server.fastmcp import Context, FastMCP
@@ -47,13 +50,18 @@ def create_mcp_server(settings: Settings) -> FastMCP:
             "ContactGraph builds a private contact graph from connected data "
             "sources. Authenticate with OAuth 2.1 Bearer tokens "
             "(see /.well-known/oauth-protected-resource). "
-            "Available source types: google_mail (Gmail + Google Contacts). "
+            "Available source types: google_mail (Gmail + Google Contacts), "
+            "google_calendar (Calendar attendees), phone_contacts_upload, "
+            "linkedin_connections_upload (CSV export). "
+            "Import sources first, then call start_enrichment to find current "
+            "employers and activity. "
             "Multiple Gmail accounts can be linked to a single user: call "
             "connect_source while authenticated to add another Google account. "
             "All contacts merge into one graph. "
-            "Use connect_source to start OAuth, list_sources to see "
-            "connections, sync_source to (re)start ingestion, "
-            "get_source_status for progress, "
+            "Use connect_source to start OAuth, upload_source for file imports, "
+            "list_sources to see connections, sync_source to (re)start ingestion, "
+            "get_source_status for import progress, start_enrichment / "
+            "get_enrichment_status for enrichment, "
             "describe_graph for a high-level graph summary, "
             "query_network to search contacts (includes 2nd-degree results "
             "from trusted connections), "
@@ -73,7 +81,10 @@ def create_mcp_server(settings: Settings) -> FastMCP:
         user_token: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> ConnectSourceResult:
-        """Connect Gmail for a Google account (includes Google Contacts seeding on sync).
+        """Connect Gmail or Google Calendar for a Google account.
+
+        source_type: "google_mail" or "google_calendar". Gmail sync also seeds
+        Google Contacts. Calendar uses the same Google OAuth consent.
 
         Returns oauth_url when browser authorization is needed, or
         access_token when the account is already connected.
@@ -125,6 +136,51 @@ def create_mcp_server(settings: Settings) -> FastMCP:
         return await actions.sync_source(
             lifespan.app_context, user_id, source_id=source_id
         )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def upload_source(
+        source_type: str,
+        filename: str,
+        content: str,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> UploadSourceResult:
+        """Upload phone contacts (vCard/CSV) or LinkedIn Connections.csv.
+
+        source_type: phone_contacts_upload or linkedin_connections_upload.
+        content: raw file text. Schedules background import automatically.
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        if user_id is None:
+            raise ValueError("Authentication required")
+        return await actions.upload_source(
+            lifespan.app_context,
+            user_id,
+            source_type=source_type,
+            filename=filename,
+            content=content,
+        )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def start_enrichment(
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> StartEnrichmentResult:
+        """Run enrichment across the merged graph (employers, roles, web activity).
+
+        Call after importing sources. Uses Exa/web search and LLM when configured.
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.start_enrichment(lifespan.app_context, user_id)
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def get_enrichment_status(
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> EnrichmentStatusResult:
+        """Poll enrichment progress after start_enrichment."""
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.get_enrichment_status(lifespan.app_context, user_id)
 
     @mcp.tool()  # pyright: ignore[reportUnusedFunction]
     async def query_network(

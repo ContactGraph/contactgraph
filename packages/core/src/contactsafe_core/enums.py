@@ -34,6 +34,13 @@ class SyncState(StrEnum):
     FAILED = "failed"
 
 
+class EnrichmentRunState(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETE = "complete"
+    FAILED = "failed"
+
+
 class IdentityKind(StrEnum):
     EMAIL = "email"
     PHONE = "phone"

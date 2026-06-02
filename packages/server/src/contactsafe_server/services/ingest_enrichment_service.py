@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.config import Settings
-from contactsafe_server.db.models import Person, PersonAlias, UserPersonObservation
+from contactsafe_server.db.models import EnrichmentRun, Person, PersonAlias, UserPersonObservation
 from contactsafe_server.services.claim_writer import record_employment, record_person_attribute
 from contactsafe_server.services.email_parse import (
     BROADCAST_LOCAL_PARTS,
@@ -19,12 +19,14 @@ from contactsafe_server.services.email_parse import (
 from contactsafe_server.services.enrichment_attempt_tracker import EnrichmentAttemptTracker
 from contactsafe_server.services.entity_resolution import EntityResolver, MergeConflict
 from contactsafe_server.services.category_inference import infer_categories_from_contact
+from contactsafe_server.services.interaction_excerpt_service import InteractionExcerptService
 from contactsafe_server.services.openai_json import content_from_chat_completion, parse_json_object
 from contactsafe_server.services.org_enrichment import should_apply_enrichment_org
 from contactsafe_server.services.org_search import is_automation_or_generic_domain
 from contactsafe_server.services.person_discovery_service import PersonDiscoveryService
 from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
 from contactsafe_server.services.signature_enrichment import parse_signature_from_snippets
+from contactsafe_server.services.user_org_observation_service import rebuild_user_org_observations
 from contactsafe_server.services.web_enrichment import (
     extract_hints_from_web_hits,
     extract_social_profiles_from_hits,
@@ -64,11 +66,33 @@ class IngestEnrichmentService:
         user_id: uuid.UUID,
         contact_by_email: dict[str, ContactAccumulator],
     ) -> None:
+        await self.enrich_user_graph(
+            user_id=user_id,
+            contact_by_email=contact_by_email,
+        )
+
+    async def enrich_user_graph(
+        self,
+        *,
+        user_id: uuid.UUID,
+        contact_by_email: dict[str, ContactAccumulator] | None = None,
+        run: EnrichmentRun | None = None,
+    ) -> None:
+        if contact_by_email is None:
+            contact_by_email = await self._build_contact_accumulators(user_id)
+
         people: list[tuple[Person, UserPersonObservation]] = await self._load_people_with_obs(user_id)
         if not people:
+            if run is not None:
+                run.contacts_total = 0
+                run.contacts_enriched = 0
             return
 
-        enriched_person_ids: list[uuid.UUID] = []
+        if run is not None:
+            run.contacts_total = len(people)
+            await self._db.flush()
+
+        enriched_count: int = 0
 
         for person, obs in people:
             primary_email: str | None = person.primary_email
@@ -80,7 +104,10 @@ class IngestEnrichmentService:
 
             await self._heuristic_enrich(person, acc, user_id=user_id)
             await self._signature_enrich(person, acc, user_id=user_id)
-            enriched_person_ids.append(person.id)
+            enriched_count += 1
+            if run is not None:
+                run.contacts_enriched = enriched_count
+                await self._db.flush()
 
         if self._has_web_enrichment_provider():
             limit: int = self._web_enrichment_limit()
@@ -94,7 +121,36 @@ class IngestEnrichmentService:
             await self._llm_enrich_batch(top_for_llm, contact_by_email, user_id=user_id)
 
         await self._recompute.recompute_for_user(user_id)
+        await rebuild_user_org_observations(self._db, user_id)
+
+        excerpt_service = InteractionExcerptService(self._db, self._settings)
+        await excerpt_service.seed_excerpts_for_user(user_id)
         await self._db.flush()
+
+    async def _build_contact_accumulators(
+        self,
+        user_id: uuid.UUID,
+    ) -> dict[str, ContactAccumulator]:
+        people: list[tuple[Person, UserPersonObservation]] = await self._load_people_with_obs(user_id)
+        by_email: dict[str, ContactAccumulator] = {}
+        for person, obs in people:
+            email: str | None = person.primary_email
+            if not email:
+                continue
+            snippets: list[str] | None = (
+                list(obs.import_snippets) if obs.import_snippets else None
+            )
+            by_email[email] = ContactAccumulator(
+                email=email,
+                display_name=person.canonical_name,
+                first_seen_at=obs.first_observed_at,
+                last_seen_at=obs.last_observed_at,
+                message_count=obs.email_count,
+                outbound_count=obs.outbound_count,
+                inbound_count=obs.inbound_count,
+                inbound_snippets=snippets,
+            )
+        return by_email
 
     def _has_web_enrichment_provider(self) -> bool:
         return bool(

@@ -10,33 +10,13 @@ async def test_health(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_landing_page(client: AsyncClient) -> None:
-    response = await client.get("/")
-    assert response.status_code == 200
-    assert "ContactGraph" in response.text
-    assert "Turn your contacts into a superpower." in response.text
-    assert 'property="og:title"' in response.text
-    assert 'name="twitter:description"' in response.text
-    assert 'href="/skill.md"' in response.text
-    assert 'href="/mcp"' in response.text
-    assert "https://github.com/ContactGraph/contactgraph" in response.text
-    assert 'href="/manifesto"' in response.text
-    assert "agent-first" in response.text.lower()
-    assert "open source" in response.text.lower()
+async def test_marketing_routes_not_served_by_api(client: AsyncClient) -> None:
+    """Landing and manifesto are served by the Next.js app, not the API server."""
+    landing = await client.get("/")
+    assert landing.status_code == 404
 
-
-@pytest.mark.asyncio
-async def test_manifesto_page(client: AsyncClient) -> None:
-    response = await client.get("/manifesto")
-    assert response.status_code == 200
-    assert "The ContactGraph Manifesto" in response.text
-    assert 'property="og:description"' in response.text
-    assert "Turn your contacts into a superpower." in response.text
-    assert "We gave away our relationships" in response.text
-    assert 'href="/"' in response.text
-    assert "# THE CONTACTGRAPH MANIFESTO" not in response.text
-    assert "## WE GAVE AWAY" not in response.text
-    assert "<strong>ContactGraph is that graph.</strong>" in response.text
+    manifesto = await client.get("/manifesto")
+    assert manifesto.status_code == 404
 
 
 @pytest.mark.asyncio

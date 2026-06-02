@@ -7,6 +7,7 @@ from contactsafe_server.db.connection import get_session_factory
 from contactsafe_server.oauth.google import GoogleOAuthClient
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.jwt_service import JWTService
+from contactsafe_server.services.enrichment_service import EnrichmentService
 from contactsafe_server.services.oauth_service import OAuthService
 from contactsafe_server.services.oauth_server_service import OAuthServerService
 from contactsafe_server.services.source_service import SourceService
@@ -55,3 +56,7 @@ def build_oauth_server_service(db: AsyncSession, ctx: AppContext) -> OAuthServer
 
 def build_source_service(db: AsyncSession) -> SourceService:
     return SourceService(db)
+
+
+def build_enrichment_service(db: AsyncSession) -> EnrichmentService:
+    return EnrichmentService(db)

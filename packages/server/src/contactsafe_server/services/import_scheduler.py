@@ -9,7 +9,10 @@ from contactsafe_core.enums import SourceType, SyncState
 from contactsafe_server.db.connection import get_session_factory
 from contactsafe_server.db.models import Source
 from contactsafe_server.oauth.google import GoogleOAuthClient
+from contactsafe_server.services.calendar_api_client import CalendarApiClient
+from contactsafe_server.services.file_upload_import_service import FileUploadImportService
 from contactsafe_server.services.gmail_client import GmailClient
+from contactsafe_server.services.google_calendar_import_service import GoogleCalendarImportService
 from contactsafe_server.services.import_service import ImportService
 from contactsafe_server.services.people_api_client import PeopleApiClient
 
@@ -79,25 +82,40 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
                 logger.warning("Source %s not found, skipping sync", source_id)
                 return
 
-            if source.source_type != SourceType.GOOGLE_MAIL.value:
-                logger.warning(
-                    "Sync skipped for source %s with type %s",
-                    source_id,
-                    source.source_type,
-                )
-                return
-
-            gmail = GmailClient(ctx.settings, google_client)
-            people = PeopleApiClient(ctx.settings, google_client)
-            service = ImportService(
-                db=db,
-                settings=ctx.settings,
-                encryptor=ctx.encryptor,
-                gmail=gmail,
-                people_client=people,
-            )
+            source_type: str = source.source_type
             try:
-                await service.run_sync(source_id)
+                if source_type == SourceType.GOOGLE_MAIL.value:
+                    gmail = GmailClient(ctx.settings, google_client)
+                    people = PeopleApiClient(ctx.settings, google_client)
+                    service = ImportService(
+                        db=db,
+                        settings=ctx.settings,
+                        encryptor=ctx.encryptor,
+                        gmail=gmail,
+                        people_client=people,
+                    )
+                    await service.run_sync(source_id)
+                elif source_type == SourceType.GOOGLE_CALENDAR.value:
+                    calendar = CalendarApiClient(google_client)
+                    service = GoogleCalendarImportService(
+                        db=db,
+                        encryptor=ctx.encryptor,
+                        calendar_client=calendar,
+                    )
+                    await service.run_sync(source_id)
+                elif source_type in {
+                    SourceType.PHONE_CONTACTS_UPLOAD.value,
+                    SourceType.LINKEDIN_CONNECTIONS_UPLOAD.value,
+                }:
+                    service = FileUploadImportService(db=db)
+                    await service.run_sync(source_id)
+                else:
+                    logger.warning(
+                        "Sync skipped for source %s with type %s",
+                        source_id,
+                        source_type,
+                    )
+                    return
                 await db.commit()
                 logger.info("Source sync completed for source %s", source_id)
             except Exception:
