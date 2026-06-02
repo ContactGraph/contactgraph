@@ -16,9 +16,6 @@ from contactsafe_server.db.models import (
 )
 from contactsafe_server.services.network_query_service import NetworkQueryService
 
-pytestmark = pytest.mark.anyio
-
-
 @pytest.fixture(autouse=True)
 async def _setup_tables(db_engine):
     async with db_engine.begin() as conn:

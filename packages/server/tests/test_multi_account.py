@@ -29,9 +29,6 @@ from contactsafe_server.db.models import (
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.source_service import SourceService
 
-pytestmark = pytest.mark.anyio
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
