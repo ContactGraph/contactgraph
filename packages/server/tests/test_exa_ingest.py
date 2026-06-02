@@ -22,9 +22,6 @@ from contactsafe_server.services.ingest_enrichment_service import IngestEnrichme
 from contactsafe_server.services.person_discovery_service import PersonDiscoveryResult
 from contactsafe_server.services.web_search_types import WebSearchHit
 
-pytestmark = pytest.mark.anyio
-
-
 @pytest.fixture(autouse=True)
 async def _setup_tables(db_engine):
     async with db_engine.begin() as conn:

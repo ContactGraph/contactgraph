@@ -20,7 +20,6 @@ def _message_meta(message_id: str, *, to_header: str) -> GmailMessageMeta:
     )
 
 
-@pytest.mark.anyio
 async def test_flush_ingest_progress_marks_partial_and_commits() -> None:
     settings = Settings()
     settings.import_partial_contact_target = 2
@@ -76,7 +75,6 @@ async def test_flush_ingest_progress_marks_partial_and_commits() -> None:
     assert service._upsert_person.await_count == 2
 
 
-@pytest.mark.anyio
 async def test_scan_and_ingest_commits_during_scan() -> None:
     settings = Settings()
     settings.import_max_messages = 2

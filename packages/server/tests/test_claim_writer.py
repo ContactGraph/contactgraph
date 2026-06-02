@@ -21,9 +21,6 @@ from contactsafe_server.services.claim_writer import (
     record_relationship,
 )
 
-pytestmark = pytest.mark.anyio
-
-
 @pytest.fixture(autouse=True)
 async def _setup_tables(db_engine):
     async with db_engine.begin() as conn:

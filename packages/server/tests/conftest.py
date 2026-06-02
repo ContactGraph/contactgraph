@@ -10,9 +10,9 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
-    async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 os.environ.setdefault("APP_ENV", "development")
 os.environ.setdefault("BASE_URL", "http://testserver")
@@ -48,17 +48,15 @@ def postgres_available() -> bool:
 
 
 @pytest.fixture(scope="session")
-def anyio_backend() -> str:
-    return "asyncio"
-
-
-@pytest.fixture(scope="session")
 async def db_engine(postgres_available: bool) -> AsyncIterator[AsyncEngine]:
     if not postgres_available:
         pytest.skip("Postgres not available")
 
     settings = get_settings()
-    engine = create_async_engine(str(settings.database_url), pool_pre_ping=True)
+    engine = create_async_engine(
+        str(settings.database_url),
+        poolclass=NullPool,
+    )
     try:
         async with engine.connect() as conn:
             await conn.execute(__import__("sqlalchemy").text("SELECT 1"))
@@ -74,13 +72,17 @@ async def db_engine(postgres_available: bool) -> AsyncIterator[AsyncEngine]:
 async def db_session(db_engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
     connection = await db_engine.connect()
     transaction = await connection.begin()
-    factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
-        connection, expire_on_commit=False
+    session = AsyncSession(
+        bind=connection,
+        join_transaction_mode="create_savepoint",
+        expire_on_commit=False,
     )
-    async with factory() as session:
+    try:
         yield session
-    await transaction.rollback()
-    await connection.close()
+    finally:
+        await session.close()
+        await transaction.rollback()
+        await connection.close()
 
 
 @pytest.fixture

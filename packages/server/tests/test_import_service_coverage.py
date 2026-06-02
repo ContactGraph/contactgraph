@@ -24,9 +24,6 @@ from contactsafe_server.services.email_parse import ContactAccumulator
 from contactsafe_server.services.gmail_client import GmailMessageMeta, GmailMessageRef
 from contactsafe_server.services.import_service import ImportService
 
-pytestmark = pytest.mark.anyio
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

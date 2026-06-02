@@ -1,14 +1,11 @@
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
-import pytest
-
 from contactsafe_server.config import Settings
 from contactsafe_server.services.gmail_client import GmailMessageMeta, GmailMessageRef
 from contactsafe_server.services.import_service import ImportService
 
 
-@pytest.mark.anyio
 async def test_scan_gmail_builds_contacts_and_cooccurrence_edges() -> None:
     settings = Settings()
     settings.import_max_messages = 10
