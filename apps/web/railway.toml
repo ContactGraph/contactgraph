@@ -3,6 +3,6 @@ builder = "railpack"
 watchPatterns = ["apps/web/**"]
 
 [deploy]
-healthcheckPath = "/login"
+healthcheckPath = "/api/health"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"
