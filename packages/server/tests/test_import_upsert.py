@@ -23,9 +23,6 @@ from contactsafe_server.services.email_parse import ContactAccumulator
 from contactsafe_server.services.entity_resolution import EntityResolver
 from contactsafe_server.services.import_service import ImportService
 
-pytestmark = pytest.mark.anyio
-
-
 @pytest.fixture(autouse=True)
 async def _setup_tables(db_engine):
     async with db_engine.begin() as conn:
