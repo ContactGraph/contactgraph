@@ -15,21 +15,6 @@ jobs:
     name: Test
     runs-on: ubuntu-latest
 
-    services:
-      postgres:
-        image: pgvector/pgvector:pg16
-        env:
-          POSTGRES_USER: contactsafe
-          POSTGRES_PASSWORD: contactsafe
-          POSTGRES_DB: contactsafe
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U contactsafe -d contactsafe"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
     env:
       APP_ENV: development
       BASE_URL: http://testserver
@@ -43,6 +28,45 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set up PostgreSQL
+        run: |
+          set -euo pipefail
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get update
+          sudo apt-get install -y postgresql-16 postgresql-client-16 postgresql-16-pgvector
+
+          sudo systemctl start postgresql
+
+          sudo -u postgres psql -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          BEGIN
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'contactsafe') THEN
+              CREATE ROLE contactsafe LOGIN PASSWORD 'contactsafe' CREATEDB;
+            END IF;
+          END
+          $$;
+          SELECT 'CREATE DATABASE contactsafe OWNER contactsafe'
+            WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'contactsafe')\gexec
+          SQL
+
+          PG_HBA="/etc/postgresql/16/main/pg_hba.conf"
+          PG_CONF="/etc/postgresql/16/main/postgresql.conf"
+          if ! grep -q '127.0.0.1/32' "$PG_HBA"; then
+            echo "host all all 127.0.0.1/32 scram-sha-256" | sudo tee -a "$PG_HBA"
+            echo "host all all ::1/128 scram-sha-256" | sudo tee -a "$PG_HBA"
+          fi
+          sudo sed -i "s/#listen_addresses = 'localhost'/listen_addresses = 'localhost'/" "$PG_CONF"
+          sudo systemctl restart postgresql
+
+          for i in $(seq 1 30); do
+            if PGPASSWORD=contactsafe pg_isready -h 127.0.0.1 -p 5432 -U contactsafe -d contactsafe; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "PostgreSQL failed to become ready"
+          exit 1
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
