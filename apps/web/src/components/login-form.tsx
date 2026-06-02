@@ -150,14 +150,14 @@ export function LoginForm() {
   };
 
   return (
-    <Card className="w-full max-w-md">
-      <CardHeader>
-        <CardTitle>Sign in to ContactGraph</CardTitle>
-        <CardDescription>
+    <Card className="w-full max-w-md border-border">
+      <CardHeader className="p-5 pb-3">
+        <CardTitle className="text-sm font-semibold">Sign in to ContactGraph</CardTitle>
+        <CardDescription className="text-sm">
           Connect your Google account to access your private contact graph.
         </CardDescription>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-4 p-5 pt-0">
         {error ? (
           <Alert variant="destructive">
             <AlertTitle>Sign in failed</AlertTitle>

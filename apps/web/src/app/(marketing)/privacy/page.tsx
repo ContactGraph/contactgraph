@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 
+import { MarketingMain, MarketingProse } from "../components/marketing-prose";
+
 export const metadata: Metadata = {
   title: "Privacy Policy — ContactGraph",
   description:
@@ -22,9 +24,9 @@ export const metadata: Metadata = {
 
 export default function PrivacyPage() {
   return (
-    <main className="marketing-content-wide">
-      <article className="prose">
-        <h1 className="doc-title">PRIVACY POLICY</h1>
+    <MarketingMain wide>
+      <MarketingProse>
+        <h1>Privacy Policy</h1>
         <p><em>Effective: May 25, 2026</em></p>
 
         <h2>What we collect</h2>
@@ -82,7 +84,7 @@ export default function PrivacyPage() {
 
         <h2>Contact</h2>
         <p>Questions? Email <strong>support@basebase.com</strong>.</p>
-      </article>
-    </main>
+      </MarketingProse>
+    </MarketingMain>
   );
 }

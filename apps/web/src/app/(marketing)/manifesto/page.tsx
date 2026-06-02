@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { MarketingMain, MarketingProse } from "../components/marketing-prose";
+
 export const metadata: Metadata = {
   title: "Manifesto — ContactGraph",
   description:
@@ -110,11 +112,11 @@ export default function ManifestoPage() {
   const { title, html } = parseManifesto();
 
   return (
-    <main className="marketing-content-wide">
-      <article className="prose">
-        <h1 className="doc-title">{title.toUpperCase()}</h1>
+    <MarketingMain wide>
+      <MarketingProse>
+        <h1>{title}</h1>
         <div dangerouslySetInnerHTML={{ __html: html }} />
-      </article>
-    </main>
+      </MarketingProse>
+    </MarketingMain>
   );
 }

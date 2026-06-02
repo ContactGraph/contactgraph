@@ -6,24 +6,33 @@ export function MarketingHeader() {
   const mcpPath = `${API_BASE}/mcp`;
 
   return (
-    <header>
-      <div className="masthead">
-        <div className="brand-block">
-          <a href="/">CONTACTGRAPH</a>
-          <div className="brand-meta">{year}</div>
+    <header className="border-b border-border">
+      <div className="flex flex-col gap-4 px-5 py-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-0.5">
+          <a href="/" className="text-sm font-semibold no-underline hover:underline">
+            ContactGraph
+          </a>
+          <div className="text-sm text-muted-foreground">{year}</div>
         </div>
-        <nav className="nav-block" aria-label="ContactGraph links">
-          <div className="nav-bracket">
-            [&nbsp;
-            <a href={`${API_BASE}/skill.md`}>SKILL.MD</a>
-            &nbsp;/&nbsp;
-            <a href={mcpPath}>MCP</a>
-            &nbsp;/&nbsp;
-            <a href={GITHUB_REPO_URL}>GITHUB</a>
-            &nbsp;/&nbsp;
-            <a href="/manifesto">MANIFESTO</a>
-            &nbsp;]
-          </div>
+        <nav
+          className="text-sm text-muted-foreground sm:text-right"
+          aria-label="ContactGraph links"
+        >
+          <a href={`${API_BASE}/skill.md`} className="no-underline hover:underline">
+            Skill
+          </a>
+          {" / "}
+          <a href={mcpPath} className="no-underline hover:underline">
+            MCP
+          </a>
+          {" / "}
+          <a href={GITHUB_REPO_URL} className="no-underline hover:underline">
+            GitHub
+          </a>
+          {" / "}
+          <a href="/manifesto" className="no-underline hover:underline">
+            Manifesto
+          </a>
         </nav>
       </div>
     </header>

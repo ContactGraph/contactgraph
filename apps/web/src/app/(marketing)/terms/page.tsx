@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 
+import { MarketingMain, MarketingProse } from "../components/marketing-prose";
+
 export const metadata: Metadata = {
   title: "Terms of Service — ContactGraph",
   description:
@@ -22,9 +24,9 @@ export const metadata: Metadata = {
 
 export default function TermsPage() {
   return (
-    <main className="marketing-content-wide">
-      <article className="prose">
-        <h1 className="doc-title">TERMS OF SERVICE</h1>
+    <MarketingMain wide>
+      <MarketingProse>
+        <h1>Terms of Service</h1>
         <p><em>Effective: May 25, 2026</em></p>
 
         <h2>Acceptance</h2>
@@ -55,7 +57,10 @@ export default function TermsPage() {
         <h2>Intellectual property</h2>
         <p>
           The ContactGraph source code is licensed under the{" "}
-          <a href="https://github.com/ContactGraph/contactgraph/blob/main/LICENSE">
+          <a
+            href="https://github.com/ContactGraph/contactgraph/blob/main/LICENSE"
+            className="no-underline hover:underline"
+          >
             Apache License 2.0
           </a>.
           Your data remains yours.
@@ -83,7 +88,7 @@ export default function TermsPage() {
 
         <h2>Contact</h2>
         <p>Questions? Email <strong>support@basebase.com</strong>.</p>
-      </article>
-    </main>
+      </MarketingProse>
+    </MarketingMain>
   );
 }

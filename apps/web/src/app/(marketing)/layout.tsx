@@ -3,7 +3,6 @@ import type { ReactNode } from "react";
 
 import { MarketingHeader } from "./components/marketing-header";
 import { MarketingFooter } from "./components/marketing-footer";
-import "./marketing.css";
 
 export const metadata: Metadata = {
   robots: "index, follow",
@@ -11,7 +10,7 @@ export const metadata: Metadata = {
 
 export default function MarketingLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="marketing-page">
+    <div className="flex min-h-full flex-col bg-background text-foreground">
       <MarketingHeader />
       {children}
       <MarketingFooter />
