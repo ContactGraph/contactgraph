@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
 
@@ -17,12 +17,6 @@ from contactsafe_server.mcp.path_middleware import NormalizeMcpPathMiddleware
 from contactsafe_server.mcp.server import create_mcp_server
 from contactsafe_server.oauth.router import router as oauth_router
 from contactsafe_server.oauth.well_known import router as well_known_router
-from contactsafe_server.web.site import (
-    render_landing_page,
-    render_manifesto_page,
-    render_privacy_page,
-    render_terms_page,
-)
 
 
 def create_app() -> FastAPI:
@@ -75,30 +69,6 @@ def create_app() -> FastAPI:
     @app.get("/health")  # pyright: ignore[reportUnusedFunction]
     async def health() -> dict[str, str]:
         return {"status": "ok"}
-
-    @app.get("/", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
-    async def landing_page() -> HTMLResponse:
-        return HTMLResponse(
-            render_landing_page(mcp_path=settings.mcp_path, base_url=settings.base_url)
-        )
-
-    @app.get("/manifesto", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
-    async def manifesto_page() -> HTMLResponse:
-        return HTMLResponse(
-            render_manifesto_page(mcp_path=settings.mcp_path, base_url=settings.base_url)
-        )
-
-    @app.get("/privacy", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
-    async def privacy_page() -> HTMLResponse:
-        return HTMLResponse(
-            render_privacy_page(mcp_path=settings.mcp_path, base_url=settings.base_url)
-        )
-
-    @app.get("/terms", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
-    async def terms_page() -> HTMLResponse:
-        return HTMLResponse(
-            render_terms_page(mcp_path=settings.mcp_path, base_url=settings.base_url)
-        )
 
     @app.get("/skill.md", include_in_schema=False)  # pyright: ignore[reportUnusedFunction]
     async def serve_skill_md() -> FileResponse:
