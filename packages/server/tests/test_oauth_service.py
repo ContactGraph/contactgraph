@@ -442,7 +442,7 @@ class TestCompleteOauth:
         with pytest.raises(ValueError, match="email"):
             await svc.complete_oauth(session, "code")
 
-    async def test_creates_google_contacts_source(self, db_session: AsyncSession) -> None:
+    async def test_does_not_create_google_contacts_source(self, db_session: AsyncSession) -> None:
         svc, session, _ = await self._setup_oauth(db_session, email="contacts@example.com")
 
         user, _ = await svc.complete_oauth(session, "code")
@@ -454,8 +454,15 @@ class TestCompleteOauth:
             )
         )
         contacts_source: Source | None = result.scalar_one_or_none()
-        assert contacts_source is not None
-        assert contacts_source.external_account_id == "contacts@example.com"
+        assert contacts_source is None
+
+        mail_result = await db_session.execute(
+            select(Source).where(
+                Source.user_id == user.id,
+                Source.source_type == SourceType.GOOGLE_MAIL.value,
+            )
+        )
+        assert mail_result.scalar_one_or_none() is not None
 
     async def test_session_references_nonexistent_user_raises(self, db_session: AsyncSession) -> None:
         """The DB FK constraint prevents a session from referencing a

@@ -28,10 +28,7 @@ import { proxyPost } from "@/lib/proxy-client";
 const connectableSources: ReadonlyArray<{
   type: SourceType;
   label: string;
-}> = [
-  { type: "google_mail", label: "Gmail" },
-  { type: "google_contacts", label: "Google Contacts" },
-];
+}> = [{ type: "google_mail", label: "Gmail" }];
 
 export default function SourcesPage() {
   const queryClient = useQueryClient();
@@ -166,7 +163,7 @@ export default function SourcesPage() {
         <CardHeader>
           <CardTitle>Connect a source</CardTitle>
           <CardDescription>
-            Add Gmail or Google Contacts to expand your graph.
+            Connect Gmail to import contacts and email relationships.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
@@ -212,7 +209,7 @@ export default function SourcesPage() {
             </div>
           ) : sources.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No sources connected yet. Connect Gmail or Google Contacts above.
+              No sources connected yet. Connect Gmail above.
             </p>
           ) : (
             <ul className="divide-y">

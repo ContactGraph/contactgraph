@@ -47,10 +47,7 @@ def create_mcp_server(settings: Settings) -> FastMCP:
             "ContactGraph builds a private contact graph from connected data "
             "sources. Authenticate with OAuth 2.1 Bearer tokens "
             "(see /.well-known/oauth-protected-resource). "
-            "Available source types: google_mail (Gmail metadata), "
-            "google_contacts (Google Contacts / People API). "
-            "Both share one Google OAuth consent — connecting either "
-            "auto-creates both sources. "
+            "Available source types: google_mail (Gmail + Google Contacts). "
             "Multiple Gmail accounts can be linked to a single user: call "
             "connect_source while authenticated to add another Google account. "
             "All contacts merge into one graph. "
@@ -76,10 +73,9 @@ def create_mcp_server(settings: Settings) -> FastMCP:
         user_token: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> ConnectSourceResult:
-        """Connect a data source. Available source_type values: "google_mail", "google_contacts".
+        """Connect Gmail for a Google account (includes Google Contacts seeding on sync).
 
-        Both share one Google OAuth consent flow. Connecting either auto-creates both
-        sources. Returns oauth_url when browser authorization is needed, or
+        Returns oauth_url when browser authorization is needed, or
         access_token when the account is already connected.
 
         To add a second/third Gmail account, call this while authenticated with a
