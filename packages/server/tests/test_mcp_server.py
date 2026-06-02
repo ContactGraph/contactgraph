@@ -352,7 +352,7 @@ class TestConnectSourceTool:
 
         call_kwargs: dict[str, Any] = mock_oauth.create_connect_session.call_args.kwargs
         assert call_kwargs["authenticated_user_id"] == user_id
-        assert call_kwargs["source_type"] == SourceType.GOOGLE_CONTACTS
+        assert call_kwargs["source_type"] == SourceType.GOOGLE_MAIL
 
 
 # ---------------------------------------------------------------------------

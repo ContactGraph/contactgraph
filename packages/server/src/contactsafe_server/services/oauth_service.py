@@ -30,7 +30,7 @@ class OAuthService:
 
     _GOOGLE_SOURCE_TYPES: frozenset[SourceType] = frozenset({
         SourceType.GOOGLE_MAIL,
-        SourceType.GOOGLE_CONTACTS,
+        SourceType.GOOGLE_CONTACTS,  # deprecated alias; treated as google_mail
     })
 
     async def create_connect_session(
@@ -47,6 +47,9 @@ class OAuthService:
         """
         if source_type not in self._GOOGLE_SOURCE_TYPES:
             raise ValueError(f"connect_source not implemented for {source_type.value}")
+
+        if source_type == SourceType.GOOGLE_CONTACTS:
+            source_type = SourceType.GOOGLE_MAIL
 
         if user_token:
             existing: ConnectSourceResult | None = await self._check_existing_by_email(
@@ -100,8 +103,6 @@ class OAuthService:
         source: Source = await self._sources.ensure_google_mail_source(user.id, email)
         await self._sources.link_credential_to_source(cred, source)
 
-        await self._sources.ensure_google_contacts_source(user.id, email)
-
         session.user_id = user.id
         session.status = SessionStatus.CONNECTED.value
         session.completed_at = datetime.now(tz=UTC)
@@ -127,7 +128,6 @@ class OAuthService:
 
         source: Source = await self._sources.ensure_google_mail_source(user.id, normalized)
         await self._sources.link_credential_to_source(cred, source)
-        await self._sources.ensure_google_contacts_source(user.id, normalized)
 
         session: ConnectSession = ConnectSession(
             state=secrets.token_urlsafe(32),

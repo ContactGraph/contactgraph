@@ -1,11 +1,14 @@
 import uuid
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
-
-import pytest
 
 from contactsafe_core.enums import SyncState
 from contactsafe_server.config import Settings
-from contactsafe_server.services.gmail_client import GmailMessageMeta, GmailMessageRef
+from contactsafe_server.services.gmail_client import (
+    GmailMessageListPage,
+    GmailMessageMeta,
+    GmailMessageRef,
+)
 from contactsafe_server.services.import_service import ImportService
 
 
@@ -75,9 +78,9 @@ async def test_flush_ingest_progress_marks_partial_and_commits() -> None:
     assert service._upsert_person.await_count == 2
 
 
-async def test_scan_and_ingest_commits_during_scan() -> None:
+async def test_phase2_sent_mail_scan_commits_during_scan() -> None:
     settings = Settings()
-    settings.import_max_messages = 2
+    settings.import_sent_max_messages = 2
     settings.import_progress_commit_messages = 1
     settings.import_partial_contact_target = 1
 
@@ -89,12 +92,13 @@ async def test_scan_and_ingest_commits_during_scan() -> None:
     gmail = MagicMock()
     gmail.list_message_refs = AsyncMock(
         side_effect=[
-            (
-                [
+            GmailMessageListPage(
+                refs=[
                     GmailMessageRef(id="m1", internal_date_ms="1700000000000"),
                     GmailMessageRef(id="m2", internal_date_ms="1700000000000"),
                 ],
-                None,
+                next_page_token=None,
+                result_size_estimate=2,
             )
         ]
     )
@@ -112,9 +116,6 @@ async def test_scan_and_ingest_commits_during_scan() -> None:
         gmail=gmail,
     )
     service._upsert_person = AsyncMock()  # type: ignore[method-assign]
-    service._load_user_identity = AsyncMock(  # type: ignore[method-assign]
-        return_value=({"owner@example.com"}, {"owner"})
-    )
 
     source = MagicMock()
     source.id = uuid.uuid4()
@@ -123,16 +124,25 @@ async def test_scan_and_ingest_commits_during_scan() -> None:
     source.contacts_resolved = 0
     source.contacts_pending = 0
 
-    contacts, pairs, upserted = await service._scan_and_ingest_gmail(
+    contacts: dict[str, MagicMock] = {}
+    pair_stats: dict[tuple[str, str], tuple[int, datetime | None]] = {}
+    upserted_emails: set[str] = set()
+
+    await service._phase2_sent_mail_scan(
         access_token="token",
         user_email="owner@example.com",
         user_id=uuid.uuid4(),
         source=source,
         resolver=MagicMock(),
+        user_emails={"owner@example.com"},
+        user_local_parts={"owner"},
+        contacts=contacts,
+        pair_stats=pair_stats,
+        upserted_emails=upserted_emails,
     )
 
     assert "alice@example.com" in contacts
     assert "bob@example.com" in contacts
-    assert len(pairs) == 0
-    assert upserted == {"alice@example.com", "bob@example.com"}
+    assert len(pair_stats) == 0
+    assert upserted_emails == {"alice@example.com", "bob@example.com"}
     assert db.commit.await_count == 2

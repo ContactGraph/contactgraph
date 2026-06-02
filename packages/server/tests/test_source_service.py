@@ -19,7 +19,7 @@ from contactsafe_core.schemas import (
     SyncSourceResult,
 )
 from contactsafe_server.db.models import ConnectSession, OAuthCredential, Source, User
-from contactsafe_server.services.source_service import SourceService, _STALE_SYNC_TIMEOUT
+from contactsafe_server.services.source_service import SourceService
 from contactsafe_server.utils import parse_connect_session_id, parse_source_id
 
 
@@ -99,6 +99,118 @@ async def _connected_gmail_source(db_session: AsyncSession) -> tuple[User, Sourc
 
 
 @pytest.mark.asyncio
+async def test_list_sources_recovers_orphaned_sync(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, source = await _connected_gmail_source(db_session)
+    source.sync_state = SyncState.SYNCING.value
+    source.sync_started_at = datetime.now(tz=UTC) - timedelta(minutes=5)
+    await db_session.flush()
+
+    monkeypatch.setattr(
+        "contactsafe_server.services.source_service.is_user_sync_running",
+        lambda uid: False,
+    )
+    monkeypatch.setattr(
+        "contactsafe_server.services.source_service.is_source_sync_running",
+        lambda sid: False,
+    )
+
+    service = SourceService(db_session)
+    result = await service.list_sources_for_user(source.user_id)
+    await db_session.refresh(source)
+
+    assert len(result.sources) == 1
+    assert result.sources[0].sync_state == SyncState.FAILED
+    assert source.sync_state == SyncState.FAILED.value
+    assert source.sync_error is not None
+
+
+@pytest.mark.asyncio
+async def test_request_sync_recovers_orphaned_sync_before_scheduling(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    user, source = await _connected_gmail_source(db_session)
+    source.sync_state = SyncState.SYNCING.value
+    source.sync_started_at = datetime.now(tz=UTC) - timedelta(minutes=5)
+    await db_session.flush()
+
+    monkeypatch.setattr(
+        "contactsafe_server.services.source_service.is_user_sync_running",
+        lambda uid: False,
+    )
+    monkeypatch.setattr(
+        "contactsafe_server.services.source_service.is_source_sync_running",
+        lambda sid: False,
+    )
+    monkeypatch.setattr(
+        "contactsafe_server.services.source_service.schedule_source_sync",
+        lambda source_id, user_id: True,
+    )
+
+    service = SourceService(db_session)
+    result = await service.request_sync(source.id)
+    await db_session.refresh(source)
+
+    assert result.scheduled is True
+    assert source.sync_state == SyncState.SYNCING.value
+
+
+@pytest.mark.asyncio
+async def test_request_sync_redirects_legacy_google_contacts_source(
+    db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from contactsafe_server.services.crypto import TokenEncryptor
+    from contactsafe_server.config import get_settings
+
+    user: User = User(email="legacy@example.com")
+    db_session.add(user)
+    await db_session.flush()
+
+    encryptor: TokenEncryptor = TokenEncryptor(get_settings().token_encryption_key)
+    svc: SourceService = SourceService(db_session)
+    mail_source: Source = await svc.ensure_google_mail_source(user.id, user.email)
+    contacts_source: Source = await svc.ensure_google_contacts_source(user.id, user.email)
+
+    cred: OAuthCredential = OAuthCredential(
+        user_id=user.id,
+        source_id=mail_source.id,
+        provider=OAuthProvider.GOOGLE.value,
+        external_account_id=user.email,
+        access_token_encrypted=encryptor.encrypt("access"),
+        refresh_token_encrypted=encryptor.encrypt("refresh"),
+        token_expires_at=datetime.now(tz=UTC) + timedelta(hours=1),
+        scopes=["https://www.googleapis.com/auth/gmail.readonly"],
+        is_valid=True,
+    )
+    db_session.add(cred)
+    await db_session.flush()
+
+    scheduled_ids: list[uuid.UUID] = []
+
+    monkeypatch.setattr(
+        "contactsafe_server.services.source_service.schedule_source_sync",
+        lambda source_id, user_id: scheduled_ids.append(source_id) or True,
+    )
+    monkeypatch.setattr(
+        "contactsafe_server.services.source_service.is_source_sync_running",
+        lambda sid: False,
+    )
+    monkeypatch.setattr(
+        "contactsafe_server.services.source_service.is_user_sync_running",
+        lambda uid: False,
+    )
+
+    result: SyncSourceResult = await svc.request_sync(contacts_source.id)
+
+    assert result.scheduled is True
+    assert scheduled_ids == [mail_source.id]
+
+
+@pytest.mark.asyncio
 async def test_request_sync_rejects_when_db_sync_in_progress(
     db_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
@@ -116,6 +228,14 @@ async def test_request_sync_rejects_when_db_sync_in_progress(
     monkeypatch.setattr(
         "contactsafe_server.services.source_service.schedule_source_sync",
         fake_schedule,
+    )
+    monkeypatch.setattr(
+        "contactsafe_server.services.source_service.is_user_sync_running",
+        lambda uid: True,
+    )
+    monkeypatch.setattr(
+        "contactsafe_server.services.source_service.is_source_sync_running",
+        lambda sid: False,
     )
 
     service = SourceService(db_session)
@@ -388,11 +508,9 @@ async def test_list_sources_for_user_populated(db_session: AsyncSession) -> None
 
     result: ListSourcesResult = await svc.list_sources_for_user(user.id)
 
-    assert len(result.sources) == 2
-    assert "2 source(s)" in result.message
-    types: set[SourceType] = {s.source_type for s in result.sources}
-    assert SourceType.GOOGLE_MAIL in types
-    assert SourceType.GOOGLE_CONTACTS in types
+    assert len(result.sources) == 1
+    assert "1 source(s)" in result.message
+    assert result.sources[0].source_type == SourceType.GOOGLE_MAIL
 
 
 # ---------------------------------------------------------------------------
@@ -1011,7 +1129,9 @@ async def test_user_has_queryable_graph_complete(db_session: AsyncSession) -> No
 
 
 @pytest.mark.asyncio
-async def test_user_has_queryable_graph_contacts_source(db_session: AsyncSession) -> None:
+async def test_user_has_queryable_graph_requires_google_mail_source(
+    db_session: AsyncSession,
+) -> None:
     user: User = User(email="ctgraph@example.com")
     db_session.add(user)
     await db_session.flush()
@@ -1021,7 +1141,7 @@ async def test_user_has_queryable_graph_contacts_source(db_session: AsyncSession
     source.sync_state = SyncState.PARTIAL.value
     await db_session.flush()
 
-    assert await svc.user_has_queryable_graph(user.id) is True
+    assert await svc.user_has_queryable_graph(user.id) is False
 
 
 # ---------------------------------------------------------------------------
@@ -1066,7 +1186,7 @@ class TestSyncInProgress:
         )
         assert SourceService._sync_in_progress(source, source.user_id) is False
 
-    def test_syncing_state_no_lock_within_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_syncing_state_no_lock_is_orphaned(self, monkeypatch: pytest.MonkeyPatch) -> None:
         source: Source = _make_source(
             sync_state=SyncState.SYNCING.value,
             sync_started_at=datetime.now(tz=UTC) - timedelta(minutes=5),
@@ -1079,12 +1199,12 @@ class TestSyncInProgress:
             "contactsafe_server.services.source_service.is_source_sync_running",
             lambda sid: False,
         )
-        assert SourceService._sync_in_progress(source, source.user_id) is True
+        assert SourceService._sync_in_progress(source, source.user_id) is False
 
     def test_syncing_state_stale_timeout(self, monkeypatch: pytest.MonkeyPatch) -> None:
         source: Source = _make_source(
             sync_state=SyncState.SYNCING.value,
-            sync_started_at=datetime.now(tz=UTC) - _STALE_SYNC_TIMEOUT - timedelta(minutes=1),
+            sync_started_at=datetime.now(tz=UTC) - timedelta(minutes=31),
         )
         monkeypatch.setattr(
             "contactsafe_server.services.source_service.is_user_sync_running",
@@ -1109,7 +1229,7 @@ class TestSyncInProgress:
             "contactsafe_server.services.source_service.is_source_sync_running",
             lambda sid: False,
         )
-        assert SourceService._sync_in_progress(source, source.user_id) is True
+        assert SourceService._sync_in_progress(source, source.user_id) is False
 
 
 # ---------------------------------------------------------------------------
@@ -1144,13 +1264,13 @@ class TestSyncMessage:
         msg: str = SourceService._sync_message(source)
         assert "42/100" in msg
 
-    def test_syncing_google_contacts_label(self) -> None:
+    def test_syncing_uses_gmail_label(self) -> None:
         source: Source = _make_source(
             source_type=SourceType.GOOGLE_CONTACTS.value,
             sync_state=SyncState.SYNCING.value,
         )
         msg: str = SourceService._sync_message(source)
-        assert "Google Contacts" in msg
+        assert "Gmail" in msg
 
     def test_partial(self) -> None:
         source: Source = _make_source(

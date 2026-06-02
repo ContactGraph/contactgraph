@@ -2,16 +2,26 @@ import uuid
 from unittest.mock import AsyncMock, MagicMock
 
 from contactsafe_server.config import Settings
-from contactsafe_server.services.gmail_client import GmailMessageMeta, GmailMessageRef
+from contactsafe_server.services.gmail_client import (
+    GmailMessageListPage,
+    GmailMessageMeta,
+    GmailMessageRef,
+)
 from contactsafe_server.services.import_service import ImportService
 
 
-async def test_scan_gmail_builds_contacts_and_cooccurrence_edges() -> None:
+async def test_phase2_sent_mail_builds_contacts_and_cooccurrence_edges() -> None:
     settings = Settings()
-    settings.import_max_messages = 10
+    settings.import_sent_max_messages = 10
     gmail = MagicMock()
     gmail.list_message_refs = AsyncMock(
-        side_effect=[([GmailMessageRef(id="m1", internal_date_ms="1700000000000")], None)]
+        side_effect=[
+            GmailMessageListPage(
+                refs=[GmailMessageRef(id="m1", internal_date_ms="1700000000000")],
+                next_page_token=None,
+                result_size_estimate=1,
+            )
+        ]
     )
     gmail.get_message_metadata = AsyncMock(
         return_value=GmailMessageMeta(
@@ -36,13 +46,12 @@ async def test_scan_gmail_builds_contacts_and_cooccurrence_edges() -> None:
         gmail=gmail,
     )
     service._upsert_person = AsyncMock()  # type: ignore[method-assign]
-    service._load_user_identity = AsyncMock(  # type: ignore[method-assign]
-        return_value=({"owner@example.com"}, {"owner"})
-    )
 
     resolver = AsyncMock()
+    contacts: dict[str, object] = {}
+    pair_stats: dict[tuple[str, str], tuple[int, object]] = {}
 
-    contacts, pairs, _ = await service._scan_and_ingest_gmail(
+    await service._phase2_sent_mail_scan(
         access_token="token",
         user_email="owner@example.com",
         user_id=uuid.uuid4(),
@@ -54,11 +63,16 @@ async def test_scan_gmail_builds_contacts_and_cooccurrence_edges() -> None:
             contacts_pending=0,
         ),
         resolver=resolver,
+        user_emails={"owner@example.com"},
+        user_local_parts={"owner"},
+        contacts=contacts,
+        pair_stats=pair_stats,
+        upserted_emails=set(),
     )
 
     assert "alice@example.com" in contacts
     assert "bob@example.com" in contacts
     assert "carol@example.com" in contacts
-    assert pairs[("alice@example.com", "bob@example.com")][0] == 1
-    assert pairs[("alice@example.com", "carol@example.com")][0] == 1
-    assert pairs[("bob@example.com", "carol@example.com")][0] == 1
+    assert pair_stats[("alice@example.com", "bob@example.com")][0] == 1
+    assert pair_stats[("alice@example.com", "carol@example.com")][0] == 1
+    assert pair_stats[("bob@example.com", "carol@example.com")][0] == 1

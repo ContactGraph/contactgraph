@@ -63,6 +63,9 @@ async def connect_source(
     except ValueError as exc:
         raise ValueError(f"Unknown source_type: {source_type}") from exc
 
+    if parsed_type == SourceType.GOOGLE_CONTACTS:
+        parsed_type = SourceType.GOOGLE_MAIL
+
     async with ctx.session_factory() as db:
         oauth = build_oauth_service(db, ctx)
         result: ConnectSourceResult = await oauth.create_connect_session(

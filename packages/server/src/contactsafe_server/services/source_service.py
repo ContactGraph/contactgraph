@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from sqlalchemy import exists, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,7 +22,6 @@ from contactsafe_server.db.models import ConnectSession, OAuthCredential, Source
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-_STALE_SYNC_TIMEOUT: timedelta = timedelta(minutes=30)
 from contactsafe_server.services.import_scheduler import (
     is_source_sync_running,
     is_user_sync_running,
@@ -106,14 +105,23 @@ class SourceService:
             .order_by(Source.created_at)
         )
         sources: list[Source] = list(result.scalars().all())
-        if not sources:
+        for source in sources:
+            await self._recover_orphaned_sync(source)
+        visible_sources: list[Source] = [
+            source
+            for source in sources
+            if source.source_type != SourceType.GOOGLE_CONTACTS.value
+        ]
+        if visible_sources:
+            await self._db.flush()
+        if not visible_sources:
             return ListSourcesResult(
                 sources=[],
                 message="No data sources connected yet. Call connect_source first.",
             )
         return ListSourcesResult(
-            sources=[self._to_summary(s) for s in sources],
-            message=f"Found {len(sources)} source(s).",
+            sources=[self._to_summary(s) for s in visible_sources],
+            message=f"Found {len(visible_sources)} source(s).",
         )
 
     async def get_source_status(
@@ -287,11 +295,9 @@ class SourceService:
         if source is None:
             raise ValueError(f"Unknown source_id: {source_id}")
 
-        _SYNCABLE_TYPES: set[str] = {
-            SourceType.GOOGLE_MAIL.value,
-            SourceType.GOOGLE_CONTACTS.value,
-        }
-        if source.source_type not in _SYNCABLE_TYPES:
+        source = await self._resolve_gmail_sync_source(source)
+
+        if source.source_type != SourceType.GOOGLE_MAIL.value:
             return SyncSourceResult(
                 source_id=source.id,
                 scheduled=False,
@@ -322,6 +328,8 @@ class SourceService:
         user: User | None = await self._db.get(User, source.user_id)
         email: str | None = user.email if user is not None else None
         user_id: uuid.UUID = source.user_id
+
+        await self._recover_orphaned_sync(source)
 
         if self._sync_in_progress(source, user_id):
             await self._db.refresh(source)
@@ -400,7 +408,6 @@ class SourceService:
                 Source.user_id == user_id,
                 Source.source_type.in_([
                     SourceType.GOOGLE_MAIL.value,
-                    SourceType.GOOGLE_CONTACTS.value,
                 ]),
                 Source.sync_state.in_(
                     [SyncState.PARTIAL.value, SyncState.COMPLETE.value]
@@ -423,19 +430,39 @@ class SourceService:
 
     @staticmethod
     def _sync_in_progress(source: Source, user_id: uuid.UUID) -> bool:
-        if is_user_sync_running(user_id) or is_source_sync_running(source.id):
-            return True
+        return is_user_sync_running(user_id) or is_source_sync_running(source.id)
+
+    async def _recover_orphaned_sync(self, source: Source) -> None:
+        """Mark sync failed when DB says syncing but no background task is running."""
         if source.sync_state != SyncState.SYNCING.value:
-            return False
-        if source.sync_started_at is not None:
-            elapsed: timedelta = datetime.now(tz=UTC) - source.sync_started_at
-            if elapsed > _STALE_SYNC_TIMEOUT:
-                logger.warning(
-                    "Source %s stuck in syncing for %s, treating as stale",
-                    source.id, elapsed,
-                )
-                return False
-        return True
+            return
+        if is_user_sync_running(source.user_id) or is_source_sync_running(source.id):
+            return
+        source.sync_state = SyncState.FAILED.value
+        source.sync_error = (
+            source.sync_error or "Sync was interrupted before it finished. Try again."
+        )[:500]
+        logger.warning(
+            "Recovered orphaned sync for source %s (started_at=%s)",
+            source.id,
+            source.sync_started_at,
+        )
+
+    async def _resolve_gmail_sync_source(self, source: Source) -> Source:
+        """Map legacy google_contacts rows to the paired google_mail source."""
+        if source.source_type != SourceType.GOOGLE_CONTACTS.value:
+            return source
+        result = await self._db.execute(
+            select(Source).where(
+                Source.user_id == source.user_id,
+                Source.source_type == SourceType.GOOGLE_MAIL.value,
+                Source.external_account_id == source.external_account_id,
+            )
+        )
+        mail_source: Source | None = result.scalar_one_or_none()
+        if mail_source is not None:
+            return mail_source
+        return source
 
     async def _try_claim_sync(self, source: Source) -> bool:
         """Atomically mark a source syncing; only one sync per user at a time."""
@@ -444,6 +471,7 @@ class SourceService:
             .where(
                 Source.user_id == source.user_id,
                 Source.sync_state == SyncState.SYNCING.value,
+                Source.source_type == SourceType.GOOGLE_MAIL.value,
             )
             .exists()
         )
@@ -526,11 +554,7 @@ class SourceService:
     @staticmethod
     def _sync_message(source: Source) -> str:
         sync_state: SyncState = SyncState(source.sync_state)
-        label: str = (
-            "Google Contacts"
-            if source.source_type == SourceType.GOOGLE_CONTACTS.value
-            else "Gmail"
-        )
+        label: str = "Gmail"
         if source.sync_error:
             return f"Sync failed: {source.sync_error}"
         match sync_state:

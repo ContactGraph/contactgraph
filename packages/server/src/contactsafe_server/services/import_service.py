@@ -27,6 +27,7 @@ from contactsafe_server.services.email_parse import (
     email_local_part,
     email_lookup_variants,
     is_likely_self_contact,
+    normalize_email,
     org_name_from_email,
     parse_address_header,
     parse_internal_date_ms,
@@ -42,9 +43,11 @@ from contactsafe_server.services.interaction_excerpt_service import InteractionE
 from contactsafe_server.services.org_search import is_automation_or_generic_domain
 from contactsafe_server.services.gmail_client import (
     GmailClient,
+    GmailMessageListPage,
     GmailMessageMeta,
     GmailMessageRef,
 )
+from contactsafe_server.services.people_api_client import GoogleContact, PeopleApiClient
 from contactsafe_server.services.pitch_detection import (
     is_pitch_outreach_snippet,
     message_from_user,
@@ -54,17 +57,21 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 
 class ImportService:
+    SENT_MAIL_QUERY: str = "in:sent"
+
     def __init__(
         self,
         db: AsyncSession,
         settings: Settings,
         encryptor: TokenEncryptor,
         gmail: GmailClient,
+        people_client: PeopleApiClient | None = None,
     ) -> None:
         self._db: AsyncSession = db
         self._settings: Settings = settings
         self._encryptor: TokenEncryptor = encryptor
         self._gmail: GmailClient = gmail
+        self._people: PeopleApiClient | None = people_client
 
     async def run_sync(self, source_id: uuid.UUID) -> None:
         source: Source | None = await self._db.get(Source, source_id)
@@ -103,12 +110,47 @@ class ImportService:
             resolver = EntityResolver(self._db)
 
             source_email: str = source.external_account_id or user.email
-            contacts, person_pair_counts, upserted_emails = await self._scan_and_ingest_gmail(
+            user_emails, user_local_parts = await self._load_user_identity(
+                user_email=source_email,
+                source=source,
+            )
+            contacts: dict[str, ContactAccumulator] = {}
+            pair_stats: dict[tuple[str, str], tuple[int, datetime | None]] = {}
+            upserted_emails: set[str] = set()
+
+            await self._phase1_google_contacts_seed(
+                access_token=access_token,
+                user_id=user_id,
+                user_email=source_email,
+                source=source,
+                resolver=resolver,
+                user_emails=user_emails,
+                user_local_parts=user_local_parts,
+                contacts=contacts,
+                upserted_emails=upserted_emails,
+            )
+
+            await self._phase2_sent_mail_scan(
                 access_token=access_token,
                 user_email=source_email,
                 user_id=user_id,
                 source=source,
                 resolver=resolver,
+                user_emails=user_emails,
+                user_local_parts=user_local_parts,
+                contacts=contacts,
+                pair_stats=pair_stats,
+                upserted_emails=upserted_emails,
+            )
+
+            await self._phase3_contact_timelines(
+                access_token=access_token,
+                user_id=user_id,
+                user_email=source_email,
+                source=source,
+                resolver=resolver,
+                contacts=contacts,
+                upserted_emails=upserted_emails,
             )
 
             sorted_contacts: list[ContactAccumulator] = sorted(
@@ -140,7 +182,7 @@ class ImportService:
             await self._upsert_person_pair_observations(
                 user_id=user_id,
                 source_id=source.id,
-                person_pair_counts=person_pair_counts,
+                person_pair_counts=pair_stats,
                 resolver=resolver,
             )
 
@@ -186,7 +228,111 @@ class ImportService:
         await self._db.commit()
         await self._db.refresh(source)
 
-    async def _scan_and_ingest_gmail(
+    async def _phase1_google_contacts_seed(
+        self,
+        *,
+        access_token: str,
+        user_id: uuid.UUID,
+        user_email: str,
+        source: Source,
+        resolver: EntityResolver,
+        user_emails: set[str],
+        user_local_parts: set[str],
+        contacts: dict[str, ContactAccumulator],
+        upserted_emails: set[str],
+    ) -> None:
+        if self._people is None:
+            logger.warning(
+                "PeopleApiClient not configured; skipping Phase 1 Google Contacts seed",
+            )
+            return
+
+        page_token: str | None = None
+        contacts_fetched: int = 0
+        max_results: int = self._settings.import_contacts_max_results
+        page_size: int = self._settings.import_contacts_page_size
+
+        while contacts_fetched < max_results:
+            page = await self._people.list_connections(
+                access_token,
+                page_size=min(page_size, max_results - contacts_fetched),
+                page_token=page_token,
+                request_sync_token=False,
+            )
+
+            for contact in page.contacts:
+                if contact.is_deleted or not contact.emails:
+                    continue
+                contacts_fetched += 1
+
+                for raw_email in contact.emails:
+                    email: str | None = normalize_email(raw_email)
+                    if email is None:
+                        continue
+                    if is_likely_self_contact(
+                        email,
+                        user_emails=user_emails,
+                        user_local_parts=user_local_parts,
+                    ):
+                        continue
+
+                    display_name: str = sanitize_display_name(
+                        contact.display_name or email,
+                        email,
+                    )
+                    existing: ContactAccumulator | None = contacts.get(email)
+                    if existing is None:
+                        contacts[email] = ContactAccumulator(
+                            email=email,
+                            display_name=display_name,
+                            from_google_contacts=True,
+                        )
+                    else:
+                        existing.from_google_contacts = True
+                        if display_name and (
+                            not existing.display_name or existing.display_name == email
+                        ):
+                            existing.display_name = display_name
+
+                    await self._upsert_google_contact_details(
+                        contact=contact,
+                        email=email,
+                        display_name=display_name,
+                        user_id=user_id,
+                        source_id=source.id,
+                        resolver=resolver,
+                    )
+                    await self._upsert_person(
+                        user_id,
+                        user_email,
+                        contacts[email],
+                        source_id=source.id,
+                        resolver=resolver,
+                    )
+                    upserted_emails.add(email)
+
+            source.contacts_found = len(contacts)
+            source.contacts_resolved = len(upserted_emails)
+            source.contacts_pending = max(0, source.contacts_found - source.contacts_resolved)
+            if (
+                source.sync_state == SyncState.SYNCING.value
+                and source.contacts_resolved >= self._settings.import_partial_contact_target
+            ):
+                source.sync_state = SyncState.PARTIAL.value
+            await self._db.flush()
+            await self._commit_progress(source)
+
+            page_token = page.next_page_token
+            if page_token is None:
+                break
+
+        logger.info(
+            "Phase 1 Google Contacts seed complete: contacts=%s resolved=%s",
+            len(contacts),
+            len(upserted_emails),
+        )
+
+    async def _phase2_sent_mail_scan(
         self,
         *,
         access_token: str,
@@ -194,36 +340,30 @@ class ImportService:
         user_id: uuid.UUID,
         source: Source,
         resolver: EntityResolver,
-    ) -> tuple[
-        dict[str, ContactAccumulator],
-        dict[tuple[str, str], tuple[int, datetime | None]],
-        set[str],
-    ]:
-        contacts: dict[str, ContactAccumulator] = {}
-        pair_stats: dict[tuple[str, str], tuple[int, datetime | None]] = {}
-        upserted_emails: set[str] = set()
-        user_emails, user_local_parts = await self._load_user_identity(
-            user_email=user_email,
-            source=source,
-        )
+        user_emails: set[str],
+        user_local_parts: set[str],
+        contacts: dict[str, ContactAccumulator],
+        pair_stats: dict[tuple[str, str], tuple[int, datetime | None]],
+        upserted_emails: set[str],
+    ) -> None:
         page_token: str | None = None
         messages_scanned: int = 0
         messages_since_commit: int = 0
-        max_messages: int = self._settings.import_max_messages
+        max_messages: int = self._settings.import_sent_max_messages
         commit_interval: int = max(1, self._settings.import_progress_commit_messages)
 
         while messages_scanned < max_messages:
             batch_size: int = min(100, max_messages - messages_scanned)
-            refs, page_token = await self._gmail.list_message_refs(
+            page: GmailMessageListPage = await self._gmail.list_message_refs(
                 access_token,
                 max_results=batch_size,
                 page_token=page_token,
-                query=self._settings.import_gmail_query,
+                query=self.SENT_MAIL_QUERY,
             )
-            if not refs:
+            if not page.refs:
                 break
 
-            for ref in refs:
+            for ref in page.refs:
                 meta: GmailMessageMeta = await self._gmail.get_message_metadata(
                     access_token, ref.id
                 )
@@ -250,6 +390,7 @@ class ImportService:
                     )
                     messages_since_commit = 0
 
+            page_token = page.next_page_token
             if page_token is None:
                 break
 
@@ -265,13 +406,136 @@ class ImportService:
             )
 
         logger.info(
-            "Gmail scan complete: fetched=%s contacts=%s person_pairs=%s resolved=%s",
+            "Phase 2 sent mail scan complete: fetched=%s contacts=%s person_pairs=%s resolved=%s",
             messages_scanned,
             len(contacts),
             len(pair_stats),
             len(upserted_emails),
         )
-        return contacts, pair_stats, upserted_emails
+
+    async def _phase3_contact_timelines(
+        self,
+        *,
+        access_token: str,
+        user_id: uuid.UUID,
+        user_email: str,
+        source: Source,
+        resolver: EntityResolver,
+        contacts: dict[str, ContactAccumulator],
+        upserted_emails: set[str],
+    ) -> None:
+        sorted_contacts: list[ContactAccumulator] = sorted(
+            contacts.values(),
+            key=lambda c: (
+                c.last_seen_at or datetime.min.replace(tzinfo=UTC),
+                c.message_count,
+            ),
+            reverse=True,
+        )
+        timeline_contacts: list[ContactAccumulator] = sorted_contacts[
+            : self._settings.import_timeline_max_contacts
+        ]
+        commit_interval: int = max(1, self._settings.import_progress_commit_messages)
+        timelines_fetched: int = 0
+
+        for accumulator in timeline_contacts:
+            timeline = await self._gmail.get_contact_timeline(
+                access_token,
+                accumulator.email,
+                max_pages=self._settings.import_timeline_max_pages,
+            )
+            accumulator.apply_timeline(
+                earliest_date=timeline.earliest_date,
+                latest_date=timeline.latest_date,
+                estimated_count=timeline.estimated_count,
+            )
+            await self._upsert_person(
+                user_id,
+                user_email,
+                accumulator,
+                source_id=source.id,
+                resolver=resolver,
+            )
+            upserted_emails.add(accumulator.email)
+            timelines_fetched += 1
+
+            if timelines_fetched % commit_interval == 0:
+                source.contacts_found = len(contacts)
+                source.contacts_resolved = len(upserted_emails)
+                source.contacts_pending = max(
+                    0, source.contacts_found - source.contacts_resolved
+                )
+                await self._db.flush()
+                await self._commit_progress(source)
+
+        source.contacts_found = len(contacts)
+        source.contacts_resolved = len(upserted_emails)
+        source.contacts_pending = max(0, source.contacts_found - source.contacts_resolved)
+        await self._db.flush()
+        await self._commit_progress(source)
+
+        logger.info(
+            "Phase 3 contact timelines complete: timelines=%s contacts=%s",
+            timelines_fetched,
+            len(contacts),
+        )
+
+    async def _upsert_google_contact_details(
+        self,
+        *,
+        contact: GoogleContact,
+        email: str,
+        display_name: str,
+        user_id: uuid.UUID,
+        source_id: uuid.UUID,
+        resolver: EntityResolver,
+    ) -> None:
+        phone: str | None = contact.phone_numbers[0] if contact.phone_numbers else None
+        person: Person = await resolver.resolve_person(
+            emails=[email],
+            display_name=display_name,
+            phone=phone,
+        )
+
+        if contact.display_name and (
+            not person.canonical_name
+            or person.canonical_name == (person.primary_email or "")
+        ):
+            person.canonical_name = contact.display_name
+
+        if contact.phone_numbers:
+            existing_phones: set[str] = set(person.phone_numbers or [])
+            new_phones: list[str] = list(existing_phones)
+            for phone_num in contact.phone_numbers:
+                if phone_num not in existing_phones:
+                    new_phones.append(phone_num)
+                    try:
+                        await resolver.add_person_alias(
+                            person_id=person.id,
+                            kind="phone",
+                            value=phone_num,
+                        )
+                    except Exception:
+                        logger.debug(
+                            "Phone alias %s already mapped, skipping", phone_num,
+                        )
+            if len(new_phones) > len(person.phone_numbers or []):
+                person.phone_numbers = new_phones
+
+        if contact.org_name:
+            domain: str = email.rsplit("@", 1)[-1].lower()
+            if not is_automation_or_generic_domain(domain):
+                org = await resolver.resolve_org(domain=domain, name=contact.org_name)
+                await record_employment(
+                    self._db,
+                    person_id=person.id,
+                    org_id=org.id,
+                    role_title=contact.org_title,
+                    contributor_user_id=user_id,
+                    contributor_source_kind="google_contacts",
+                    contributor_source_id=source_id,
+                    confidence=0.8,
+                )
 
     async def _flush_ingest_progress(
         self,
@@ -544,11 +808,22 @@ class ImportService:
             person.canonical_name = display_name
 
         tie_strength: float = compute_tie_strength(accumulator, classification)
+        if accumulator.from_google_contacts and accumulator.message_count == 0:
+            tie_strength = max(tie_strength, 0.3)
+
+        relationship_types: list[str] = (
+            ["contact", "google_contact"]
+            if accumulator.from_google_contacts
+            else ["contact"]
+        )
+        first_observed: datetime | None = (
+            accumulator.first_seen_at or accumulator.last_seen_at
+        )
 
         stmt = pg_insert(UserPersonObservation).values(
             user_id=user_id,
             person_id=person.id,
-            first_observed_at=accumulator.last_seen_at,
+            first_observed_at=first_observed,
             last_observed_at=accumulator.last_seen_at,
             last_genuine_interaction_at=accumulator.last_seen_at if classification.is_human else None,
             email_count=accumulator.message_count,
@@ -557,15 +832,16 @@ class ImportService:
             thread_count=accumulator.message_count,
             tie_strength_score=tie_strength,
             is_broadcast=classification.is_broadcast,
-            is_human=classification.is_human,
+            is_human=classification.is_human or accumulator.from_google_contacts,
             is_automated=classification.is_automated,
-            relationship_types=["contact"],
+            relationship_types=relationship_types,
             notes=f"Imported from Gmail metadata for {user_email}",
             source_id=source_id,
         )
         stmt = stmt.on_conflict_do_update(
             constraint="pk_user_person_obs",
             set_={
+                "first_observed_at": stmt.excluded.first_observed_at,
                 "last_observed_at": stmt.excluded.last_observed_at,
                 "last_genuine_interaction_at": stmt.excluded.last_genuine_interaction_at,
                 "email_count": stmt.excluded.email_count,
@@ -576,6 +852,7 @@ class ImportService:
                 "is_broadcast": stmt.excluded.is_broadcast,
                 "is_human": stmt.excluded.is_human,
                 "is_automated": stmt.excluded.is_automated,
+                "relationship_types": stmt.excluded.relationship_types,
                 "notes": stmt.excluded.notes,
                 "source_id": stmt.excluded.source_id,
                 "updated_at": stmt.excluded.updated_at,

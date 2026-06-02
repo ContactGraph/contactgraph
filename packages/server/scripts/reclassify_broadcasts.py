@@ -104,12 +104,12 @@ async def main(limit: int, dry_run: bool) -> None:
         has_unsub: bool = False
 
         try:
-            refs, _ = await gmail.list_message_refs(
+            page = await gmail.list_message_refs(
                 access_token,
                 max_results=SAMPLE_MESSAGES,
                 query=f"from:{email}",
             )
-            for ref in refs:
+            for ref in page.refs:
                 meta: GmailMessageMeta = await gmail.get_message_metadata(access_token, ref.id)
                 if meta.has_list_unsubscribe:
                     has_unsub = True
