@@ -22,6 +22,18 @@ from contactsafe_server.db.models import ConnectSession, OAuthCredential, Source
 
 logger: logging.Logger = logging.getLogger(__name__)
 
+_SYNCABLE_SOURCE_TYPES: frozenset[SourceType] = frozenset({
+    SourceType.GOOGLE_MAIL,
+    SourceType.GOOGLE_CALENDAR,
+    SourceType.PHONE_CONTACTS_UPLOAD,
+    SourceType.LINKEDIN_CONNECTIONS_UPLOAD,
+})
+
+_OAUTH_SOURCE_TYPES: frozenset[SourceType] = frozenset({
+    SourceType.GOOGLE_MAIL,
+    SourceType.GOOGLE_CALENDAR,
+})
+
 from contactsafe_server.services.import_scheduler import (
     is_source_sync_running,
     is_user_sync_running,
@@ -85,6 +97,85 @@ class SourceService:
             external_account_id=normalized,
             connection_status=SourceConnectionStatus.CONNECTED.value,
             sync_state=SyncState.PENDING.value,
+        )
+        self._db.add(source)
+        await self._db.flush()
+        return source
+
+    async def ensure_google_calendar_source(self, user_id: uuid.UUID, email: str) -> Source:
+        normalized: str = email.strip().lower()
+        result = await self._db.execute(
+            select(Source).where(
+                Source.user_id == user_id,
+                Source.source_type == SourceType.GOOGLE_CALENDAR.value,
+                Source.external_account_id == normalized,
+            )
+        )
+        existing: Source | None = result.scalar_one_or_none()
+        if existing is not None:
+            existing.connection_status = SourceConnectionStatus.CONNECTED.value
+            existing.label = f"{normalized} (calendar)"
+            await self._db.flush()
+            return existing
+
+        source = Source(
+            user_id=user_id,
+            source_type=SourceType.GOOGLE_CALENDAR.value,
+            label=f"{normalized} (calendar)",
+            external_account_id=normalized,
+            connection_status=SourceConnectionStatus.CONNECTED.value,
+            sync_state=SyncState.PENDING.value,
+        )
+        self._db.add(source)
+        await self._db.flush()
+        return source
+
+    async def ensure_upload_source(
+        self,
+        user_id: uuid.UUID,
+        *,
+        source_type: SourceType,
+        filename: str,
+        content: str,
+    ) -> Source:
+        if source_type not in {
+            SourceType.PHONE_CONTACTS_UPLOAD,
+            SourceType.LINKEDIN_CONNECTIONS_UPLOAD,
+        }:
+            raise ValueError(f"Upload not supported for {source_type.value}")
+
+        external_id: str = f"upload:{filename.strip().lower()}"
+        result = await self._db.execute(
+            select(Source).where(
+                Source.user_id == user_id,
+                Source.source_type == source_type.value,
+                Source.external_account_id == external_id,
+            )
+        )
+        existing: Source | None = result.scalar_one_or_none()
+        label: str = (
+            "Phone contacts"
+            if source_type == SourceType.PHONE_CONTACTS_UPLOAD
+            else "LinkedIn connections"
+        )
+        payload: dict[str, object] = {"filename": filename, "content": content}
+
+        if existing is not None:
+            existing.upload_payload = payload
+            existing.connection_status = SourceConnectionStatus.CONNECTED.value
+            existing.sync_state = SyncState.PENDING.value
+            existing.sync_error = None
+            await self._db.flush()
+            return existing
+
+        source = Source(
+            user_id=user_id,
+            source_type=source_type.value,
+            label=label,
+            external_account_id=external_id,
+            connection_status=SourceConnectionStatus.CONNECTED.value,
+            sync_state=SyncState.PENDING.value,
+            upload_payload=payload,
         )
         self._db.add(source)
         await self._db.flush()
@@ -297,7 +388,17 @@ class SourceService:
 
         source = await self._resolve_gmail_sync_source(source)
 
-        if source.source_type != SourceType.GOOGLE_MAIL.value:
+        try:
+            parsed_type: SourceType = SourceType(source.source_type)
+        except ValueError:
+            return SyncSourceResult(
+                source_id=source.id,
+                scheduled=False,
+                sync_state=SyncState(source.sync_state),
+                message=f"Sync not implemented for source type {source.source_type}.",
+            )
+
+        if parsed_type not in _SYNCABLE_SOURCE_TYPES:
             return SyncSourceResult(
                 source_id=source.id,
                 scheduled=False,
@@ -313,16 +414,24 @@ class SourceService:
                 message="Source is not connected. Call connect_source first.",
             )
 
-        cred: OAuthCredential | None = await self._get_credential_for_source(source)
-        if cred is None:
+        if parsed_type in _OAUTH_SOURCE_TYPES:
+            cred: OAuthCredential | None = await self._get_credential_for_source(source)
+            if cred is None:
+                return SyncSourceResult(
+                    source_id=source.id,
+                    scheduled=False,
+                    sync_state=SyncState(source.sync_state),
+                    message=(
+                        "No valid credentials for this source. "
+                        "Call connect_source with your email as user_token to reconnect."
+                    ),
+                )
+        elif source.upload_payload is None:
             return SyncSourceResult(
                 source_id=source.id,
                 scheduled=False,
                 sync_state=SyncState(source.sync_state),
-                message=(
-                    "No valid credentials for this source. "
-                    "Call connect_source with your email as user_token to reconnect."
-                ),
+                message="Upload a file before syncing this source.",
             )
 
         user: User | None = await self._db.get(User, source.user_id)
@@ -408,6 +517,9 @@ class SourceService:
                 Source.user_id == user_id,
                 Source.source_type.in_([
                     SourceType.GOOGLE_MAIL.value,
+                    SourceType.GOOGLE_CALENDAR.value,
+                    SourceType.PHONE_CONTACTS_UPLOAD.value,
+                    SourceType.LINKEDIN_CONNECTIONS_UPLOAD.value,
                 ]),
                 Source.sync_state.in_(
                     [SyncState.PARTIAL.value, SyncState.COMPLETE.value]
@@ -471,7 +583,6 @@ class SourceService:
             .where(
                 Source.user_id == source.user_id,
                 Source.sync_state == SyncState.SYNCING.value,
-                Source.source_type == SourceType.GOOGLE_MAIL.value,
             )
             .exists()
         )
@@ -554,7 +665,18 @@ class SourceService:
     @staticmethod
     def _sync_message(source: Source) -> str:
         sync_state: SyncState = SyncState(source.sync_state)
-        label: str = "Gmail"
+        try:
+            source_type: SourceType = SourceType(source.source_type)
+        except ValueError:
+            source_type = SourceType.GOOGLE_MAIL
+        label_map: dict[SourceType, str] = {
+            SourceType.GOOGLE_MAIL: "Gmail",
+            SourceType.GOOGLE_CALENDAR: "Google Calendar",
+            SourceType.PHONE_CONTACTS_UPLOAD: "Phone contacts",
+            SourceType.LINKEDIN_CONNECTIONS_UPLOAD: "LinkedIn connections",
+            SourceType.GOOGLE_CONTACTS: "Gmail",
+        }
+        label: str = label_map.get(source_type, source.label)
         if source.sync_error:
             return f"Sync failed: {source.sync_error}"
         match sync_state:

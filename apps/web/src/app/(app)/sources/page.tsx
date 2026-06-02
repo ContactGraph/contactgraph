@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { RefreshCw, Plus } from "lucide-react";
+import { CheckCircle2, Circle, Loader2, Plus, RefreshCw, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -17,25 +17,145 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
   ConnectSourceResult,
+  EnrichmentStatusResult,
   ListSourcesResult,
   PollConnectResult,
+  SourceSummary,
   SourceType,
+  StartEnrichmentResult,
   SyncSourceResult,
+  SyncState,
+  UploadSourceResult,
 } from "@/lib/api-types";
 import { formatSourceType, SyncStateBadge } from "@/lib/formatters";
 import { proxyPost } from "@/lib/proxy-client";
 
-const connectableSources: ReadonlyArray<{
-  type: SourceType;
-  label: string;
-}> = [{ type: "google_mail", label: "Gmail" }];
+const IMPORT_COMPLETE_STATES: ReadonlySet<SyncState> = new Set([
+  "partial",
+  "complete",
+]);
+
+type SetupStepId =
+  | "gmail"
+  | "calendar"
+  | "phone"
+  | "linkedin"
+  | "enrich";
+
+interface SetupStep {
+  id: SetupStepId;
+  title: string;
+  description: string;
+  optional?: boolean;
+}
+
+const setupSteps: ReadonlyArray<SetupStep> = [
+  {
+    id: "gmail",
+    title: "Connect Gmail",
+    description: "Import contacts and email relationships from your inbox.",
+  },
+  {
+    id: "calendar",
+    title: "Connect Google Calendar",
+    description: "Add people you've met via calendar events.",
+    optional: true,
+  },
+  {
+    id: "phone",
+    title: "Upload phone contacts",
+    description: "Import a vCard (.vcf) or CSV export from your phone.",
+    optional: true,
+  },
+  {
+    id: "linkedin",
+    title: "Upload LinkedIn export",
+    description: "Import Connections.csv when you have your LinkedIn data export.",
+    optional: true,
+  },
+  {
+    id: "enrich",
+    title: "Enrich contacts",
+    description:
+      "Find current employers and recent activity for your top contacts (uses web search).",
+  },
+];
+
+function sourceForType(
+  sources: ReadonlyArray<SourceSummary>,
+  type: SourceType,
+): SourceSummary | undefined {
+  return sources.find((source) => source.source_type === type);
+}
+
+function stepComplete(
+  stepId: SetupStepId,
+  sources: ReadonlyArray<SourceSummary>,
+  enrichment: EnrichmentStatusResult | undefined,
+): boolean {
+  switch (stepId) {
+    case "gmail": {
+      const source = sourceForType(sources, "google_mail");
+      return source !== undefined && IMPORT_COMPLETE_STATES.has(source.sync_state);
+    }
+    case "calendar": {
+      const source = sourceForType(sources, "google_calendar");
+      return source !== undefined && IMPORT_COMPLETE_STATES.has(source.sync_state);
+    }
+    case "phone": {
+      const source = sourceForType(sources, "phone_contacts_upload");
+      return source !== undefined && source.sync_state === "complete";
+    }
+    case "linkedin": {
+      const source = sourceForType(sources, "linkedin_connections_upload");
+      return source !== undefined && source.sync_state === "complete";
+    }
+    case "enrich":
+      return enrichment?.state === "complete";
+    default:
+      return false;
+  }
+}
+
+function stepInProgress(
+  stepId: SetupStepId,
+  sources: ReadonlyArray<SourceSummary>,
+  enrichment: EnrichmentStatusResult | undefined,
+): boolean {
+  if (stepId === "enrich") {
+    return enrichment?.state === "running";
+  }
+  const typeMap: Partial<Record<SetupStepId, SourceType>> = {
+    gmail: "google_mail",
+    calendar: "google_calendar",
+    phone: "phone_contacts_upload",
+    linkedin: "linkedin_connections_upload",
+  };
+  const sourceType: SourceType | undefined = typeMap[stepId];
+  if (sourceType === undefined) {
+    return false;
+  }
+  const source = sourceForType(sources, sourceType);
+  return source?.sync_state === "syncing";
+}
+
+function anyImportReady(sources: ReadonlyArray<SourceSummary>): boolean {
+  return sources.some(
+    (source) =>
+      source.source_type !== "google_contacts" &&
+      IMPORT_COMPLETE_STATES.has(source.sync_state),
+  );
+}
 
 export default function SourcesPage() {
   const queryClient = useQueryClient();
   const popupRef = useRef<Window | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const phoneInputRef = useRef<HTMLInputElement>(null);
+  const linkedinInputRef = useRef<HTMLInputElement>(null);
   const [connectMessage, setConnectMessage] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   const clearPollTimer = useCallback((): void => {
     if (pollTimerRef.current) {
@@ -57,9 +177,19 @@ export default function SourcesPage() {
     refetchInterval: (query) => {
       const data: ListSourcesResult | undefined = query.state.data;
       const syncing: boolean =
-        data?.sources.some((source) => source.sync_state === "syncing") ??
-        false;
+        data?.sources.some((source) => source.sync_state === "syncing") ?? false;
       return syncing ? 4000 : false;
+    },
+  });
+
+  const enrichmentQuery = useQuery({
+    queryKey: ["enrichment-status"],
+    queryFn: () =>
+      proxyPost<EnrichmentStatusResult>("get-enrichment-status"),
+    refetchInterval: (query) => {
+      const state: EnrichmentStatusResult["state"] | undefined =
+        query.state.data?.state;
+      return state === "running" ? 4000 : false;
     },
   });
 
@@ -68,6 +198,28 @@ export default function SourcesPage() {
       proxyPost<SyncSourceResult>("sync-source", { source_id: sourceId ?? null }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["sources"] });
+    },
+  });
+
+  const enrichMutation = useMutation({
+    mutationFn: () => proxyPost<StartEnrichmentResult>("start-enrichment"),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["enrichment-status"] });
+    },
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: (payload: {
+      source_type: SourceType;
+      filename: string;
+      content: string;
+    }) => proxyPost<UploadSourceResult>("upload-source", payload),
+    onSuccess: async () => {
+      setUploadError(null);
+      await queryClient.invalidateQueries({ queryKey: ["sources"] });
+    },
+    onError: (error: Error) => {
+      setUploadError(error.message);
     },
   });
 
@@ -110,6 +262,9 @@ export default function SourcesPage() {
       if (result.already_connected) {
         setConnectMessage(result.message);
         await queryClient.invalidateQueries({ queryKey: ["sources"] });
+        if (result.source_id) {
+          syncMutation.mutate(result.source_id);
+        }
         return;
       }
 
@@ -137,20 +292,46 @@ export default function SourcesPage() {
     },
   });
 
-  const sources: ListSourcesResult["sources"] = sourcesQuery.data?.sources ?? [];
+  const handleFileUpload = useCallback(
+    async (
+      sourceType: SourceType,
+      file: File | undefined,
+    ): Promise<void> => {
+      if (file === undefined) {
+        return;
+      }
+      const content: string = await file.text();
+      uploadMutation.mutate({
+        source_type: sourceType,
+        filename: file.name,
+        content,
+      });
+    },
+    [uploadMutation],
+  );
+
+  const sources: SourceSummary[] = sourcesQuery.data?.sources ?? [];
+  const enrichment: EnrichmentStatusResult | undefined = enrichmentQuery.data;
+  const importReady: boolean = anyImportReady(sources);
 
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Sources</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Setup</h1>
         <p className="text-muted-foreground">
-          Connect and sync data sources that feed your contact graph.
+          Import your contacts from multiple sources, then enrich to discover
+          where people work now and what they are posting about.
         </p>
       </div>
 
       {connectError ? (
         <Alert variant="destructive">
           <AlertDescription>{connectError}</AlertDescription>
+        </Alert>
+      ) : null}
+      {uploadError ? (
+        <Alert variant="destructive">
+          <AlertDescription>{uploadError}</AlertDescription>
         </Alert>
       ) : null}
       {connectMessage ? (
@@ -161,23 +342,147 @@ export default function SourcesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Connect a source</CardTitle>
+          <CardTitle>Getting started</CardTitle>
           <CardDescription>
-            Connect Gmail to import contacts and email relationships.
+            Complete imports in any order. Enrichment runs once across your
+            merged graph.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-wrap gap-2">
-          {connectableSources.map((source) => (
-            <Button
-              key={source.type}
-              variant="outline"
-              onClick={() => connectMutation.mutate(source.type)}
-              disabled={connectMutation.isPending}
-            >
-              <Plus className="size-4" />
-              {source.label}
-            </Button>
-          ))}
+        <CardContent className="space-y-4">
+          {setupSteps.map((step) => {
+            const complete: boolean = stepComplete(step.id, sources, enrichment);
+            const inProgress: boolean = stepInProgress(
+              step.id,
+              sources,
+              enrichment,
+            );
+            const enrichEnabled: boolean =
+              step.id !== "enrich" || importReady;
+
+            return (
+              <div
+                key={step.id}
+                className="flex flex-col gap-3 border-b pb-4 last:border-b-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between"
+              >
+                <div className="flex gap-3">
+                  <div className="mt-0.5 shrink-0">
+                    {complete ? (
+                      <CheckCircle2 className="size-5 text-green-600" />
+                    ) : inProgress ? (
+                      <Loader2 className="size-5 animate-spin text-muted-foreground" />
+                    ) : (
+                      <Circle className="size-5 text-muted-foreground" />
+                    )}
+                  </div>
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-medium">{step.title}</p>
+                      {step.optional ? (
+                        <Badge variant="outline">Optional</Badge>
+                      ) : null}
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {step.description}
+                    </p>
+                    {step.id === "enrich" && enrichment?.message ? (
+                      <p className="text-xs text-muted-foreground">
+                        {enrichment.message}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 sm:justify-end">
+                  {step.id === "gmail" ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => connectMutation.mutate("google_mail")}
+                      disabled={connectMutation.isPending || inProgress}
+                    >
+                      <Plus className="size-4" />
+                      Connect
+                    </Button>
+                  ) : null}
+                  {step.id === "calendar" ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => connectMutation.mutate("google_calendar")}
+                      disabled={connectMutation.isPending || inProgress}
+                    >
+                      <Plus className="size-4" />
+                      Connect
+                    </Button>
+                  ) : null}
+                  {step.id === "phone" ? (
+                    <>
+                      <input
+                        ref={phoneInputRef}
+                        type="file"
+                        accept=".vcf,.vcard,.csv,text/vcard,text/csv"
+                        className="hidden"
+                        onChange={(event) => {
+                          void handleFileUpload(
+                            "phone_contacts_upload",
+                            event.target.files?.[0],
+                          );
+                          event.target.value = "";
+                        }}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => phoneInputRef.current?.click()}
+                        disabled={uploadMutation.isPending || inProgress}
+                      >
+                        Upload file
+                      </Button>
+                    </>
+                  ) : null}
+                  {step.id === "linkedin" ? (
+                    <>
+                      <input
+                        ref={linkedinInputRef}
+                        type="file"
+                        accept=".csv,text/csv"
+                        className="hidden"
+                        onChange={(event) => {
+                          void handleFileUpload(
+                            "linkedin_connections_upload",
+                            event.target.files?.[0],
+                          );
+                          event.target.value = "";
+                        }}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => linkedinInputRef.current?.click()}
+                        disabled={uploadMutation.isPending || inProgress}
+                      >
+                        Upload CSV
+                      </Button>
+                    </>
+                  ) : null}
+                  {step.id === "enrich" ? (
+                    <Button
+                      size="sm"
+                      onClick={() => enrichMutation.mutate()}
+                      disabled={
+                        !enrichEnabled ||
+                        enrichMutation.isPending ||
+                        inProgress ||
+                        complete
+                      }
+                    >
+                      <Sparkles className="size-4" />
+                      {inProgress ? "Enriching…" : "Enrich now"}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
         </CardContent>
       </Card>
 
@@ -192,8 +497,11 @@ export default function SourcesPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void sourcesQuery.refetch()}
-            disabled={sourcesQuery.isFetching}
+            onClick={() => {
+              void sourcesQuery.refetch();
+              void enrichmentQuery.refetch();
+            }}
+            disabled={sourcesQuery.isFetching || enrichmentQuery.isFetching}
           >
             <RefreshCw
               className={`size-4 ${sourcesQuery.isFetching ? "animate-spin" : ""}`}
@@ -209,7 +517,7 @@ export default function SourcesPage() {
             </div>
           ) : sources.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No sources connected yet. Connect Gmail above.
+              No sources connected yet. Start with Gmail above.
             </p>
           ) : (
             <ul className="divide-y">
@@ -231,18 +539,16 @@ export default function SourcesPage() {
                       {source.contacts_pending} pending ·{" "}
                       {source.contacts_found} found
                     </p>
-                    <p className="text-xs text-muted-foreground capitalize">
-                      Connection: {source.connection_status.replace(/_/g, " ")}
-                    </p>
                   </div>
                   <Button
                     size="sm"
-                    onClick={() =>
-                      syncMutation.mutate(source.source_id)
-                    }
+                    variant="outline"
+                    onClick={() => syncMutation.mutate(source.source_id)}
                     disabled={
                       syncMutation.isPending ||
-                      source.sync_state === "syncing"
+                      source.sync_state === "syncing" ||
+                      source.source_type === "phone_contacts_upload" ||
+                      source.source_type === "linkedin_connections_upload"
                     }
                   >
                     {source.sync_state === "syncing" ? "Syncing…" : "Sync now"}

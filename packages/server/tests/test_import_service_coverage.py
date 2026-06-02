@@ -140,14 +140,10 @@ class TestRunSync:
 
         assert source.sync_state == SyncState.PENDING.value
 
-    @patch("contactsafe_server.services.import_service.InteractionExcerptService")
-    @patch("contactsafe_server.services.import_service.IngestEnrichmentService")
     @patch("contactsafe_server.services.import_service.EntityResolver")
     async def test_success_flow_sets_complete(
         self,
         mock_resolver_cls: MagicMock,
-        mock_enricher_cls: MagicMock,
-        mock_excerpt_cls: MagicMock,
     ) -> None:
         user_id: uuid.UUID = uuid.uuid4()
         source: MagicMock = _make_source(user_id=user_id)
@@ -165,13 +161,13 @@ class TestRunSync:
         svc._get_credential_for_source = AsyncMock(return_value=_make_cred())  # type: ignore[method-assign]
         _mock_phased_import(svc)
         svc._upsert_person_pair_observations = AsyncMock()  # type: ignore[method-assign]
-        svc._rebuild_user_org_observations = AsyncMock()  # type: ignore[method-assign]
         svc._commit_progress = AsyncMock()  # type: ignore[method-assign]
 
-        mock_enricher_cls.return_value.enrich_after_import = AsyncMock()
-        mock_excerpt_cls.return_value.seed_excerpts_for_user = AsyncMock()
-
-        await svc.run_sync(source.id)
+        with patch(
+            "contactsafe_server.services.import_service.rebuild_user_org_observations",
+            new_callable=AsyncMock,
+        ):
+            await svc.run_sync(source.id)
 
         assert source.sync_state == SyncState.COMPLETE.value
         assert source.connection_status == SourceConnectionStatus.CONNECTED.value
@@ -180,14 +176,10 @@ class TestRunSync:
         svc._phase2_sent_mail_scan.assert_awaited_once()
         svc._phase3_contact_timelines.assert_awaited_once()
 
-    @patch("contactsafe_server.services.import_service.InteractionExcerptService")
-    @patch("contactsafe_server.services.import_service.IngestEnrichmentService")
     @patch("contactsafe_server.services.import_service.EntityResolver")
     async def test_success_flow_upserts_remaining_contacts(
         self,
         mock_resolver_cls: MagicMock,
-        mock_enricher_cls: MagicMock,
-        mock_excerpt_cls: MagicMock,
     ) -> None:
         """Contacts discovered during import but not yet upserted get upserted in final pass."""
         user_id: uuid.UUID = uuid.uuid4()
@@ -216,25 +208,21 @@ class TestRunSync:
         _mock_phased_import(svc, phase2_side_effect=add_contact)
         svc._upsert_person = AsyncMock()  # type: ignore[method-assign]
         svc._upsert_person_pair_observations = AsyncMock()  # type: ignore[method-assign]
-        svc._rebuild_user_org_observations = AsyncMock()  # type: ignore[method-assign]
         svc._commit_progress = AsyncMock()  # type: ignore[method-assign]
 
-        mock_enricher_cls.return_value.enrich_after_import = AsyncMock()
-        mock_excerpt_cls.return_value.seed_excerpts_for_user = AsyncMock()
-
-        await svc.run_sync(source.id)
+        with patch(
+            "contactsafe_server.services.import_service.rebuild_user_org_observations",
+            new_callable=AsyncMock,
+        ):
+            await svc.run_sync(source.id)
 
         svc._upsert_person.assert_awaited_once()
         assert source.sync_state == SyncState.COMPLETE.value
 
-    @patch("contactsafe_server.services.import_service.InteractionExcerptService")
-    @patch("contactsafe_server.services.import_service.IngestEnrichmentService")
     @patch("contactsafe_server.services.import_service.EntityResolver")
     async def test_skips_already_upserted_contacts(
         self,
         mock_resolver_cls: MagicMock,
-        mock_enricher_cls: MagicMock,
-        mock_excerpt_cls: MagicMock,
     ) -> None:
         user_id: uuid.UUID = uuid.uuid4()
         source: MagicMock = _make_source(user_id=user_id)
@@ -263,13 +251,13 @@ class TestRunSync:
         _mock_phased_import(svc, phase3_side_effect=mark_upserted)
         svc._upsert_person = AsyncMock()  # type: ignore[method-assign]
         svc._upsert_person_pair_observations = AsyncMock()  # type: ignore[method-assign]
-        svc._rebuild_user_org_observations = AsyncMock()  # type: ignore[method-assign]
         svc._commit_progress = AsyncMock()  # type: ignore[method-assign]
 
-        mock_enricher_cls.return_value.enrich_after_import = AsyncMock()
-        mock_excerpt_cls.return_value.seed_excerpts_for_user = AsyncMock()
-
-        await svc.run_sync(source.id)
+        with patch(
+            "contactsafe_server.services.import_service.rebuild_user_org_observations",
+            new_callable=AsyncMock,
+        ):
+            await svc.run_sync(source.id)
 
         svc._upsert_person.assert_not_awaited()
 
@@ -311,14 +299,10 @@ class TestRunSync:
         assert source.sync_state == SyncState.FAILED.value
         assert "gmail down" in (source.sync_error or "")
 
-    @patch("contactsafe_server.services.import_service.InteractionExcerptService")
-    @patch("contactsafe_server.services.import_service.IngestEnrichmentService")
     @patch("contactsafe_server.services.import_service.EntityResolver")
     async def test_refreshed_tokens_are_persisted(
         self,
         mock_resolver_cls: MagicMock,
-        mock_enricher_cls: MagicMock,
-        mock_excerpt_cls: MagicMock,
     ) -> None:
         user_id: uuid.UUID = uuid.uuid4()
         source: MagicMock = _make_source(user_id=user_id)
@@ -341,13 +325,13 @@ class TestRunSync:
         svc._persist_tokens = AsyncMock()  # type: ignore[method-assign]
         _mock_phased_import(svc)
         svc._upsert_person_pair_observations = AsyncMock()  # type: ignore[method-assign]
-        svc._rebuild_user_org_observations = AsyncMock()  # type: ignore[method-assign]
         svc._commit_progress = AsyncMock()  # type: ignore[method-assign]
 
-        mock_enricher_cls.return_value.enrich_after_import = AsyncMock()
-        mock_excerpt_cls.return_value.seed_excerpts_for_user = AsyncMock()
-
-        await svc.run_sync(source.id)
+        with patch(
+            "contactsafe_server.services.import_service.rebuild_user_org_observations",
+            new_callable=AsyncMock,
+        ):
+            await svc.run_sync(source.id)
 
         svc._persist_tokens.assert_awaited_once_with(cred, refreshed_tokens)
 
@@ -822,14 +806,10 @@ class TestAccumulatePairStats:
 # ---------------------------------------------------------------------------
 
 class TestUpsertPerson:
-    @patch("contactsafe_server.services.import_service.record_employment", new_callable=AsyncMock)
-    @patch("contactsafe_server.services.import_service.is_automation_or_generic_domain", return_value=False)
     @patch("contactsafe_server.services.import_service.classify_contact")
-    async def test_creates_observation_and_records_employment(
+    async def test_creates_observation(
         self,
         mock_classify: MagicMock,
-        _auto_domain: MagicMock,
-        mock_employment: AsyncMock,
     ) -> None:
         classification: MagicMock = MagicMock()
         classification.is_human = True
@@ -844,7 +824,6 @@ class TestUpsertPerson:
 
         resolver: MagicMock = MagicMock()
         resolver.resolve_person = AsyncMock(return_value=person)
-        resolver.resolve_org = AsyncMock(return_value=MagicMock(id=uuid.uuid4()))
 
         db: MagicMock = _make_db()
         svc: ImportService = _make_service(db=db)
@@ -853,6 +832,7 @@ class TestUpsertPerson:
             email="friend@company.com",
             display_name="Friend",
             last_seen_at=datetime(2025, 6, 1, tzinfo=UTC),
+            inbound_snippets=["Thanks, Jane"],
         )
         acc.message_count = 5
         acc.outbound_count = 2
@@ -866,7 +846,6 @@ class TestUpsertPerson:
         )
 
         db.execute.assert_awaited_once()
-        mock_employment.assert_awaited_once()
         assert person.canonical_name == "Friend"
 
     @patch("contactsafe_server.services.import_service.classify_contact")
@@ -904,14 +883,10 @@ class TestUpsertPerson:
         db.execute.assert_awaited_once()
         assert person.canonical_name == "Already Set"
 
-    @patch("contactsafe_server.services.import_service.record_employment", new_callable=AsyncMock)
-    @patch("contactsafe_server.services.import_service.is_automation_or_generic_domain", return_value=True)
     @patch("contactsafe_server.services.import_service.classify_contact")
-    async def test_skips_employment_for_generic_domain(
+    async def test_does_not_record_employment_during_import(
         self,
         mock_classify: MagicMock,
-        _auto_domain: MagicMock,
-        mock_employment: AsyncMock,
     ) -> None:
         classification: MagicMock = MagicMock()
         classification.is_human = True
@@ -940,16 +915,12 @@ class TestUpsertPerson:
             uuid.uuid4(), "me@example.com", acc, source_id=uuid.uuid4(), resolver=resolver
         )
 
-        mock_employment.assert_not_awaited()
+        db.execute.assert_awaited_once()
 
-    @patch("contactsafe_server.services.import_service.record_employment", new_callable=AsyncMock)
-    @patch("contactsafe_server.services.import_service.is_automation_or_generic_domain", return_value=False)
     @patch("contactsafe_server.services.import_service.classify_contact")
     async def test_updates_canonical_name_when_newer(
         self,
         mock_classify: MagicMock,
-        _auto_domain: MagicMock,
-        _mock_employment: AsyncMock,
     ) -> None:
         classification: MagicMock = MagicMock()
         classification.is_human = True
@@ -964,7 +935,6 @@ class TestUpsertPerson:
 
         resolver: MagicMock = MagicMock()
         resolver.resolve_person = AsyncMock(return_value=person)
-        resolver.resolve_org = AsyncMock(return_value=MagicMock(id=uuid.uuid4()))
 
         svc: ImportService = _make_service()
 
@@ -980,14 +950,10 @@ class TestUpsertPerson:
 
         assert person.canonical_name == "New Name"
 
-    @patch("contactsafe_server.services.import_service.record_employment", new_callable=AsyncMock)
-    @patch("contactsafe_server.services.import_service.is_automation_or_generic_domain", return_value=False)
     @patch("contactsafe_server.services.import_service.classify_contact")
     async def test_keeps_canonical_name_when_email_placeholder(
         self,
         mock_classify: MagicMock,
-        _auto_domain: MagicMock,
-        _mock_employment: AsyncMock,
     ) -> None:
         """canonical_name == email triggers an update even if person.updated_at is newer."""
         classification: MagicMock = MagicMock()
@@ -1003,7 +969,6 @@ class TestUpsertPerson:
 
         resolver: MagicMock = MagicMock()
         resolver.resolve_person = AsyncMock(return_value=person)
-        resolver.resolve_org = AsyncMock(return_value=MagicMock(id=uuid.uuid4()))
 
         svc: ImportService = _make_service()
 

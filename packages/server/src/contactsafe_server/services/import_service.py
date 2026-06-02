@@ -20,7 +20,7 @@ from contactsafe_server.db.models import (
     UserRelationshipObservation,
 )
 from contactsafe_server.oauth.google import GoogleTokens
-from contactsafe_server.services.claim_writer import record_employment, record_relationship
+from contactsafe_server.services.claim_writer import record_relationship
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.email_parse import (
     ContactAccumulator,
@@ -28,7 +28,6 @@ from contactsafe_server.services.email_parse import (
     email_lookup_variants,
     is_likely_self_contact,
     normalize_email,
-    org_name_from_email,
     parse_address_header,
     parse_internal_date_ms,
     sanitize_display_name,
@@ -38,9 +37,6 @@ from contactsafe_server.services.contact_classifier import (
     compute_tie_strength,
 )
 from contactsafe_server.services.entity_resolution import EntityResolver
-from contactsafe_server.services.ingest_enrichment_service import IngestEnrichmentService
-from contactsafe_server.services.interaction_excerpt_service import InteractionExcerptService
-from contactsafe_server.services.org_search import is_automation_or_generic_domain
 from contactsafe_server.services.gmail_client import (
     GmailClient,
     GmailMessageListPage,
@@ -52,6 +48,7 @@ from contactsafe_server.services.pitch_detection import (
     is_pitch_outreach_snippet,
     message_from_user,
 )
+from contactsafe_server.services.user_org_observation_service import rebuild_user_org_observations
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -186,17 +183,7 @@ class ImportService:
                 resolver=resolver,
             )
 
-            await self._rebuild_user_org_observations(user_id)
-
-            enricher = IngestEnrichmentService(self._db, self._settings)
-            await enricher.enrich_after_import(
-                user_id=user_id,
-                contact_by_email=contacts,
-            )
-            await self._rebuild_user_org_observations(user_id)
-
-            excerpt_service = InteractionExcerptService(self._db, self._settings)
-            await excerpt_service.seed_excerpts_for_user(user_id)
+            await rebuild_user_org_observations(self._db, user_id)
 
             source.sync_state = SyncState.COMPLETE.value
             source.sync_completed_at = datetime.now(tz=UTC)
@@ -522,21 +509,6 @@ class ImportService:
             if len(new_phones) > len(person.phone_numbers or []):
                 person.phone_numbers = new_phones
 
-        if contact.org_name:
-            domain: str = email.rsplit("@", 1)[-1].lower()
-            if not is_automation_or_generic_domain(domain):
-                org = await resolver.resolve_org(domain=domain, name=contact.org_name)
-                await record_employment(
-                    self._db,
-                    person_id=person.id,
-                    org_id=org.id,
-                    role_title=contact.org_title,
-                    contributor_user_id=user_id,
-                    contributor_source_kind="google_contacts",
-                    contributor_source_id=source_id,
-                    confidence=0.8,
-                )
-
     async def _flush_ingest_progress(
         self,
         *,
@@ -820,6 +792,12 @@ class ImportService:
             accumulator.first_seen_at or accumulator.last_seen_at
         )
 
+        import_snippets: list[str] | None = (
+            list(accumulator.inbound_snippets)
+            if accumulator.inbound_snippets
+            else None
+        )
+
         stmt = pg_insert(UserPersonObservation).values(
             user_id=user_id,
             person_id=person.id,
@@ -836,6 +814,7 @@ class ImportService:
             is_automated=classification.is_automated,
             relationship_types=relationship_types,
             notes=f"Imported from Gmail metadata for {user_email}",
+            import_snippets=import_snippets,
             source_id=source_id,
         )
         stmt = stmt.on_conflict_do_update(
@@ -854,26 +833,12 @@ class ImportService:
                 "is_automated": stmt.excluded.is_automated,
                 "relationship_types": stmt.excluded.relationship_types,
                 "notes": stmt.excluded.notes,
+                "import_snippets": stmt.excluded.import_snippets,
                 "source_id": stmt.excluded.source_id,
                 "updated_at": stmt.excluded.updated_at,
             },
         )
         await self._db.execute(stmt)
-
-        if not classification.is_automated:
-            domain: str = accumulator.email.rsplit("@", 1)[1].lower()
-            if not is_automation_or_generic_domain(domain):
-                org_name_hint: str | None = org_name_from_email(accumulator.email)
-                org = await resolver.resolve_org(domain=domain, name=org_name_hint)
-                await record_employment(
-                    self._db,
-                    person_id=person.id,
-                    org_id=org.id,
-                    contributor_user_id=user_id,
-                    contributor_source_kind="gmail_domain",
-                    contributor_source_id=source_id,
-                    confidence=0.5,
-                )
 
     async def _upsert_person_pair_observations(
         self,
@@ -932,71 +897,6 @@ class ImportService:
                 last_seen_together_at=last_seen,
             )
 
-        await self._db.flush()
-
-    async def _rebuild_user_org_observations(self, user_id: uuid.UUID) -> None:
-        from contactsafe_server.db.models import (
-            EmploymentClaim,
-            Org,
-            UserOrgObservation,
-            UserPersonObservation,
-        )
-
-        result = await self._db.execute(
-            select(
-                EmploymentClaim.org_id,
-                EmploymentClaim.person_id,
-                UserPersonObservation.email_count,
-                UserPersonObservation.last_observed_at,
-                UserPersonObservation.tie_strength_score,
-            )
-            .join(
-                UserPersonObservation,
-                (UserPersonObservation.person_id == EmploymentClaim.person_id)
-                & (UserPersonObservation.user_id == user_id),
-            )
-            .where(EmploymentClaim.is_current.is_(True))
-        )
-        rows = result.all()
-
-        by_org: dict[uuid.UUID, dict[str, object]] = {}
-        for org_id, person_id, email_count, last_at, tie in rows:
-            bucket = by_org.setdefault(org_id, {
-                "person_ids": set(),
-                "email_count": 0,
-                "tie": 0.0,
-                "last_at": None,
-            })
-            pid_set: set[uuid.UUID] = bucket["person_ids"]  # type: ignore[assignment]
-            pid_set.add(person_id)
-            bucket["email_count"] = int(bucket["email_count"]) + email_count  # type: ignore[arg-type]
-            bucket["tie"] = max(float(bucket["tie"]), tie)  # type: ignore[arg-type]
-            prev: datetime | None = bucket["last_at"]  # type: ignore[assignment]
-            if last_at is not None and (prev is None or last_at > prev):
-                bucket["last_at"] = last_at
-
-        for org_id, bucket in by_org.items():
-            pid_set = bucket["person_ids"]  # type: ignore[assignment]
-            stmt = pg_insert(UserOrgObservation).values(
-                user_id=user_id,
-                org_id=org_id,
-                associated_person_ids=sorted(pid_set),
-                total_email_count=int(bucket["email_count"]),  # type: ignore[arg-type]
-                last_interaction_at=bucket["last_at"],  # type: ignore[arg-type]
-                tie_strength_score=float(bucket["tie"]),  # type: ignore[arg-type]
-                relationship_types=["contact"],
-            )
-            stmt = stmt.on_conflict_do_update(
-                constraint="pk_user_org_obs",
-                set_={
-                    "associated_person_ids": stmt.excluded.associated_person_ids,
-                    "total_email_count": stmt.excluded.total_email_count,
-                    "last_interaction_at": stmt.excluded.last_interaction_at,
-                    "tie_strength_score": stmt.excluded.tie_strength_score,
-                    "updated_at": stmt.excluded.updated_at,
-                },
-            )
-            await self._db.execute(stmt)
         await self._db.flush()
 
     async def _load_user_identity(

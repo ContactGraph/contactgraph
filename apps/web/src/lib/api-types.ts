@@ -22,6 +22,12 @@ export type SyncState =
   | "complete"
   | "failed";
 
+export type EnrichmentRunState =
+  | "pending"
+  | "running"
+  | "complete"
+  | "failed";
+
 export type TrustListInviteStatus =
   | "pending"
   | "accepted"
@@ -94,6 +100,34 @@ export interface SyncSourceResult {
   scheduled: boolean;
   sync_state: SyncState;
   email: string | null;
+  message: string;
+  system_messages: string[];
+}
+
+export interface StartEnrichmentResult {
+  run_id: string | null;
+  scheduled: boolean;
+  state: EnrichmentRunState;
+  message: string;
+  system_messages: string[];
+}
+
+export interface EnrichmentStatusResult {
+  run_id: string | null;
+  state: EnrichmentRunState;
+  contacts_total: number;
+  contacts_enriched: number;
+  started_at: string | null;
+  completed_at: string | null;
+  error: string | null;
+  message: string;
+  system_messages: string[];
+}
+
+export interface UploadSourceResult {
+  source_id: string;
+  scheduled: boolean;
+  sync_state: SyncState;
   message: string;
   system_messages: string[];
 }

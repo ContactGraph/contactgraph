@@ -31,6 +31,7 @@ class OAuthService:
     _GOOGLE_SOURCE_TYPES: frozenset[SourceType] = frozenset({
         SourceType.GOOGLE_MAIL,
         SourceType.GOOGLE_CONTACTS,  # deprecated alias; treated as google_mail
+        SourceType.GOOGLE_CALENDAR,
     })
 
     async def create_connect_session(
@@ -53,7 +54,8 @@ class OAuthService:
 
         if user_token:
             existing: ConnectSourceResult | None = await self._check_existing_by_email(
-                user_token
+                user_token,
+                source_type=source_type,
             )
             if existing is not None:
                 return existing
@@ -100,21 +102,27 @@ class OAuthService:
 
         user: User = await self._resolve_or_create_user(email, userinfo, session)
         cred: OAuthCredential = await self._upsert_credentials(user.id, email, tokens)
-        source: Source = await self._sources.ensure_google_mail_source(user.id, email)
-        await self._sources.link_credential_to_source(cred, source)
+        mail_source: Source = await self._sources.ensure_google_mail_source(user.id, email)
+        await self._sources.link_credential_to_source(cred, mail_source)
+        await self._sources.ensure_google_calendar_source(user.id, email)
 
         session.user_id = user.id
         session.status = SessionStatus.CONNECTED.value
         session.completed_at = datetime.now(tz=UTC)
         await self._db.flush()
-        return user, source
+        return user, mail_source
 
     async def mark_session_failed(self, session: ConnectSession) -> None:
         session.status = SessionStatus.FAILED.value
         session.completed_at = datetime.now(tz=UTC)
         await self._db.flush()
 
-    async def _check_existing_by_email(self, email: str) -> ConnectSourceResult | None:
+    async def _check_existing_by_email(
+        self,
+        email: str,
+        *,
+        source_type: SourceType = SourceType.GOOGLE_MAIL,
+    ) -> ConnectSourceResult | None:
         normalized: str = email.strip().lower()
         user: User | None = await self._find_user_by_email(normalized)
         if user is None:
@@ -126,8 +134,15 @@ class OAuthService:
         if cred is None:
             return None
 
-        source: Source = await self._sources.ensure_google_mail_source(user.id, normalized)
-        await self._sources.link_credential_to_source(cred, source)
+        mail_source: Source = await self._sources.ensure_google_mail_source(user.id, normalized)
+        await self._sources.link_credential_to_source(cred, mail_source)
+        calendar_source: Source = await self._sources.ensure_google_calendar_source(
+            user.id, normalized
+        )
+
+        target_source: Source = (
+            calendar_source if source_type == SourceType.GOOGLE_CALENDAR else mail_source
+        )
 
         session: ConnectSession = ConnectSession(
             state=secrets.token_urlsafe(32),
@@ -139,20 +154,25 @@ class OAuthService:
         self._db.add(session)
         await self._db.flush()
 
-        if source.sync_state in {SyncState.PENDING.value, SyncState.FAILED.value} or (
-            source.sync_error
+        if target_source.sync_state in {SyncState.PENDING.value, SyncState.FAILED.value} or (
+            target_source.sync_error
         ):
-            await self._sources.request_sync(source.id)
+            await self._sources.request_sync(target_source.id)
 
+        label: str = (
+            "Google Calendar"
+            if source_type == SourceType.GOOGLE_CALENDAR
+            else "Gmail"
+        )
         return ConnectSourceResult(
             connect_session_id=session.id,
             oauth_url="",
             status=SessionStatus.CONNECTED,
-            message="Gmail and Calendar are already connected for this account.",
+            message=f"{label} is already connected for this account.",
             already_connected=True,
             email=user.email,
             scopes=list(cred.scopes),
-            source_id=source.id,
+            source_id=target_source.id,
         )
 
     async def _find_user_by_email(self, email: str) -> User | None:

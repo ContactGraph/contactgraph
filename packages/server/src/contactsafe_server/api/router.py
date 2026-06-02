@@ -31,14 +31,18 @@ from contactsafe_core.schemas import (
     DescribeGraphResult,
     EditTrustedUsersRequest,
     EditTrustedUsersResult,
+    EnrichmentStatusResult,
     GetSourceStatusRequest,
     ListSourcesResult,
     PollConnectResult,
     QueryNetworkRequest,
     QueryNetworkResult,
     SourceStatusResult,
+    StartEnrichmentResult,
     SyncSourceRequest,
     SyncSourceResult,
+    UploadSourceRequest,
+    UploadSourceResult,
     ViewTrustedUsersResult,
 )
 from contactsafe_server import actions
@@ -249,6 +253,37 @@ async def api_sync_source(
 ) -> SyncSourceResult:
     b: SyncSourceRequest = body or SyncSourceRequest()
     return await actions.sync_source(ctx, user_id, source_id=b.source_id)
+
+
+@router.post("/start-enrichment", response_model=StartEnrichmentResult)
+async def api_start_enrichment(ctx: Ctx, user_id: EffectiveUser) -> StartEnrichmentResult:
+    return await actions.start_enrichment(ctx, user_id)
+
+
+@router.post("/get-enrichment-status", response_model=EnrichmentStatusResult)
+async def api_get_enrichment_status(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> EnrichmentStatusResult:
+    return await actions.get_enrichment_status(ctx, user_id)
+
+
+@router.post("/upload-source", response_model=UploadSourceResult)
+async def api_upload_source(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: UploadSourceRequest,
+) -> UploadSourceResult:
+    try:
+        return await actions.upload_source(
+            ctx,
+            user_id,
+            source_type=body.source_type,
+            filename=body.filename,
+            content=body.content,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/query-network", response_model=QueryNetworkResult)
