@@ -1,17 +1,25 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
-import { MarketingHeader } from "./components/marketing-header";
 import { MarketingFooter } from "./components/marketing-footer";
+import { SiteHeader } from "@/components/site-header";
+import { getSession } from "@/lib/session";
 
 export const metadata: Metadata = {
   robots: "index, follow",
 };
 
-export default function MarketingLayout({ children }: { children: ReactNode }) {
+export default async function MarketingLayout({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  const session = await getSession();
+  const email: string | null = session.isLoggedIn ? (session.email ?? null) : null;
+
   return (
     <div className="flex min-h-full flex-col bg-background text-foreground">
-      <MarketingHeader />
+      <SiteHeader email={email} />
       {children}
       <MarketingFooter />
     </div>
