@@ -61,14 +61,34 @@ pnpm generate:types
 
 Types are checked into `src/lib/api-types.ts` and aligned with `packages/core/src/contactsafe_core/schemas.py`.
 
-## Production deploy
+## Production deploy (Railway)
 
-Deploy as a standalone Node service (Vercel, Railway, etc.). Set:
+Create a **separate** Railway service from the Python API. The repo root
+`railway.toml` is for the API Dockerfile only; the web app must use its own
+config or Railway will try to build the Python image and fail on missing
+`migrations/`.
 
-- `CONTACTGRAPH_API_URL` → your deployed API URL
-- `SESSION_SECRET` → a strong random secret (32+ chars)
+**WWW service settings**
 
-The web app uses a BFF pattern: JWTs stay in an httpOnly cookie on the Next.js server; the browser never sees them. No CORS changes are required on the API.
+| Setting | Value |
+|---------|--------|
+| Root directory | `apps/web` |
+| Config file path | `/apps/web/railway.toml` (optional; Railpack default works once root `railway.toml` is removed) |
+| Builder | Railpack |
+
+**API service:** set config file path to `/railway.api.toml` (the old root
+`railway.toml` forced the Python Dockerfile on every service in the project).
+
+**Environment variables**
+
+- `CONTACTGRAPH_API_URL` → e.g. `https://api.contactgraph.ai`
+- `SESSION_SECRET` → strong random secret (32+ chars)
+
+Railpack detects pnpm from `pnpm-lock.yaml` and runs `pnpm build` / `pnpm start`.
+Optional: `RAILPACK_NODE_VERSION=20` if you want to pin Node.
+
+The web app uses a BFF pattern: JWTs stay in an httpOnly cookie on the Next.js
+server; the browser never sees them. No CORS changes are required on the API.
 
 ## Architecture
 

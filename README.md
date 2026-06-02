@@ -375,7 +375,19 @@ Requested scopes include `gmail.readonly` (Gmail source), `contacts.readonly` (G
 
 ## Deploy on Railway
 
-1. Create a Railway project from this repo (`Dockerfile` + `railway.toml`).
+Two services from this repo:
+
+| Service | Root directory | Config file | Builder |
+|---------|----------------|-------------|---------|
+| API | `/` (default) | `/railway.api.toml` | Dockerfile |
+| WWW | `apps/web` | `/apps/web/railway.toml` | Railpack |
+
+Do **not** use a root `railway.toml` — Railway applies it to every service and
+will force the API Dockerfile on the web app.
+
+### API
+
+1. Create a Railway service from this repo (`Dockerfile` + `railway.api.toml`).
 2. Postgres or Supabase `DATABASE_URL`.
 3. **Required env vars:**
    - `APP_ENV=production`
