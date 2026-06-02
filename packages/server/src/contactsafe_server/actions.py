@@ -12,6 +12,12 @@ from uuid import UUID
 
 from datetime import UTC, datetime
 
+from contactsafe_core.contact_schemas import (
+    ListOrgsResult,
+    ListPeopleResult,
+    OrgDetailResult,
+    PersonDetailResult,
+)
 from contactsafe_core.enums import SessionStatus, SourceType
 from contactsafe_core.schemas import (
     ConnectSourceResult,
@@ -34,6 +40,7 @@ from contactsafe_server.deps import (
     build_oauth_service,
     build_source_service,
 )
+from contactsafe_server.services.contacts_service import ContactsService
 from contactsafe_server.services.graph_summary_service import GraphSummaryService
 from contactsafe_server.services.network_query_service import NetworkQueryService
 from contactsafe_server.services.query_planner import QueryPlanner
@@ -348,3 +355,61 @@ async def poll_connect(
             email=email,
             message="Connected! Use the access_token as your Bearer token.",
         )
+
+
+async def list_people(ctx: AppContext, user_id: UUID | None) -> ListPeopleResult:
+    if user_id is None:
+        return ListPeopleResult(
+            people=[],
+            total=0,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        service: ContactsService = ContactsService(db)
+        return await service.list_people(user_id)
+
+
+async def get_person(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    person_id: str,
+) -> PersonDetailResult:
+    if user_id is None:
+        raise ValueError("Authentication required")
+    parsed_id: UUID = UUID(person_id)
+    async with ctx.session_factory() as db:
+        service: ContactsService = ContactsService(db)
+        detail: PersonDetailResult | None = await service.get_person(user_id, parsed_id)
+        if detail is None:
+            raise ValueError(f"Person not found: {person_id}")
+        return detail
+
+
+async def list_orgs(ctx: AppContext, user_id: UUID | None) -> ListOrgsResult:
+    if user_id is None:
+        return ListOrgsResult(
+            orgs=[],
+            total=0,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        service: ContactsService = ContactsService(db)
+        return await service.list_orgs(user_id)
+
+
+async def get_org(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    org_id: str,
+) -> OrgDetailResult:
+    if user_id is None:
+        raise ValueError("Authentication required")
+    parsed_id: UUID = UUID(org_id)
+    async with ctx.session_factory() as db:
+        service: ContactsService = ContactsService(db)
+        detail: OrgDetailResult | None = await service.get_org(user_id, parsed_id)
+        if detail is None:
+            raise ValueError(f"Organization not found: {org_id}")
+        return detail

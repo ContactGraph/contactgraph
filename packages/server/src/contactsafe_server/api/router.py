@@ -17,6 +17,14 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from contactsafe_core.contact_schemas import (
+    GetOrgRequest,
+    GetPersonRequest,
+    ListOrgsResult,
+    ListPeopleResult,
+    OrgDetailResult,
+    PersonDetailResult,
+)
 from contactsafe_core.schemas import (
     ConnectSourceRequest,
     ConnectSourceResult,
@@ -277,3 +285,37 @@ async def api_edit_trusted_users(
         decline=body.decline,
         set_privacy=body.set_privacy,
     )
+
+
+@router.post("/list-people", response_model=ListPeopleResult)
+async def api_list_people(ctx: Ctx, user_id: EffectiveUser) -> ListPeopleResult:
+    return await actions.list_people(ctx, user_id)
+
+
+@router.post("/get-person", response_model=PersonDetailResult)
+async def api_get_person(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: GetPersonRequest,
+) -> PersonDetailResult:
+    try:
+        return await actions.get_person(ctx, user_id, person_id=body.person_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/list-orgs", response_model=ListOrgsResult)
+async def api_list_orgs(ctx: Ctx, user_id: EffectiveUser) -> ListOrgsResult:
+    return await actions.list_orgs(ctx, user_id)
+
+
+@router.post("/get-org", response_model=OrgDetailResult)
+async def api_get_org(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: GetOrgRequest,
+) -> OrgDetailResult:
+    try:
+        return await actions.get_org(ctx, user_id, org_id=body.org_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
