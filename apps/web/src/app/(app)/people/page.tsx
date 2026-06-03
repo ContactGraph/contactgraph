@@ -10,7 +10,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { Search } from "lucide-react";
+import { Download, Search } from "lucide-react";
 
 import {
   CompactCell,
@@ -21,6 +21,7 @@ import {
 import { EntityActionsMenu } from "@/components/entity-actions-menu";
 import { PersonDetailPanel } from "@/components/person-detail-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -31,6 +32,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type { ListPeopleResult, PersonDetailResult, PersonListItem } from "@/lib/api-types";
+import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { formatDateCompact, formatSourceAbbrev } from "@/lib/formatters";
 import { proxyPost } from "@/lib/proxy-client";
 
@@ -212,6 +214,39 @@ export default function PeoplePage() {
       (person: PersonListItem) => person.person_id === selectedPersonId,
     );
 
+  const handleDownloadCsv = (): void => {
+    const rows: PersonListItem[] = table
+      .getSortedRowModel()
+      .rows.map((row) => row.original);
+    const csv: string = buildCsv(
+      [
+        "First",
+        "Last",
+        "Email",
+        "Phone",
+        "Org",
+        "Role",
+        "Tie",
+        "Sources",
+        "First Contact",
+        "Last Contact",
+      ],
+      rows.map((person: PersonListItem) => [
+        person.first_name,
+        person.last_name,
+        person.primary_email ?? person.emails[0] ?? "",
+        person.phone ?? "",
+        person.org_name ?? "",
+        person.current_role ?? "",
+        person.tie_strength_score.toFixed(2),
+        person.sources.map((source: string) => formatSourceAbbrev(source)).join("; "),
+        formatDateCompact(person.first_contact_at),
+        formatDateCompact(person.last_contact_at),
+      ]),
+    );
+    downloadCsv(csvFilename("people"), csv);
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -221,14 +256,27 @@ export default function PeoplePage() {
             {peopleQuery.data?.message ?? "Loading contacts…"}
           </p>
         </div>
-        <div className="relative w-full max-w-sm">
-          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search people…"
-            className="h-8 pl-8 text-xs"
-          />
+        <div className="flex w-full max-w-md items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search people…"
+              className="h-8 pl-8 text-xs"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 text-xs"
+            onClick={handleDownloadCsv}
+            disabled={peopleQuery.isLoading || table.getRowModel().rows.length === 0}
+          >
+            <Download />
+            CSV
+          </Button>
         </div>
       </div>
 

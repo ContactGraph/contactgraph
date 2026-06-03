@@ -10,7 +10,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { Search } from "lucide-react";
+import { Download, Search } from "lucide-react";
 
 import {
   CompactCell,
@@ -20,6 +20,7 @@ import {
 import { EntityActionsMenu } from "@/components/entity-actions-menu";
 import { OrgDetailPanel } from "@/components/org-detail-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -30,6 +31,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type { ListOrgsResult, OrgDetailResult, OrgListItem } from "@/lib/api-types";
+import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { proxyPost } from "@/lib/proxy-client";
 
 export default function OrganizationsPage() {
@@ -141,6 +143,22 @@ export default function OrganizationsPage() {
     (org: OrgListItem) => org.org_id === selectedOrgId,
   );
 
+  const handleDownloadCsv = (): void => {
+    const rows: OrgListItem[] = table
+      .getSortedRowModel()
+      .rows.map((row) => row.original);
+    const csv: string = buildCsv(
+      ["Organization", "Domain", "Categories", "Contacts"],
+      rows.map((org: OrgListItem) => [
+        org.name,
+        org.primary_domain ?? "",
+        org.categories.join("; "),
+        org.contact_count.toString(),
+      ]),
+    );
+    downloadCsv(csvFilename("organizations"), csv);
+  };
+
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
@@ -150,14 +168,27 @@ export default function OrganizationsPage() {
             {orgsQuery.data?.message ?? "Loading organizations…"}
           </p>
         </div>
-        <div className="relative w-full max-w-sm">
-          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search organizations…"
-            className="h-8 pl-8 text-xs"
-          />
+        <div className="flex w-full max-w-md items-center gap-2">
+          <div className="relative flex-1">
+            <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search organizations…"
+              className="h-8 pl-8 text-xs"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 shrink-0 text-xs"
+            onClick={handleDownloadCsv}
+            disabled={orgsQuery.isLoading || table.getRowModel().rows.length === 0}
+          >
+            <Download />
+            CSV
+          </Button>
         </div>
       </div>
 
