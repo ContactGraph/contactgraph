@@ -78,6 +78,7 @@ class ConnectSourceResult(BaseModel):
     system_messages: list[str] = Field(default_factory=list)
     upload_url: str | None = None
     upload_instructions: str | None = None
+    poll_secret: str | None = None
 
 
 class SourceStatusResult(BaseModel):
@@ -155,7 +156,7 @@ class SecondDegreeMatch(BaseModel):
 
     holder_name: str
     holder_user_id: UUID
-    person_id: UUID
+    opaque_person_ref: str
     person_name: str
     person_org: str | None = None
     person_role: str | None = None

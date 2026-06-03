@@ -55,6 +55,7 @@ export interface ConnectSourceResult {
   system_messages: string[];
   upload_url: string | null;
   upload_instructions: string | null;
+  poll_secret: string | null;
 }
 
 export interface PollConnectResult {
@@ -216,7 +217,7 @@ export interface DescribeGraphResult {
 export interface SecondDegreeMatch {
   holder_name: string;
   holder_user_id: string;
-  person_id: string;
+  opaque_person_ref: string;
   person_name: string;
   person_org: string | null;
   person_role: string | null;

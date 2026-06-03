@@ -415,15 +415,18 @@ class TestGetSourceStatusTool:
         source_uuid: UUID = uuid4()
         mock_parse.return_value = source_uuid
 
+        user_id: UUID = uuid4()
         status_result: MagicMock = MagicMock(spec=SourceStatusResult)
         mock_sources: AsyncMock = AsyncMock()
+        mock_sources.require_source_owned_by = AsyncMock()
         mock_sources.get_source_status = AsyncMock(return_value=status_result)
         mock_build_source.return_value = mock_sources
 
-        ctx: MagicMock = _make_ctx(user_id=None, lifespan=lifespan)
+        ctx: MagicMock = _make_ctx(user_id=user_id, lifespan=lifespan)
         result = await fn(source_id=str(source_uuid), ctx=ctx)
 
         assert result is status_result
+        mock_sources.require_source_owned_by.assert_called_once_with(source_uuid, user_id)
         mock_sources.get_source_status.assert_called_once_with(source_uuid)
 
     @pytest.mark.asyncio
@@ -478,15 +481,18 @@ class TestSyncSourceTool:
         source_uuid: UUID = uuid4()
         mock_parse.return_value = source_uuid
 
+        user_id: UUID = uuid4()
         sync_result: MagicMock = MagicMock(spec=SyncSourceResult)
         mock_sources: AsyncMock = AsyncMock()
+        mock_sources.require_source_owned_by = AsyncMock()
         mock_sources.request_sync = AsyncMock(return_value=sync_result)
         mock_build_source.return_value = mock_sources
 
-        ctx: MagicMock = _make_ctx(user_id=None, lifespan=lifespan)
+        ctx: MagicMock = _make_ctx(user_id=user_id, lifespan=lifespan)
         result = await fn(source_id=str(source_uuid), ctx=ctx)
 
         assert result is sync_result
+        mock_sources.require_source_owned_by.assert_called_once_with(source_uuid, user_id)
         mock_sources.request_sync.assert_called_once_with(source_uuid)
 
     @pytest.mark.asyncio

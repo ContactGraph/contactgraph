@@ -12,6 +12,7 @@ from contactsafe_server.api.router import router as api_router
 from contactsafe_server.config import Settings, get_settings
 from contactsafe_server.db.connection import init_db, shutdown_db
 from contactsafe_server.deps import AppContext, build_app_context, build_jwt_service
+from contactsafe_server.middleware.rate_limit import RateLimitMiddleware
 from contactsafe_server.mcp.auth_middleware import McpAuthMiddleware
 from contactsafe_server.mcp.path_middleware import NormalizeMcpPathMiddleware
 from contactsafe_server.mcp.server import create_mcp_server
@@ -48,13 +49,20 @@ def create_app() -> FastAPI:
         lifespan=app_lifespan,
     )
 
+    dev_origins: list[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"] if settings.app_env == "development" else [],
+        allow_origins=dev_origins if settings.app_env == "development" else [],
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RateLimitMiddleware)
     app.add_middleware(
         NormalizeMcpPathMiddleware,
         mcp_path=settings.mcp_path,

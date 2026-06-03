@@ -74,7 +74,9 @@ from contactsafe_server.services.target_companies_service import (
     TargetCompaniesService,
     TargetCompanyMatch,
 )
+from contactsafe_server.services.connect_session_poll import verify_poll_secret
 from contactsafe_server.services.trust_list_service import TrustListService
+from contactsafe_server.services.upload_payload_crypto import build_upload_payload
 from contactsafe_server.utils import parse_source_id
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -186,12 +188,15 @@ async def get_source_status(
     async with ctx.session_factory() as db:
         sources: SourceService = build_source_service(db)
         if source_id is not None:
+            if user_id is None:
+                raise ValueError("Authentication required (Bearer token)")
             source_uuid: UUID = parse_source_id(source_id)
+            await sources.require_source_owned_by(source_uuid, user_id)
             return await sources.get_source_status(source_uuid)
         elif user_id is not None:
             return await sources.get_source_status_for_user(user_id)
         else:
-            raise ValueError("Authentication required (Bearer token) or provide source_id")
+            raise ValueError("Authentication required (Bearer token)")
 
 
 async def sync_source(
@@ -203,12 +208,15 @@ async def sync_source(
     async with ctx.session_factory() as db:
         sources: SourceService = build_source_service(db)
         if source_id is not None:
+            if user_id is None:
+                raise ValueError("Authentication required (Bearer token)")
             source_uuid: UUID = parse_source_id(source_id)
+            await sources.require_source_owned_by(source_uuid, user_id)
             result: SyncSourceResult = await sources.request_sync(source_uuid)
         elif user_id is not None:
             result = await sources.request_sync_for_user(user_id)
         else:
-            raise ValueError("Authentication required (Bearer token) or provide source_id")
+            raise ValueError("Authentication required (Bearer token)")
         await db.commit()
         return result
 
@@ -480,6 +488,7 @@ async def upload_source(
             source_type=parsed_type,
             filename=filename,
             content=content,
+            encryptor=ctx.encryptor,
         )
         await db.commit()
         sync_result: SyncSourceResult = await sources.request_sync(source.id)
@@ -518,7 +527,11 @@ async def upload_contacts(
         if source.source_type != SourceType.PHONE_CONTACTS_UPLOAD.value:
             raise ValueError("Source is not a phone contacts upload source")
 
-        source.upload_payload = {"filename": filename, "content": content}
+        source.upload_payload = build_upload_payload(
+            filename=filename,
+            content=content,
+            encryptor=ctx.encryptor,
+        )
         source.sync_state = SyncState.PENDING.value
         source.sync_error = None
         await db.commit()
@@ -563,6 +576,7 @@ async def query_network(
                 user_id=user_id,
                 plan=plan,
                 trust_list_service=trust_svc,
+                signing_key=ctx.settings.effective_jwt_signing_key,
             )
         except Exception:
             logger.debug("2nd-degree query failed, returning first-degree only", exc_info=True)
@@ -793,11 +807,14 @@ async def poll_connect(
     ctx: AppContext,
     *,
     connect_session_id: UUID,
+    poll_secret: str,
 ) -> PollConnectResult:
     async with ctx.session_factory() as db:
         session: ConnectSession | None = await db.get(ConnectSession, connect_session_id)
         if session is None:
             raise ValueError(f"Unknown connect_session_id: {connect_session_id}")
+        if not verify_poll_secret(session, poll_secret):
+            raise ValueError("Invalid poll credentials")
 
         status: str = session.status
         if status == SessionStatus.PENDING.value:

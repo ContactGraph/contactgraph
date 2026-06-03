@@ -11,6 +11,7 @@ from contactsafe_server.config import Settings
 from contactsafe_server.db.models import ConnectSession, OAuthCredential, Source, User, UserIdentity
 from contactsafe_server.oauth.google import GoogleOAuthClient, GoogleTokens, GoogleUserInfo
 from contactsafe_server.services.crypto import TokenEncryptor
+from contactsafe_server.services.connect_session_poll import assign_poll_secret
 from contactsafe_server.services.source_service import SourceService
 
 
@@ -67,6 +68,7 @@ class OAuthService:
             requested_scopes=list(self._settings.google_scopes),
             user_id=authenticated_user_id,
         )
+        poll_secret: str = assign_poll_secret(session)
         self._db.add(session)
         await self._db.flush()
 
@@ -79,6 +81,7 @@ class OAuthService:
             status=SessionStatus.PENDING,
             message="Open the OAuth URL in a browser to connect Gmail, Calendar, and Contacts.",
             already_connected=False,
+            poll_secret=poll_secret,
         )
 
     async def get_session_by_id(self, session_id: uuid.UUID) -> ConnectSession | None:
@@ -151,6 +154,7 @@ class OAuthService:
             requested_scopes=list(cred.scopes),
             completed_at=datetime.now(tz=UTC),
         )
+        poll_secret: str = assign_poll_secret(session)
         self._db.add(session)
         await self._db.flush()
 
@@ -173,6 +177,7 @@ class OAuthService:
             email=user.email,
             scopes=list(cred.scopes),
             source_id=target_source.id,
+            poll_secret=poll_secret,
         )
 
     async def _find_user_by_email(self, email: str) -> User | None:

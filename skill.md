@@ -31,6 +31,7 @@ RESP=$(curl -s -X POST "$BASE_URL/api/connect-source" \
   -H "Content-Type: application/json" \
   -d '{"source_type":"google_mail"}')
 SESSION_ID=$(echo "$RESP" | jq -r '.connect_session_id')
+POLL_SECRET=$(echo "$RESP" | jq -r '.poll_secret')
 OAUTH_URL=$(echo "$RESP" | jq -r '.oauth_url')
 ```
 
@@ -40,7 +41,7 @@ OAUTH_URL=$(echo "$RESP" | jq -r '.oauth_url')
 
 ```bash
 while true; do
-  POLL=$(curl -s -X POST "$BASE_URL/api/poll-connect/$SESSION_ID")
+  POLL=$(curl -s -X POST "$BASE_URL/api/poll-connect/$SESSION_ID" -H "X-Poll-Secret: $POLL_SECRET")
   STATUS=$(echo "$POLL" | jq -r '.status')
   if [ "$STATUS" = "connected" ]; then
     TOKEN=$(echo "$POLL" | jq -r '.access_token')

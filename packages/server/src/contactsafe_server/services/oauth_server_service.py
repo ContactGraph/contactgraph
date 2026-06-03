@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import AuthorizationCode, ConnectSession, OAuthClient, RefreshToken
 from contactsafe_server.services.jwt_service import DEFAULT_MCP_SCOPES, JWTService
+from contactsafe_server.services.token_hash import hash_token
 
 DEFAULT_GRANT_TYPES: tuple[str, ...] = ("authorization_code", "refresh_token")
 DEFAULT_RESPONSE_TYPES: tuple[str, ...] = ("code",)
@@ -45,10 +46,6 @@ class TokenResponse:
     refresh_token: str | None
     scope: str
     resource: str | None = None
-
-
-def hash_token(value: str) -> str:
-    return hashlib.sha256(value.encode()).hexdigest()
 
 
 def verify_pkce(code_verifier: str, code_challenge: str, method: str) -> bool:

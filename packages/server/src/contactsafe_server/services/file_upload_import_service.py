@@ -29,15 +29,26 @@ from contactsafe_server.services.phone_contacts_parser import (
     ParsedPhoneContact,
     parse_phone_contacts_upload,
 )
+from contactsafe_server.services.crypto import TokenEncryptor
+from contactsafe_server.services.upload_payload_crypto import read_upload_payload
 from contactsafe_server.services.user_person_service import ensure_user_person
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
 class FileUploadImportService:
-    def __init__(self, db: AsyncSession, settings: Settings | None = None) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        settings: Settings | None = None,
+        *,
+        encryptor: TokenEncryptor | None = None,
+    ) -> None:
         self._db: AsyncSession = db
         self._settings: Settings = settings or Settings()
+        self._encryptor: TokenEncryptor = encryptor or TokenEncryptor(
+            self._settings.token_encryption_key
+        )
 
     async def run_sync(self, source_id: uuid.UUID) -> None:
         source: Source | None = await self._db.get(Source, source_id)
@@ -60,12 +71,10 @@ class FileUploadImportService:
         await self._db.flush()
 
         try:
-            payload: dict[str, object] | None = source.upload_payload
-            if payload is None:
-                raise ValueError("No upload payload stored for this source")
-
-            content: str = str(payload.get("content", ""))
-            filename: str = str(payload.get("filename", "upload.csv"))
+            filename, content = read_upload_payload(
+                source.upload_payload,
+                self._encryptor,
+            )
             if not content.strip():
                 raise ValueError("Upload payload is empty")
 

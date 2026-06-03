@@ -246,6 +246,9 @@ class ContactsService:
             .order_by(Person.canonical_name.asc())
         )
         people_rows: list[Person] = list(people_result.scalars().all())
+        if not people_rows:
+            return None
+
         alias_values: list[str] = [alias.value for alias in org.aliases]
 
         return OrgDetailResult(

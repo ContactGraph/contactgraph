@@ -7,6 +7,7 @@ import { getSession } from "@/lib/session";
 export async function GET(request: Request): Promise<NextResponse> {
   const url: URL = new URL(request.url);
   const sessionId: string | null = url.searchParams.get("sid");
+  const pollSecret: string | null = url.searchParams.get("poll_secret");
 
   if (!sessionId) {
     return NextResponse.json(
@@ -14,11 +15,20 @@ export async function GET(request: Request): Promise<NextResponse> {
       { status: 400 },
     );
   }
+  if (!pollSecret) {
+    return NextResponse.json(
+      { error: "Missing poll secret" },
+      { status: 400 },
+    );
+  }
 
   try {
     const response: Response = await fetch(
       `${env.apiUrl}/api/poll-connect/${sessionId}`,
-      { method: "POST" },
+      {
+        method: "POST",
+        headers: { "X-Poll-Secret": pollSecret },
+      },
     );
 
     if (!response.ok) {
