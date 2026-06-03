@@ -236,6 +236,7 @@ async def get_user_profile(
         if user is None:
             return UserProfileResult(message="User not found.")
         return UserProfileResult(
+            email=user.email,
             display_name=user.display_name or user.google_profile_name,
             location=user.location,
             google_profile_name=user.google_profile_name,
@@ -265,6 +266,7 @@ async def update_user_profile(
         await db.commit()
         await db.refresh(user)
         return UserProfileResult(
+            email=user.email,
             display_name=user.display_name or user.google_profile_name,
             location=user.location,
             google_profile_name=user.google_profile_name,

@@ -287,6 +287,7 @@ class UploadSourceResult(BaseModel):
 
 
 class UserProfileResult(BaseModel):
+    email: str | None = None
     display_name: str | None = None
     location: str | None = None
     google_profile_name: str | None = None

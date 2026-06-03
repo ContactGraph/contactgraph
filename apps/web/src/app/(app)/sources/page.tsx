@@ -164,6 +164,7 @@ export default function SourcesPage() {
   const [connectError, setConnectError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [profileName, setProfileName] = useState<string>("");
+  const [profileEmail, setProfileEmail] = useState<string>("");
   const [profileLocation, setProfileLocation] = useState<string>("");
   const [profileSaved, setProfileSaved] = useState<boolean>(false);
 
@@ -214,6 +215,7 @@ export default function SourcesPage() {
       return;
     }
     setProfileName(profile.display_name ?? "");
+    setProfileEmail(profile.email ?? "");
     setProfileLocation(profile.location ?? "");
   }, [profileQuery.data]);
 
@@ -400,8 +402,8 @@ export default function SourcesPage() {
         <CardHeader>
           <CardTitle>Your info</CardTitle>
           <CardDescription>
-            Helps enrichment identify the right person for common names and
-            personal emails.
+            Name and email come from Google sign-in. Location helps enrichment
+            identify the right person for common names.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -411,15 +413,25 @@ export default function SourcesPage() {
             <>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
+                  <Label htmlFor="profile-email">Your email</Label>
+                  <Input
+                    id="profile-email"
+                    value={profileEmail}
+                    readOnly
+                    disabled
+                    className="bg-muted"
+                  />
+                </div>
+                <div className="space-y-2">
                   <Label htmlFor="profile-name">Your name</Label>
                   <Input
                     id="profile-name"
-                    placeholder="Tom Gutierrez"
+                    placeholder="From Google account"
                     value={profileName}
                     onChange={(event) => setProfileName(event.target.value)}
                   />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-2 sm:col-span-2">
                   <Label htmlFor="profile-location">Your location</Label>
                   <Input
                     id="profile-location"

@@ -627,6 +627,28 @@ class TestResolveOrCreateUser:
 
         assert resolved.id == user.id
         assert resolved.google_profile_name == "Updated"
+        assert resolved.display_name == "Updated"
+
+    async def test_reconnect_does_not_overwrite_custom_display_name(
+        self, db_session: AsyncSession
+    ) -> None:
+        user: User = await _seed_user(db_session, email="known@example.com")
+        user.display_name = "Custom Name"
+        await db_session.flush()
+
+        svc: OAuthService = _build_service(db_session)
+        session: ConnectSession = ConnectSession(
+            state="s1b", status=SessionStatus.PENDING.value, requested_scopes=["openid"],
+        )
+        db_session.add(session)
+        await db_session.flush()
+
+        userinfo: GoogleUserInfo = _make_userinfo(email="known@example.com", name="Updated")
+
+        resolved: User = await svc._resolve_or_create_user("known@example.com", userinfo, session)
+
+        assert resolved.google_profile_name == "Updated"
+        assert resolved.display_name == "Custom Name"
 
     async def test_session_user_id_links_new_email(self, db_session: AsyncSession) -> None:
         user: User = await _seed_user(db_session, email="primary@example.com")
@@ -665,6 +687,7 @@ class TestResolveOrCreateUser:
 
         assert resolved.email == "brand-new@example.com"
         assert resolved.google_profile_name == "Brand New"
+        assert resolved.display_name == "Brand New"
 
         result = await db_session.execute(
             select(UserIdentity).where(UserIdentity.value == "brand-new@example.com")

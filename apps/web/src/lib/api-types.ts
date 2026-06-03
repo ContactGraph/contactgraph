@@ -135,6 +135,7 @@ export interface UploadSourceResult {
 }
 
 export interface UserProfileResult {
+  email: string | null;
   display_name: string | null;
   location: string | null;
   google_profile_name: string | null;
