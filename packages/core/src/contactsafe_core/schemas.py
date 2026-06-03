@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -286,17 +286,41 @@ class UploadSourceResult(BaseModel):
     system_messages: list[str] = Field(default_factory=list)
 
 
+class UserExperience(BaseModel):
+    id: UUID | None = None
+    company: str
+    role: str | None = None
+    is_current: bool = False
+    started_at: date | None = None
+    ended_at: date | None = None
+
+
 class UserProfileResult(BaseModel):
     email: str | None = None
     display_name: str | None = None
+    headline: str | None = None
     location: str | None = None
     google_profile_name: str | None = None
+    experiences: list[UserExperience] = Field(default_factory=list)
     message: str = ""
 
 
 class UpdateUserProfileRequest(BaseModel):
     display_name: str | None = None
     location: str | None = None
+
+
+class SaveUserExperienceRequest(BaseModel):
+    id: UUID | None = None
+    company: str
+    role: str | None = None
+    is_current: bool = False
+    started_at: date | None = None
+    ended_at: date | None = None
+
+
+class DeleteUserExperienceRequest(BaseModel):
+    id: UUID
 
 
 class QueryNetworkRequest(BaseModel):

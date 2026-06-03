@@ -106,8 +106,9 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
                 elif source_type in {
                     SourceType.PHONE_CONTACTS_UPLOAD.value,
                     SourceType.LINKEDIN_CONNECTIONS_UPLOAD.value,
+                    SourceType.LINKEDIN_PROFILE_UPLOAD.value,
                 }:
-                    service = FileUploadImportService(db=db)
+                    service = FileUploadImportService(db=db, settings=ctx.settings)
                     await service.run_sync(source_id)
                 else:
                     logger.warning(

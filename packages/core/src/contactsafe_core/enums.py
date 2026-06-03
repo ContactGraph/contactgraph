@@ -16,6 +16,7 @@ class SourceType(StrEnum):
     GOOGLE_CALENDAR = "google_calendar"
     GOOGLE_CONTACTS = "google_contacts"
     LINKEDIN_CONNECTIONS_UPLOAD = "linkedin_connections_upload"
+    LINKEDIN_PROFILE_UPLOAD = "linkedin_profile_upload"
     PHONE_CONTACTS_UPLOAD = "phone_contacts_upload"
 
 

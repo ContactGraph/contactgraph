@@ -19,6 +19,7 @@ dependencies = [
     "certifi>=2026.5.20",
     "pgvector>=0.3.6",
     "vobject>=0.9.9",
+    "pypdf>=4.0",
 ]
 
 [project.scripts]

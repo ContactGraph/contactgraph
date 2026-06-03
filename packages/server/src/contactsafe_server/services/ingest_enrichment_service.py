@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.config import Settings
-from contactsafe_server.db.models import EnrichmentRun, Person, PersonAlias, User, UserPersonObservation
+from contactsafe_server.db.models import EmploymentClaim, EnrichmentRun, Org, Person, PersonAlias, PersonAttributeClaim, User, UserPersonObservation
 from contactsafe_server.services.claim_writer import record_employment, record_person_attribute
 from contactsafe_server.services.email_parse import (
     BROADCAST_LOCAL_PARTS,
@@ -110,8 +110,8 @@ class IngestEnrichmentService:
         if self._has_web_enrichment_provider():
             limit: int = self._web_enrichment_limit()
             top_for_web = await self._load_top_people_by_tie_strength(user_id, limit=limit)
-            user_context: tuple[str | None, str | None] = await self._load_user_enrichment_context(
-                user_id
+            user_context: tuple[str | None, str | None, list[str] | None] = (
+                await self._load_user_enrichment_context(user_id)
             )
             await self._web_enrich_batch(
                 top_for_web,
@@ -210,12 +210,36 @@ class IngestEnrichmentService:
     async def _load_user_enrichment_context(
         self,
         user_id: uuid.UUID,
-    ) -> tuple[str | None, str | None]:
+    ) -> tuple[str | None, str | None, list[str] | None]:
+        """Return (user_name, user_location, user_context_hints)."""
         user: User | None = await self._db.get(User, user_id)
         if user is None:
-            return None, None
+            return None, None, None
         user_name: str | None = user.display_name or user.google_profile_name
-        return user_name, user.location
+
+        hints: list[str] = []
+        if user.person_id is not None:
+            org_result = await self._db.execute(
+                select(Org.canonical_name)
+                .join(EmploymentClaim, EmploymentClaim.org_id == Org.id)
+                .where(EmploymentClaim.person_id == user.person_id)
+            )
+            for (org_name,) in org_result.all():
+                if org_name and org_name not in hints:
+                    hints.append(org_name)
+
+            edu_result = await self._db.execute(
+                select(PersonAttributeClaim.value)
+                .where(
+                    PersonAttributeClaim.person_id == user.person_id,
+                    PersonAttributeClaim.kind == "education",
+                )
+            )
+            for (school_name,) in edu_result.all():
+                if school_name and school_name not in hints:
+                    hints.append(school_name)
+
+        return user_name, user.location, hints if hints else None
 
     async def _load_person_linkedin_url(self, person_id: uuid.UUID) -> str | None:
         result = await self._db.execute(

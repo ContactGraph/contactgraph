@@ -19,6 +19,8 @@ from contactsafe_core.contact_schemas import (
     OrgDetailResult,
     PersonDetailResult,
 )
+from datetime import date
+
 from contactsafe_core.enums import SessionStatus, SourceType, EnrichmentRunState, SyncState
 from contactsafe_core.schemas import (
     ConnectSourceResult,
@@ -35,11 +37,19 @@ from contactsafe_core.schemas import (
     SyncSourceResult,
     UpdateUserProfileRequest,
     UploadSourceResult,
+    UserExperience,
     UserProfileResult,
     ViewTrustedUsersResult,
 )
 
-from contactsafe_server.db.models import ConnectSession, Source, User
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from contactsafe_server.db.models import ConnectSession, EmploymentClaim, Org, PersonAttributeClaim, Source, User
+from contactsafe_server.services.claim_writer import record_employment
+from contactsafe_server.services.entity_resolution import EntityResolver
+from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
+from contactsafe_server.services.user_person_service import ensure_user_person
 from contactsafe_server.deps import (
     AppContext,
     build_oauth_server_service,
@@ -225,6 +235,50 @@ async def get_enrichment_status(
         return await enrichment.get_enrichment_status(user_id)
 
 
+async def _load_user_experiences(
+    db: AsyncSession,
+    user: User,
+) -> list[UserExperience]:
+    if user.person_id is None:
+        return []
+    result = await db.execute(
+        select(EmploymentClaim, Org.canonical_name)
+        .join(Org, EmploymentClaim.org_id == Org.id)
+        .where(EmploymentClaim.person_id == user.person_id)
+        .order_by(EmploymentClaim.is_current.desc(), EmploymentClaim.started_at.desc().nulls_last())
+    )
+    experiences: list[UserExperience] = []
+    for claim, org_name in result.all():
+        experiences.append(UserExperience(
+            id=claim.id,
+            company=org_name,
+            role=claim.role_title,
+            is_current=claim.is_current,
+            started_at=claim.started_at,
+            ended_at=claim.ended_at,
+        ))
+    return experiences
+
+
+async def _load_user_headline(
+    db: AsyncSession,
+    user: User,
+) -> str | None:
+    if user.person_id is None:
+        return None
+    result = await db.execute(
+        select(PersonAttributeClaim.value)
+        .where(
+            PersonAttributeClaim.person_id == user.person_id,
+            PersonAttributeClaim.kind == "headline",
+        )
+        .order_by(PersonAttributeClaim.confidence.desc())
+        .limit(1)
+    )
+    row: str | None = result.scalar_one_or_none()
+    return row
+
+
 async def get_user_profile(
     ctx: AppContext,
     user_id: UUID | None,
@@ -235,11 +289,15 @@ async def get_user_profile(
         user: User | None = await db.get(User, user_id)
         if user is None:
             return UserProfileResult(message="User not found.")
+        experiences: list[UserExperience] = await _load_user_experiences(db, user)
+        headline: str | None = await _load_user_headline(db, user)
         return UserProfileResult(
             email=user.email,
             display_name=user.display_name or user.google_profile_name,
+            headline=headline,
             location=user.location,
             google_profile_name=user.google_profile_name,
+            experiences=experiences,
             message="User profile loaded.",
         )
 
@@ -274,6 +332,108 @@ async def update_user_profile(
         )
 
 
+async def save_user_experience(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    experience_id: UUID | None = None,
+    company: str,
+    role: str | None = None,
+    is_current: bool = False,
+    started_at: date | None = None,
+    ended_at: date | None = None,
+) -> UserProfileResult:
+    if user_id is None:
+        return UserProfileResult(message="Authentication required. Provide a Bearer token.")
+    async with ctx.session_factory() as db:
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return UserProfileResult(message="User not found.")
+        person = await ensure_user_person(db, user)
+        resolver = EntityResolver(db)
+        org = await resolver.resolve_org(domain=None, name=company.strip())
+
+        if experience_id is not None:
+            claim: EmploymentClaim | None = await db.get(EmploymentClaim, experience_id)
+            if claim is not None and claim.person_id == person.id:
+                claim.org_id = org.id
+                claim.role_title = role
+                claim.is_current = is_current
+                claim.started_at = started_at
+                claim.ended_at = ended_at
+                await db.flush()
+            else:
+                raise ValueError("Experience not found or does not belong to user")
+        else:
+            await record_employment(
+                db,
+                person_id=person.id,
+                org_id=org.id,
+                role_title=role,
+                is_current=is_current,
+                started_at=started_at,
+                ended_at=ended_at,
+                contributor_user_id=user_id,
+                contributor_source_kind="user_manual",
+                confidence=1.0,
+            )
+
+        recompute = PersonProfileRecompute(db)
+        await recompute.recompute_persons([person.id])
+        await db.commit()
+        await db.refresh(user)
+
+        experiences: list[UserExperience] = await _load_user_experiences(db, user)
+        headline: str | None = await _load_user_headline(db, user)
+        return UserProfileResult(
+            email=user.email,
+            display_name=user.display_name or user.google_profile_name,
+            headline=headline,
+            location=user.location,
+            google_profile_name=user.google_profile_name,
+            experiences=experiences,
+            message="Experience saved.",
+        )
+
+
+async def delete_user_experience(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    experience_id: UUID,
+) -> UserProfileResult:
+    if user_id is None:
+        return UserProfileResult(message="Authentication required. Provide a Bearer token.")
+    async with ctx.session_factory() as db:
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return UserProfileResult(message="User not found.")
+        if user.person_id is None:
+            raise ValueError("No profile exists yet")
+
+        claim: EmploymentClaim | None = await db.get(EmploymentClaim, experience_id)
+        if claim is None or claim.person_id != user.person_id:
+            raise ValueError("Experience not found or does not belong to user")
+
+        await db.delete(claim)
+        recompute = PersonProfileRecompute(db)
+        await recompute.recompute_persons([user.person_id])
+        await db.commit()
+        await db.refresh(user)
+
+        experiences: list[UserExperience] = await _load_user_experiences(db, user)
+        headline: str | None = await _load_user_headline(db, user)
+        return UserProfileResult(
+            email=user.email,
+            display_name=user.display_name or user.google_profile_name,
+            headline=headline,
+            location=user.location,
+            google_profile_name=user.google_profile_name,
+            experiences=experiences,
+            message="Experience deleted.",
+        )
+
+
 async def upload_source(
     ctx: AppContext,
     user_id: UUID | None,
@@ -296,6 +456,7 @@ async def upload_source(
     if parsed_type not in {
         SourceType.PHONE_CONTACTS_UPLOAD,
         SourceType.LINKEDIN_CONNECTIONS_UPLOAD,
+        SourceType.LINKEDIN_PROFILE_UPLOAD,
     }:
         raise ValueError(f"upload_source not supported for {source_type}")
 

@@ -7,25 +7,33 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.enums import SourceConnectionStatus, SourceType, SyncState
-from contactsafe_server.db.models import Person, Source, UserPersonObservation
-from contactsafe_server.services.claim_writer import record_employment
+from contactsafe_server.config import Settings
+from contactsafe_server.db.models import Person, Source, User, UserPersonObservation
+from contactsafe_server.services.claim_writer import record_employment, record_person_attribute
 from contactsafe_server.services.entity_resolution import EntityResolver
 from contactsafe_server.services.linkedin_connections_parser import (
     ParsedLinkedInConnection,
     parse_linkedin_connections_csv,
 )
+from contactsafe_server.services.linkedin_profile_parser import (
+    ParsedLinkedInProfile,
+    parse_linkedin_profile_pdf,
+)
 from contactsafe_server.services.org_search import is_automation_or_generic_domain
+from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
 from contactsafe_server.services.phone_contacts_parser import (
     ParsedPhoneContact,
     parse_phone_contacts_upload,
 )
+from contactsafe_server.services.user_person_service import ensure_user_person
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
 class FileUploadImportService:
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(self, db: AsyncSession, settings: Settings | None = None) -> None:
         self._db: AsyncSession = db
+        self._settings: Settings = settings or Settings()
 
     async def run_sync(self, source_id: uuid.UUID) -> None:
         source: Source | None = await self._db.get(Source, source_id)
@@ -35,6 +43,7 @@ class FileUploadImportService:
         if source.source_type not in {
             SourceType.PHONE_CONTACTS_UPLOAD.value,
             SourceType.LINKEDIN_CONNECTIONS_UPLOAD.value,
+            SourceType.LINKEDIN_PROFILE_UPLOAD.value,
         }:
             raise ValueError(f"Unsupported upload source type {source.source_type}")
 
@@ -58,6 +67,8 @@ class FileUploadImportService:
 
             if source.source_type == SourceType.PHONE_CONTACTS_UPLOAD.value:
                 await self._ingest_phone_contacts(source, content, filename)
+            elif source.source_type == SourceType.LINKEDIN_PROFILE_UPLOAD.value:
+                await self._ingest_linkedin_profile(source, content)
             else:
                 await self._ingest_linkedin_connections(source, content)
 
@@ -268,4 +279,90 @@ class FileUploadImportService:
             await self._db.execute(stmt)
             source.contacts_found += 1
             source.contacts_resolved += 1
+        await self._db.flush()
+
+    async def _ingest_linkedin_profile(
+        self,
+        source: Source,
+        content_base64: str,
+    ) -> None:
+        profile: ParsedLinkedInProfile = await parse_linkedin_profile_pdf(
+            content_base64, self._settings,
+        )
+        user: User | None = await self._db.get(User, source.user_id)
+        if user is None:
+            raise ValueError("User not found for source")
+
+        person: Person = await ensure_user_person(self._db, user)
+        resolver = EntityResolver(self._db)
+        user_id: uuid.UUID = source.user_id
+        source_id: uuid.UUID = source.id
+
+        if profile.name and not user.display_name:
+            user.display_name = profile.name
+        if profile.location and not user.location:
+            user.location = profile.location
+
+        for exp in profile.experiences:
+            org = await resolver.resolve_org(domain=None, name=exp.company)
+            await record_employment(
+                self._db,
+                person_id=person.id,
+                org_id=org.id,
+                role_title=exp.title,
+                is_current=exp.is_current,
+                started_at=exp.start_date,
+                ended_at=exp.end_date,
+                contributor_user_id=user_id,
+                contributor_source_kind="linkedin_profile_upload",
+                contributor_source_id=source_id,
+                confidence=0.9,
+            )
+            source.contacts_found += 1
+            source.contacts_resolved += 1
+
+        for edu in profile.education:
+            await record_person_attribute(
+                self._db,
+                person_id=person.id,
+                kind="education",
+                value=edu.school,
+                contributor_user_id=user_id,
+                contributor_source_kind="linkedin_profile_upload",
+                contributor_source_id=source_id,
+                confidence=0.9,
+                evidence={
+                    "degree": edu.degree,
+                    "field_of_study": edu.field_of_study,
+                    "start_year": edu.start_year,
+                    "end_year": edu.end_year,
+                },
+            )
+
+        if profile.headline:
+            await record_person_attribute(
+                self._db,
+                person_id=person.id,
+                kind="headline",
+                value=profile.headline,
+                contributor_user_id=user_id,
+                contributor_source_kind="linkedin_profile_upload",
+                contributor_source_id=source_id,
+                confidence=0.9,
+            )
+
+        if profile.about:
+            await record_person_attribute(
+                self._db,
+                person_id=person.id,
+                kind="bio_summary",
+                value=profile.about[:500],
+                contributor_user_id=user_id,
+                contributor_source_kind="linkedin_profile_upload",
+                contributor_source_id=source_id,
+                confidence=0.9,
+            )
+
+        recompute = PersonProfileRecompute(self._db)
+        await recompute.recompute_persons([person.id])
         await self._db.flush()

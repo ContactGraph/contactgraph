@@ -8,7 +8,7 @@ creates duplicate rows.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -29,6 +29,8 @@ async def record_employment(
     org_id: uuid.UUID,
     role_title: str | None = None,
     is_current: bool = True,
+    started_at: date | None = None,
+    ended_at: date | None = None,
     contributor_user_id: uuid.UUID | None = None,
     contributor_source_kind: str,
     contributor_source_id: uuid.UUID | None = None,
@@ -40,6 +42,8 @@ async def record_employment(
         org_id=org_id,
         role_title=role_title,
         is_current=is_current,
+        started_at=started_at,
+        ended_at=ended_at,
         contributor_user_id=contributor_user_id,
         contributor_source_kind=contributor_source_kind,
         contributor_source_id=contributor_source_id,
@@ -52,6 +56,8 @@ async def record_employment(
         set_={
             "role_title": stmt.excluded.role_title,
             "is_current": stmt.excluded.is_current,
+            "started_at": stmt.excluded.started_at,
+            "ended_at": stmt.excluded.ended_at,
             "observed_at": stmt.excluded.observed_at,
             "confidence": func.greatest(EmploymentClaim.confidence, stmt.excluded.confidence),
             "evidence": stmt.excluded.evidence,

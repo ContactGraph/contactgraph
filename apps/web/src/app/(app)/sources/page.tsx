@@ -1,7 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Circle, Loader2, Plus, RefreshCw, Sparkles } from "lucide-react";
+import { CheckCircle2, Circle, Loader2, Plus, RefreshCw, Sparkles, User } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -43,6 +44,7 @@ type SetupStepId =
   | "gmail"
   | "calendar"
   | "phone"
+  | "linkedin_profile"
   | "linkedin"
   | "enrich";
 
@@ -73,10 +75,17 @@ const setupSteps: ReadonlyArray<SetupStep> = [
     optional: true,
   },
   {
-    id: "linkedin",
-    title: "Upload LinkedIn export",
+    id: "linkedin_profile",
+    title: "Set up your profile",
     description:
-      "Import Connections.csv before enriching — it dramatically improves identity matching.",
+      "Upload your LinkedIn PDF (Profile \u2192 Save to PDF) to help identify your contacts.",
+    optional: true,
+  },
+  {
+    id: "linkedin",
+    title: "Upload LinkedIn connections",
+    description:
+      "Import Connections.csv (Settings \u2192 Get a copy of your data, takes 24h) for identity matching.",
     optional: true,
   },
   {
@@ -112,6 +121,10 @@ function stepComplete(
       const source = sourceForType(sources, "phone_contacts_upload");
       return source !== undefined && source.sync_state === "complete";
     }
+    case "linkedin_profile": {
+      const source = sourceForType(sources, "linkedin_profile_upload");
+      return source !== undefined && source.sync_state === "complete";
+    }
     case "linkedin": {
       const source = sourceForType(sources, "linkedin_connections_upload");
       return source !== undefined && source.sync_state === "complete";
@@ -135,6 +148,7 @@ function stepInProgress(
     gmail: "google_mail",
     calendar: "google_calendar",
     phone: "phone_contacts_upload",
+    linkedin_profile: "linkedin_profile_upload",
     linkedin: "linkedin_connections_upload",
   };
   const sourceType: SourceType | undefined = typeMap[stepId];
@@ -578,6 +592,18 @@ export default function SourcesPage() {
                       </Button>
                     </>
                   ) : null}
+                  {step.id === "linkedin_profile" ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      asChild
+                    >
+                      <Link href="/profile">
+                        <User className="size-4" />
+                        Set up profile
+                      </Link>
+                    </Button>
+                  ) : null}
                   {step.id === "linkedin" ? (
                     <>
                       <input
@@ -687,7 +713,8 @@ export default function SourcesPage() {
                       syncMutation.isPending ||
                       source.sync_state === "syncing" ||
                       source.source_type === "phone_contacts_upload" ||
-                      source.source_type === "linkedin_connections_upload"
+                      source.source_type === "linkedin_connections_upload" ||
+                      source.source_type === "linkedin_profile_upload"
                     }
                   >
                     {source.sync_state === "syncing" ? "Syncing…" : "Sync now"}
