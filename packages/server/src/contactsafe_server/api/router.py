@@ -40,10 +40,12 @@ from contactsafe_core.schemas import (
     QueryNetworkRequest,
     QueryNetworkResult,
     SaveUserExperienceRequest,
+    SecondDegreeTargetCompaniesResult,
     SourceStatusResult,
     StartEnrichmentResult,
     SyncSourceRequest,
     SyncSourceResult,
+    TargetCompaniesResult,
     UpdateUserProfileRequest,
     UploadSourceRequest,
     UploadSourceResult,
@@ -390,6 +392,22 @@ async def api_query_network(
 @router.post("/describe-graph", response_model=DescribeGraphResult)
 async def api_describe_graph(ctx: Ctx, user_id: EffectiveUser) -> DescribeGraphResult:
     return await actions.describe_graph(ctx, user_id)
+
+
+@router.post("/get-target-companies", response_model=TargetCompaniesResult)
+async def api_get_target_companies(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> TargetCompaniesResult:
+    return await actions.get_target_companies(ctx, user_id)
+
+
+@router.post("/get-second-degree-target-companies", response_model=SecondDegreeTargetCompaniesResult)
+async def api_get_second_degree_target_companies(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> SecondDegreeTargetCompaniesResult:
+    return await actions.get_second_degree_target_companies(ctx, user_id)
 
 
 @router.post("/view-trusted-users", response_model=ViewTrustedUsersResult)

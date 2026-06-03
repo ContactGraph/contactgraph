@@ -9,7 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from contactsafe_core.enums import SourceConnectionStatus, SourceType, SyncState
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import Person, Source, User, UserPersonObservation
-from contactsafe_server.services.claim_writer import record_employment, record_person_attribute
+from contactsafe_server.services.claim_writer import (
+    record_employment,
+    record_person_attribute,
+    record_relationship,
+)
 from contactsafe_server.services.entity_resolution import EntityResolver
 from contactsafe_server.services.linkedin_connections_parser import (
     ParsedLinkedInConnection,
@@ -95,6 +99,10 @@ class FileUploadImportService:
         resolver = EntityResolver(self._db)
         user_id: uuid.UUID = source.user_id
         source_id: uuid.UUID = source.id
+        user: User | None = await self._db.get(User, user_id)
+        user_person: Person | None = None
+        if user is not None:
+            user_person = await ensure_user_person(self._db, user)
 
         for contact in contacts:
             if not contact.emails and not contact.phone_numbers:
@@ -189,6 +197,16 @@ class FileUploadImportService:
             )
             await self._db.execute(stmt)
 
+            if user_person is not None and user_person.id != person.id:
+                await record_relationship(
+                    self._db,
+                    person_a_id=user_person.id,
+                    person_b_id=person.id,
+                    kind="phone_contact",
+                    contributor_user_id=user_id,
+                    contributor_source_kind="phone_contacts_upload",
+                )
+
             if contact.org_name and contact.emails:
                 domain: str = contact.emails[0].rsplit("@", 1)[-1].lower()
                 if not is_automation_or_generic_domain(domain):
@@ -215,6 +233,11 @@ class FileUploadImportService:
     ) -> None:
         connections: list[ParsedLinkedInConnection] = parse_linkedin_connections_csv(content)
         resolver = EntityResolver(self._db)
+        user: User | None = await self._db.get(User, source.user_id)
+        user_person: Person | None = None
+        if user is not None:
+            user_person = await ensure_user_person(self._db, user)
+
         for connection in connections:
             emails: list[str] = [connection.email] if connection.email else []
             person = await resolver.resolve_person(
@@ -277,6 +300,17 @@ class FileUploadImportService:
                 },
             )
             await self._db.execute(stmt)
+
+            if user_person is not None and user_person.id != person.id:
+                await record_relationship(
+                    self._db,
+                    person_a_id=user_person.id,
+                    person_b_id=person.id,
+                    kind="linkedin_connection",
+                    contributor_user_id=source.user_id,
+                    contributor_source_kind="linkedin_connections_upload",
+                )
+
             source.contacts_found += 1
             source.contacts_resolved += 1
         await self._db.flush()

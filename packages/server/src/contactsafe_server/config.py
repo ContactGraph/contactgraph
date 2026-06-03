@@ -175,6 +175,10 @@ class Settings(BaseSettings):
         default=30,
         description="Days before re-querying web enrichment providers for a contact",
     )
+    employment_recency_days: int = Field(
+        default=365,
+        description="Max age (days) for a signal to count as current employment",
+    )
 
     @field_validator("database_url", mode="before")
     @classmethod

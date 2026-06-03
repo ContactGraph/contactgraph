@@ -32,9 +32,15 @@ from contactsafe_core.schemas import (
     PollConnectResult,
     QueryNetworkResult,
     SecondDegreeMatch,
+    SecondDegreeTargetCompaniesResult,
+    SecondDegreeTargetCompanySummary,
+    SecondDegreeTargetInsiderSummary,
     SourceStatusResult,
     StartEnrichmentResult,
     SyncSourceResult,
+    TargetCompaniesResult,
+    TargetCompanyInsiderSummary,
+    TargetCompanySummary,
     UpdateUserProfileRequest,
     UploadSourceResult,
     UserExperience,
@@ -63,6 +69,11 @@ from contactsafe_server.services.network_query_service import NetworkQueryServic
 from contactsafe_server.services.person_dedup_service import PersonDedupService
 from contactsafe_server.services.query_planner import QueryPlanner
 from contactsafe_server.services.source_service import SourceService
+from contactsafe_server.services.target_companies_service import (
+    SecondDegreeTargetCompanyMatch,
+    TargetCompaniesService,
+    TargetCompanyMatch,
+)
 from contactsafe_server.services.trust_list_service import TrustListService
 from contactsafe_server.utils import parse_source_id
 
@@ -629,6 +640,102 @@ async def describe_graph(
         except Exception:
             pass
         return result
+
+
+async def get_target_companies(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> TargetCompaniesResult:
+    if user_id is None:
+        return TargetCompaniesResult(
+            message="Authentication required. Provide a Bearer token.",
+        )
+
+    async with ctx.session_factory() as db:
+        sources: SourceService = build_source_service(db)
+        if not await sources.user_has_queryable_graph(user_id):
+            return TargetCompaniesResult(
+                message=(
+                    "Sync still running or not started. Complete onboarding and enrichment first."
+                ),
+            )
+
+        service = TargetCompaniesService(db)
+        matches: list[TargetCompanyMatch] = await service.list_first_degree(user_id)
+        companies: list[TargetCompanySummary] = [
+            TargetCompanySummary(
+                org_id=match.org_id,
+                org_name=match.org_name,
+                best_trust_score=match.best_trust_score,
+                insiders=[
+                    TargetCompanyInsiderSummary(
+                        person_id=insider.person_id,
+                        person_name=insider.person_name,
+                        person_role=insider.person_role,
+                        trust_score=insider.trust_score,
+                        relationship_kind=insider.relationship_kind,
+                    )
+                    for insider in match.insiders
+                ],
+            )
+            for match in matches
+        ]
+        return TargetCompaniesResult(
+            companies=companies,
+            message=f"Found {len(companies)} companies with high-trust connections.",
+        )
+
+
+async def get_second_degree_target_companies(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> SecondDegreeTargetCompaniesResult:
+    if user_id is None:
+        return SecondDegreeTargetCompaniesResult(
+            message="Authentication required. Provide a Bearer token.",
+        )
+
+    async with ctx.session_factory() as db:
+        trust_svc = TrustListService(db, ctx.settings.base_url)
+        member_ids: list[UUID] = await trust_svc.get_trust_member_user_ids(user_id)
+        if not member_ids:
+            return SecondDegreeTargetCompaniesResult(
+                message="Add trusted friends on the Trust List to unlock second-degree companies.",
+            )
+
+        private_by_member: dict[UUID, set[UUID]] = {}
+        for member_id in member_ids:
+            private_by_member[member_id] = await trust_svc.get_private_person_ids(member_id)
+
+        service = TargetCompaniesService(db)
+        matches: list[SecondDegreeTargetCompanyMatch] = await service.list_second_degree(
+            user_id,
+            member_ids,
+            private_person_ids_by_member=private_by_member,
+        )
+        companies: list[SecondDegreeTargetCompanySummary] = [
+            SecondDegreeTargetCompanySummary(
+                org_id=match.org_id,
+                org_name=match.org_name,
+                best_trust_score=match.best_trust_score,
+                insiders=[
+                    SecondDegreeTargetInsiderSummary(
+                        person_id=insider.person_id,
+                        person_name=insider.person_name,
+                        person_role=insider.person_role,
+                        bridge_user_id=insider.bridge_user_id,
+                        bridge_name=insider.bridge_name,
+                        trust_score=insider.trust_score,
+                    )
+                    for insider in match.insiders
+                ],
+            )
+            for match in matches
+        ]
+        return SecondDegreeTargetCompaniesResult(
+            companies=companies,
+            message=f"Found {len(companies)} companies via trusted friends' networks.",
+        )
 
 
 async def view_trusted_users(

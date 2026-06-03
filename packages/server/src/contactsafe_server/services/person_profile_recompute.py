@@ -10,9 +10,10 @@ import logging
 import re
 import uuid
 
-from sqlalchemy import and_, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from contactsafe_server.config import Settings, get_settings
 from contactsafe_server.db.models import (
     EmploymentClaim,
     Person,
@@ -20,13 +21,21 @@ from contactsafe_server.db.models import (
     UserPersonObservation,
 )
 from contactsafe_server.services.category_inference import infer_categories_from_contact
+from contactsafe_server.services.employment_ranking import (
+    employment_recency_window_days,
+    normalize_employment_claims,
+)
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
 class PersonProfileRecompute:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(self, session: AsyncSession, settings: Settings | None = None) -> None:
         self._session: AsyncSession = session
+        self._settings: Settings = settings or get_settings()
+        self._recency_days: int = employment_recency_window_days(
+            configured_days=self._settings.employment_recency_days,
+        )
 
     async def recompute_for_user(self, user_id: uuid.UUID) -> int:
         """Recompute derived person columns for every person observed by *user_id*.
@@ -58,18 +67,19 @@ class PersonProfileRecompute:
         return count
 
     async def _recompute_person(self, person_id: uuid.UUID) -> None:
-        # --- Employment: highest-confidence current employment ---
-        emp_stmt = (
-            select(EmploymentClaim)
-            .where(
-                EmploymentClaim.person_id == person_id,
-                EmploymentClaim.is_current.is_(True),
-            )
-            .order_by(EmploymentClaim.confidence.desc(), EmploymentClaim.observed_at.desc())
-            .limit(1)
+        # --- Employment: normalize claims and pick authoritative current ---
+        emp_stmt = select(EmploymentClaim).where(
+            EmploymentClaim.person_id == person_id,
         )
         emp_result = await self._session.execute(emp_stmt)
-        best_emp: EmploymentClaim | None = emp_result.scalar_one_or_none()
+        all_claims: list[EmploymentClaim] = list(emp_result.scalars().all())
+
+        last_interaction: datetime | None = await self._latest_genuine_interaction(person_id)
+        best_emp: EmploymentClaim | None = normalize_employment_claims(
+            all_claims,
+            last_genuine_interaction_at=last_interaction,
+            recency_days=self._recency_days,
+        )
 
         current_org_id: uuid.UUID | None = best_emp.org_id if best_emp else None
         current_org_name: str | None = None
@@ -77,6 +87,7 @@ class PersonProfileRecompute:
 
         if best_emp and best_emp.org_id:
             from contactsafe_server.db.models import Org
+
             org_stmt = select(Org.canonical_name).where(Org.id == best_emp.org_id)
             org_result = await self._session.execute(org_stmt)
             current_org_name = org_result.scalar_one_or_none()
@@ -161,3 +172,10 @@ class PersonProfileRecompute:
                 location=location,
             )
         )
+
+    async def _latest_genuine_interaction(self, person_id: uuid.UUID) -> datetime | None:
+        stmt = select(func.max(UserPersonObservation.last_genuine_interaction_at)).where(
+            UserPersonObservation.person_id == person_id,
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
