@@ -1,0 +1,542 @@
+"use client";
+
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  Briefcase,
+  Loader2,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
+import type {
+  DeleteUserExperienceRequest,
+  ListSourcesResult,
+  SaveUserExperienceRequest,
+  SourceType,
+  UploadSourceResult,
+  UserExperience,
+  UserProfileResult,
+} from "@/lib/api-types";
+import { proxyPost } from "@/lib/proxy-client";
+
+function formatDateRange(exp: UserExperience): string {
+  const parts: string[] = [];
+  if (exp.started_at) {
+    parts.push(
+      new Date(exp.started_at + "T00:00:00").toLocaleDateString(undefined, {
+        month: "short",
+        year: "numeric",
+      }),
+    );
+  }
+  if (exp.is_current) {
+    parts.push("Present");
+  } else if (exp.ended_at) {
+    parts.push(
+      new Date(exp.ended_at + "T00:00:00").toLocaleDateString(undefined, {
+        month: "short",
+        year: "numeric",
+      }),
+    );
+  }
+  return parts.join(" – ") || "";
+}
+
+interface ExperienceFormState {
+  id: string | null;
+  company: string;
+  role: string;
+  is_current: boolean;
+  started_at: string;
+  ended_at: string;
+}
+
+const EMPTY_FORM: ExperienceFormState = {
+  id: null,
+  company: "",
+  role: "",
+  is_current: false,
+  started_at: "",
+  ended_at: "",
+};
+
+export default function ProfilePage() {
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dialogOpen, setDialogOpen] = useState<boolean>(false);
+  const [form, setForm] = useState<ExperienceFormState>(EMPTY_FORM);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [profileSaved, setProfileSaved] = useState<boolean>(false);
+  const [awaitingSync, setAwaitingSync] = useState<boolean>(false);
+
+  const [profileName, setProfileName] = useState<string>("");
+  const [profileLocation, setProfileLocation] = useState<string>("");
+  const profileInitialized = useRef<boolean>(false);
+
+  const profileQuery = useQuery({
+    queryKey: ["user-profile"],
+    queryFn: () => proxyPost<UserProfileResult>("get-user-profile"),
+  });
+
+  const sourcesQuery = useQuery({
+    queryKey: ["sources"],
+    queryFn: () => proxyPost<ListSourcesResult>("list-sources"),
+    refetchInterval: awaitingSync ? 2000 : false,
+  });
+
+  useEffect(() => {
+    if (!awaitingSync) {
+      return;
+    }
+    const source = sourcesQuery.data?.sources.find(
+      (s) => s.source_type === "linkedin_profile_upload",
+    );
+    if (source === undefined) {
+      return;
+    }
+    if (source.sync_state === "complete" || source.sync_state === "failed") {
+      setAwaitingSync(false);
+      if (source.sync_state === "failed") {
+        setUploadError("Could not read that PDF. Try re-exporting from LinkedIn.");
+      }
+      profileInitialized.current = false;
+      void queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+    }
+  }, [awaitingSync, sourcesQuery.data, queryClient]);
+
+  const profile: UserProfileResult | undefined = profileQuery.data;
+
+  if (profile && !profileInitialized.current) {
+    profileInitialized.current = true;
+    setProfileName(profile.display_name ?? "");
+    setProfileLocation(profile.location ?? "");
+  }
+
+  const profileMutation = useMutation({
+    mutationFn: (payload: { display_name: string; location: string }) =>
+      proxyPost<UserProfileResult>("update-user-profile", payload),
+    onSuccess: async () => {
+      setProfileSaved(true);
+      profileInitialized.current = false;
+      await queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+      window.setTimeout(() => setProfileSaved(false), 2500);
+    },
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: (payload: SaveUserExperienceRequest) =>
+      proxyPost<UserProfileResult>("save-user-experience", payload),
+    onSuccess: async () => {
+      setDialogOpen(false);
+      setForm(EMPTY_FORM);
+      profileInitialized.current = false;
+      await queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (payload: DeleteUserExperienceRequest) =>
+      proxyPost<UserProfileResult>("delete-user-experience", payload),
+    onSuccess: async () => {
+      profileInitialized.current = false;
+      await queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+    },
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: (payload: {
+      source_type: SourceType;
+      filename: string;
+      content: string;
+    }) => proxyPost<UploadSourceResult>("upload-source", payload),
+    onSuccess: async () => {
+      setUploadError(null);
+      setAwaitingSync(true);
+      await queryClient.invalidateQueries({ queryKey: ["sources"] });
+    },
+    onError: (error: Error) => {
+      setUploadError(error.message);
+    },
+  });
+
+  const handlePdfUpload = useCallback(
+    async (file: File | undefined): Promise<void> => {
+      if (file === undefined) {
+        return;
+      }
+      const buffer: ArrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (const byte of bytes) {
+        binary += String.fromCharCode(byte);
+      }
+      const base64: string = btoa(binary);
+      uploadMutation.mutate({
+        source_type: "linkedin_profile_upload",
+        filename: file.name,
+        content: base64,
+      });
+    },
+    [uploadMutation],
+  );
+
+  const openEditDialog = useCallback((exp: UserExperience): void => {
+    setForm({
+      id: exp.id,
+      company: exp.company,
+      role: exp.role ?? "",
+      is_current: exp.is_current,
+      started_at: exp.started_at ?? "",
+      ended_at: exp.ended_at ?? "",
+    });
+    setDialogOpen(true);
+  }, []);
+
+  const openNewDialog = useCallback((): void => {
+    setForm(EMPTY_FORM);
+    setDialogOpen(true);
+  }, []);
+
+  const handleSave = useCallback((): void => {
+    if (!form.company.trim()) {
+      return;
+    }
+    saveMutation.mutate({
+      id: form.id,
+      company: form.company.trim(),
+      role: form.role.trim() || null,
+      is_current: form.is_current,
+      started_at: form.started_at || null,
+      ended_at: form.is_current ? null : form.ended_at || null,
+    });
+  }, [form, saveMutation]);
+
+  const experiences: UserExperience[] = profile?.experiences ?? [];
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Your Profile</h1>
+        <p className="text-muted-foreground">
+          Your professional background helps identify the right version of your
+          contacts during enrichment.
+        </p>
+      </div>
+
+      {uploadError ? (
+        <Alert variant="destructive">
+          <AlertDescription>{uploadError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {/* Basic info */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Basic info</CardTitle>
+          <CardDescription>
+            Name and email come from Google sign-in.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {profileQuery.isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="profile-email">Email</Label>
+                  <Input
+                    id="profile-email"
+                    value={profile?.email ?? ""}
+                    readOnly
+                    disabled
+                    className="bg-muted"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="profile-name">Name</Label>
+                  <Input
+                    id="profile-name"
+                    placeholder="Your name"
+                    value={profileName}
+                    onChange={(e) => setProfileName(e.target.value)}
+                  />
+                </div>
+                {profile?.headline ? (
+                  <div className="space-y-2 sm:col-span-2">
+                    <Label>Headline</Label>
+                    <p className="text-sm text-muted-foreground">
+                      {profile.headline}
+                    </p>
+                  </div>
+                ) : null}
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="profile-location">Location</Label>
+                  <Input
+                    id="profile-location"
+                    placeholder="San Francisco, CA"
+                    value={profileLocation}
+                    onChange={(e) => setProfileLocation(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={profileMutation.isPending}
+                  onClick={() =>
+                    profileMutation.mutate({
+                      display_name: profileName.trim(),
+                      location: profileLocation.trim(),
+                    })
+                  }
+                >
+                  {profileMutation.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : null}
+                  Save
+                </Button>
+                {profileSaved ? (
+                  <span className="text-sm text-muted-foreground">Saved</span>
+                ) : null}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Work experience */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-4">
+          <div>
+            <CardTitle>Work experience</CardTitle>
+            <CardDescription>
+              Your employment history — used as context when enriching contacts.
+            </CardDescription>
+          </div>
+          <Button variant="outline" size="sm" onClick={openNewDialog}>
+            <Plus className="size-4" />
+            Add
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {profileQuery.isLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-16 w-full" />
+            </div>
+          ) : experiences.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No experiences yet. Upload your LinkedIn PDF or add manually.
+            </p>
+          ) : (
+            <ul className="divide-y">
+              {experiences.map((exp) => (
+                <li
+                  key={exp.id ?? `${exp.company}-${exp.role}`}
+                  className="flex items-start justify-between gap-4 py-4"
+                >
+                  <div className="flex gap-3">
+                    <Briefcase className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+                    <div className="space-y-0.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium">{exp.company}</p>
+                        {exp.is_current ? (
+                          <Badge variant="secondary">Current</Badge>
+                        ) : null}
+                      </div>
+                      {exp.role ? (
+                        <p className="text-sm text-muted-foreground">
+                          {exp.role}
+                        </p>
+                      ) : null}
+                      {formatDateRange(exp) ? (
+                        <p className="text-xs text-muted-foreground">
+                          {formatDateRange(exp)}
+                        </p>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 gap-1">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8"
+                      onClick={() => openEditDialog(exp)}
+                    >
+                      <Pencil className="size-3.5" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="size-8 text-destructive"
+                      disabled={deleteMutation.isPending}
+                      onClick={() => {
+                        if (exp.id) {
+                          deleteMutation.mutate({ id: exp.id });
+                        }
+                      }}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* LinkedIn upload */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Import from LinkedIn</CardTitle>
+          <CardDescription>
+            Go to your LinkedIn profile, click &quot;More&quot; then &quot;Save
+            to PDF&quot;. Upload the file below to auto-fill your work history.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,application/pdf"
+            className="hidden"
+            onChange={(event) => {
+              void handlePdfUpload(event.target.files?.[0]);
+              event.target.value = "";
+            }}
+          />
+          <Button
+            variant="outline"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploadMutation.isPending || awaitingSync}
+          >
+            {uploadMutation.isPending || awaitingSync ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Upload className="size-4" />
+            )}
+            {awaitingSync ? "Processing PDF…" : "Upload LinkedIn PDF"}
+          </Button>
+        </CardContent>
+      </Card>
+
+      {/* Experience dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {form.id ? "Edit experience" : "Add experience"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="exp-company">Company</Label>
+              <Input
+                id="exp-company"
+                placeholder="Acme Corp"
+                value={form.company}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, company: e.target.value }))
+                }
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="exp-role">Role</Label>
+              <Input
+                id="exp-role"
+                placeholder="Software Engineer"
+                value={form.role}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, role: e.target.value }))
+                }
+              />
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="exp-start">Start date</Label>
+                <Input
+                  id="exp-start"
+                  type="date"
+                  value={form.started_at}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, started_at: e.target.value }))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="exp-end">End date</Label>
+                <Input
+                  id="exp-end"
+                  type="date"
+                  value={form.ended_at}
+                  disabled={form.is_current}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, ended_at: e.target.value }))
+                  }
+                />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={form.is_current}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    is_current: e.target.checked,
+                    ended_at: e.target.checked ? "" : prev.ended_at,
+                  }))
+                }
+              />
+              I currently work here
+            </label>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDialogOpen(false)}
+              disabled={saveMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={!form.company.trim() || saveMutation.isPending}
+            >
+              {saveMutation.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : null}
+              Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

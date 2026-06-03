@@ -29,6 +29,7 @@ from contactsafe_core.contact_schemas import (
 from contactsafe_core.schemas import (
     ConnectSourceRequest,
     ConnectSourceResult,
+    DeleteUserExperienceRequest,
     DescribeGraphResult,
     EditTrustedUsersRequest,
     EditTrustedUsersResult,
@@ -38,6 +39,7 @@ from contactsafe_core.schemas import (
     PollConnectResult,
     QueryNetworkRequest,
     QueryNetworkResult,
+    SaveUserExperienceRequest,
     SourceStatusResult,
     StartEnrichmentResult,
     SyncSourceRequest,
@@ -288,6 +290,43 @@ async def api_update_user_profile(
         display_name=body.display_name,
         location=body.location,
     )
+
+
+@router.post("/save-user-experience", response_model=UserProfileResult)
+async def api_save_user_experience(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: SaveUserExperienceRequest,
+) -> UserProfileResult:
+    try:
+        return await actions.save_user_experience(
+            ctx,
+            user_id,
+            experience_id=body.id,
+            company=body.company,
+            role=body.role,
+            is_current=body.is_current,
+            started_at=body.started_at,
+            ended_at=body.ended_at,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/delete-user-experience", response_model=UserProfileResult)
+async def api_delete_user_experience(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: DeleteUserExperienceRequest,
+) -> UserProfileResult:
+    try:
+        return await actions.delete_user_experience(
+            ctx,
+            user_id,
+            experience_id=body.id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/upload-source", response_model=UploadSourceResult)

@@ -7,6 +7,7 @@ export type SourceType =
   | "google_calendar"
   | "google_contacts"
   | "linkedin_connections_upload"
+  | "linkedin_profile_upload"
   | "phone_contacts_upload";
 
 export type SourceConnectionStatus =
@@ -134,17 +135,41 @@ export interface UploadSourceResult {
   system_messages: string[];
 }
 
+export interface UserExperience {
+  id: string | null;
+  company: string;
+  role: string | null;
+  is_current: boolean;
+  started_at: string | null;
+  ended_at: string | null;
+}
+
 export interface UserProfileResult {
   email: string | null;
   display_name: string | null;
+  headline: string | null;
   location: string | null;
   google_profile_name: string | null;
+  experiences: UserExperience[];
   message: string;
 }
 
 export interface UpdateUserProfileRequest {
   display_name?: string | null;
   location?: string | null;
+}
+
+export interface SaveUserExperienceRequest {
+  id?: string | null;
+  company: string;
+  role?: string | null;
+  is_current?: boolean;
+  started_at?: string | null;
+  ended_at?: string | null;
+}
+
+export interface DeleteUserExperienceRequest {
+  id: string;
 }
 
 export interface PersonMatch {
