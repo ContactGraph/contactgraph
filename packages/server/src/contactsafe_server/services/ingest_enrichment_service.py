@@ -101,8 +101,17 @@ class IngestEnrichmentService:
             if obs.is_automated or obs.is_broadcast:
                 continue
 
-            await self._heuristic_enrich(person, acc, user_id=user_id)
-            await self._signature_enrich(person, acc, user_id=user_id)
+            try:
+                async with self._db.begin_nested():
+                    await self._heuristic_enrich(person, acc, user_id=user_id)
+                    await self._signature_enrich(person, acc, user_id=user_id)
+            except Exception:
+                logger.warning(
+                    "Enrichment failed for %s (%s), skipping",
+                    person.canonical_name,
+                    primary_email,
+                    exc_info=True,
+                )
             enriched_count += 1
             if run is not None:
                 run.contacts_enriched = enriched_count
