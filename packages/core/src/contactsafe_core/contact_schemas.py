@@ -40,6 +40,12 @@ class ListPeopleResult(BaseModel):
     message: str
 
 
+class DedupPersonsResult(BaseModel):
+    groups_merged: int = 0
+    persons_removed: int = 0
+    message: str
+
+
 class PersonDetailResult(BaseModel):
     person_id: UUID
     first_name: str

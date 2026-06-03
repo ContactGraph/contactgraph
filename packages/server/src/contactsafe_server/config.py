@@ -102,6 +102,15 @@ class Settings(BaseSettings):
         description="Page size for People API connections.list (max 1000)",
     )
 
+    web_base_url: str | None = Field(
+        default=None,
+        description="Public web app URL for upload links; defaults to BASE_URL",
+    )
+    upload_max_file_size_mb: int = Field(
+        default=50,
+        description="Max VCF/CSV upload size in MB",
+    )
+
     openai_api_key: str | None = Field(default=None, description="OpenAI API key for query planning")
     openai_base_url: str = Field(default="https://api.openai.com/v1")
     openai_query_model: str = Field(default="gpt-4o-mini")
@@ -195,6 +204,17 @@ class Settings(BaseSettings):
     @property
     def oauth_start_url_template(self) -> str:
         return f"{self.base_url.rstrip('/')}/oauth/start/{{session_id}}"
+
+    @property
+    def effective_web_base_url(self) -> str:
+        return (self.web_base_url or self.base_url).rstrip("/")
+
+    def upload_url_for_source(self, source_id: object) -> str:
+        return f"{self.effective_web_base_url}/sources/upload/{source_id}"
+
+    @property
+    def upload_max_file_size_bytes(self) -> int:
+        return self.upload_max_file_size_mb * 1024 * 1024
 
     @property
     def effective_jwt_signing_key(self) -> str:

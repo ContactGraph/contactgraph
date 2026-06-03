@@ -119,6 +119,58 @@ async def test_resolve_org_by_name_only(db_session: AsyncSession) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def test_resolve_person_merges_by_canonical_name(db_session: AsyncSession) -> None:
+    resolver = EntityResolver(db_session)
+    p1 = await resolver.resolve_person(
+        emails=["heatherehughes@gmail.com"],
+        display_name="Heather Hughes",
+    )
+    p2 = await resolver.resolve_person(
+        emails=[],
+        display_name="Heather Hughes",
+        phone="510-393-4698",
+    )
+    assert p1.id == p2.id
+
+    result = await db_session.execute(
+        select(PersonAlias).where(PersonAlias.person_id == p1.id)
+    )
+    alias_kinds: set[str] = {alias.kind for alias in result.scalars().all()}
+    assert "email" in alias_kinds
+    assert "phone" in alias_kinds
+
+
+async def test_resolve_person_name_match_is_case_insensitive(
+    db_session: AsyncSession,
+) -> None:
+    resolver = EntityResolver(db_session)
+    p1 = await resolver.resolve_person(
+        emails=["alice@example.com"],
+        display_name="Alice Smith",
+    )
+    p2 = await resolver.resolve_person(
+        emails=[],
+        display_name="  alice smith  ",
+        phone="+14155551234",
+    )
+    assert p1.id == p2.id
+
+
+async def test_resolve_person_different_names_remain_separate(
+    db_session: AsyncSession,
+) -> None:
+    resolver = EntityResolver(db_session)
+    p1 = await resolver.resolve_person(
+        emails=["a@test.com"],
+        display_name="Alice Smith",
+    )
+    p2 = await resolver.resolve_person(
+        emails=["b@test.com"],
+        display_name="Bob Jones",
+    )
+    assert p1.id != p2.id
+
+
 async def test_resolve_person_by_phone(db_session: AsyncSession) -> None:
     resolver = EntityResolver(db_session)
     p1 = await resolver.resolve_person(

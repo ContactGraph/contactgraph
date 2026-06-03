@@ -13,12 +13,13 @@ from uuid import UUID
 from datetime import UTC, datetime
 
 from contactsafe_core.contact_schemas import (
+    DedupPersonsResult,
     ListOrgsResult,
     ListPeopleResult,
     OrgDetailResult,
     PersonDetailResult,
 )
-from contactsafe_core.enums import SessionStatus, SourceType, EnrichmentRunState
+from contactsafe_core.enums import SessionStatus, SourceType, EnrichmentRunState, SyncState
 from contactsafe_core.schemas import (
     ConnectSourceResult,
     DescribeGraphResult,
@@ -36,7 +37,7 @@ from contactsafe_core.schemas import (
     ViewTrustedUsersResult,
 )
 
-from contactsafe_server.db.models import ConnectSession, User
+from contactsafe_server.db.models import ConnectSession, Source, User
 from contactsafe_server.deps import (
     AppContext,
     build_oauth_server_service,
@@ -47,12 +48,18 @@ from contactsafe_server.deps import (
 from contactsafe_server.services.contacts_service import ContactsService
 from contactsafe_server.services.graph_summary_service import GraphSummaryService
 from contactsafe_server.services.network_query_service import NetworkQueryService
+from contactsafe_server.services.person_dedup_service import PersonDedupService
 from contactsafe_server.services.query_planner import QueryPlanner
 from contactsafe_server.services.source_service import SourceService
 from contactsafe_server.services.trust_list_service import TrustListService
 from contactsafe_server.utils import parse_source_id
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+_PHONE_CONTACTS_UPLOAD_INSTRUCTIONS: str = (
+    "On iPhone: Settings > Contacts > Export, then upload the .vcf file. "
+    "Or visit icloud.com/contacts, select all, export vCard."
+)
 
 
 async def connect_source(
@@ -66,6 +73,33 @@ async def connect_source(
         parsed_type: SourceType = SourceType(source_type)
     except ValueError as exc:
         raise ValueError(f"Unknown source_type: {source_type}") from exc
+
+    if parsed_type == SourceType.PHONE_CONTACTS_UPLOAD:
+        if user_id is None:
+            raise ValueError("Authentication required to add phone contacts.")
+        async with ctx.session_factory() as db:
+            user: User | None = await db.get(User, user_id)
+            if user is None:
+                raise ValueError("User not found")
+            sources: SourceService = build_source_service(db)
+            source = await sources.ensure_phone_contacts_source(user_id, user.email)
+            upload_url: str = ctx.settings.upload_url_for_source(source.id)
+            already_uploaded: bool = (
+                source.upload_payload is not None
+                and source.sync_state == SyncState.COMPLETE.value
+            )
+            await db.commit()
+            return ConnectSourceResult(
+                connect_session_id=source.id,
+                oauth_url="",
+                upload_url=upload_url,
+                upload_instructions=_PHONE_CONTACTS_UPLOAD_INSTRUCTIONS,
+                status=SessionStatus.CONNECTED,
+                source_id=source.id,
+                email=user.email,
+                message="Upload your phone contacts at the URL above.",
+                already_connected=already_uploaded,
+            )
 
     if parsed_type == SourceType.GOOGLE_CONTACTS:
         parsed_type = SourceType.GOOGLE_MAIL
@@ -199,6 +233,10 @@ async def upload_source(
 ) -> UploadSourceResult:
     if user_id is None:
         raise ValueError("Authentication required. Provide a Bearer token.")
+    if len(content.encode("utf-8")) > ctx.settings.upload_max_file_size_bytes:
+        raise ValueError(
+            f"File exceeds {ctx.settings.upload_max_file_size_mb}MB limit"
+        )
     try:
         parsed_type: SourceType = SourceType(source_type)
     except ValueError as exc:
@@ -218,6 +256,7 @@ async def upload_source(
             filename=filename,
             content=content,
         )
+        await db.commit()
         sync_result: SyncSourceResult = await sources.request_sync(source.id)
         await db.commit()
         return UploadSourceResult(
@@ -226,6 +265,43 @@ async def upload_source(
             sync_state=sync_result.sync_state,
             message=sync_result.message,
         )
+
+
+async def upload_contacts(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    source_id: str,
+    filename: str,
+    content: str,
+) -> SyncSourceResult:
+    """Upload a VCF/CSV file to an existing phone_contacts_upload source."""
+    if user_id is None:
+        raise ValueError("Authentication required. Provide a Bearer token.")
+    if len(content.encode("utf-8")) > ctx.settings.upload_max_file_size_bytes:
+        raise ValueError(
+            f"File exceeds {ctx.settings.upload_max_file_size_mb}MB limit"
+        )
+
+    source_uuid: UUID = parse_source_id(source_id)
+    async with ctx.session_factory() as db:
+        source: Source | None = await db.get(Source, source_uuid)
+        if source is None:
+            raise ValueError(f"Unknown source_id: {source_id}")
+        if source.user_id != user_id:
+            raise ValueError(f"Unknown source_id: {source_id}")
+        if source.source_type != SourceType.PHONE_CONTACTS_UPLOAD.value:
+            raise ValueError("Source is not a phone contacts upload source")
+
+        source.upload_payload = {"filename": filename, "content": content}
+        source.sync_state = SyncState.PENDING.value
+        source.sync_error = None
+        await db.commit()
+
+        sources: SourceService = build_source_service(db)
+        result: SyncSourceResult = await sources.request_sync(source.id)
+        await db.commit()
+        return result
 
 
 async def query_network(
@@ -492,3 +568,16 @@ async def get_org(
         if detail is None:
             raise ValueError(f"Organization not found: {org_id}")
         return detail
+
+
+async def dedup_persons(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> DedupPersonsResult:
+    if user_id is None:
+        raise ValueError("Authentication required. Provide a Bearer token.")
+    async with ctx.session_factory() as db:
+        service: PersonDedupService = PersonDedupService(db)
+        result: DedupPersonsResult = await service.dedup_for_user(user_id)
+        await db.commit()
+        return result

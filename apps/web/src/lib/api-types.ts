@@ -52,6 +52,8 @@ export interface ConnectSourceResult {
   access_token: string | null;
   refresh_token: string | null;
   system_messages: string[];
+  upload_url: string | null;
+  upload_instructions: string | null;
 }
 
 export interface PollConnectResult {
