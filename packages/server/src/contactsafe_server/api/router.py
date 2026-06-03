@@ -42,8 +42,10 @@ from contactsafe_core.schemas import (
     StartEnrichmentResult,
     SyncSourceRequest,
     SyncSourceResult,
+    UpdateUserProfileRequest,
     UploadSourceRequest,
     UploadSourceResult,
+    UserProfileResult,
     ViewTrustedUsersResult,
 )
 from contactsafe_server import actions
@@ -267,6 +269,25 @@ async def api_get_enrichment_status(
     user_id: EffectiveUser,
 ) -> EnrichmentStatusResult:
     return await actions.get_enrichment_status(ctx, user_id)
+
+
+@router.post("/get-user-profile", response_model=UserProfileResult)
+async def api_get_user_profile(ctx: Ctx, user_id: EffectiveUser) -> UserProfileResult:
+    return await actions.get_user_profile(ctx, user_id)
+
+
+@router.post("/update-user-profile", response_model=UserProfileResult)
+async def api_update_user_profile(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: UpdateUserProfileRequest,
+) -> UserProfileResult:
+    return await actions.update_user_profile(
+        ctx,
+        user_id,
+        display_name=body.display_name,
+        location=body.location,
+    )
 
 
 @router.post("/upload-source", response_model=UploadSourceResult)

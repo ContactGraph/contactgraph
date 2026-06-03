@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.config import Settings
-from contactsafe_server.db.models import EnrichmentRun, Person, PersonAlias, UserPersonObservation
+from contactsafe_server.db.models import EnrichmentRun, Person, PersonAlias, User, UserPersonObservation
 from contactsafe_server.services.claim_writer import record_employment, record_person_attribute
 from contactsafe_server.services.email_parse import (
     BROADCAST_LOCAL_PARTS,
@@ -27,10 +27,8 @@ from contactsafe_server.services.person_discovery_service import PersonDiscovery
 from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
 from contactsafe_server.services.signature_enrichment import parse_signature_from_snippets
 from contactsafe_server.services.user_org_observation_service import rebuild_user_org_observations
-from contactsafe_server.services.web_enrichment import (
-    extract_hints_from_web_hits,
-    extract_social_profiles_from_hits,
-)
+from contactsafe_server.services.web_enrichment import extract_hints_from_web_hits
+from contactsafe_server.services.web_hit_verification import verify_web_hits
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -112,7 +110,16 @@ class IngestEnrichmentService:
         if self._has_web_enrichment_provider():
             limit: int = self._web_enrichment_limit()
             top_for_web = await self._load_top_people_by_tie_strength(user_id, limit=limit)
-            await self._web_enrich_batch(top_for_web, contact_by_email, user_id=user_id)
+            user_context: tuple[str | None, str | None] = await self._load_user_enrichment_context(
+                user_id
+            )
+            await self._web_enrich_batch(
+                top_for_web,
+                contact_by_email,
+                user_id=user_id,
+                user_name=user_context[0],
+                user_location=user_context[1],
+            )
 
         if self._settings.openai_api_key:
             top_for_llm = await self._load_top_people_by_tie_strength(
@@ -199,6 +206,26 @@ class IngestEnrichmentService:
             .limit(limit)
         )
         return list(result.scalars().unique().all())
+
+    async def _load_user_enrichment_context(
+        self,
+        user_id: uuid.UUID,
+    ) -> tuple[str | None, str | None]:
+        user: User | None = await self._db.get(User, user_id)
+        if user is None:
+            return None, None
+        user_name: str | None = user.display_name or user.google_profile_name
+        return user_name, user.location
+
+    async def _load_person_linkedin_url(self, person_id: uuid.UUID) -> str | None:
+        result = await self._db.execute(
+            select(PersonAlias.value).where(
+                PersonAlias.person_id == person_id,
+                PersonAlias.kind == "linkedin_url",
+            ).limit(1)
+        )
+        linkedin_url: str | None = result.scalar_one_or_none()
+        return linkedin_url
 
     async def _heuristic_enrich(
         self,
@@ -336,6 +363,8 @@ class IngestEnrichmentService:
         contact_by_email: dict[str, ContactAccumulator],
         *,
         user_id: uuid.UUID,
+        user_name: str | None = None,
+        user_location: str | None = None,
     ) -> None:
         for person in people:
             email: str = person.primary_email or ""
@@ -346,11 +375,14 @@ class IngestEnrichmentService:
                 continue
 
             acc: ContactAccumulator | None = contact_by_email.get(email)
+            known_linkedin_url: str | None = await self._load_person_linkedin_url(person.id)
             try:
                 discovery = await self._discovery.discover_person(
                     name=person.canonical_name,
                     email=email,
                     org_hint=person.current_org_name,
+                    user_name=user_name,
+                    user_location=user_location,
                 )
             except Exception:
                 logger.exception("Web discovery failed for %s", email)
@@ -377,9 +409,23 @@ class IngestEnrichmentService:
             if not hits and not discovery.posts:
                 continue
 
+            from contactsafe_server.services.web_enrichment import (
+                extract_social_profiles_from_hits,
+            )
+
+            all_social_profiles: dict[str, str] = extract_social_profiles_from_hits(hits)
+            verified = verify_web_hits(
+                hits=discovery.employer_hits or hits,
+                email=email,
+                display_name=person.canonical_name,
+                org_hint=person.current_org_name,
+                known_linkedin_url=known_linkedin_url,
+                social_profiles=all_social_profiles,
+            )
+
             activity_blob: str = self._discovery.activity_blob(discovery)
             web_hints = extract_hints_from_web_hits(
-                hits=discovery.employer_hits or hits,
+                hits=verified.employer_hits,
                 email=email,
                 display_name=person.canonical_name,
                 org_hint=person.current_org_name,
@@ -388,9 +434,14 @@ class IngestEnrichmentService:
             )
 
             source_kind: str = provider.split(":")[0]
+            claim_confidence: float = verified.confidence
 
-            if web_hints.org_name and should_apply_enrichment_org(
-                primary_email=email, proposed_org=web_hints.org_name
+            if (
+                not verified.skip_employment
+                and web_hints.org_name
+                and should_apply_enrichment_org(
+                    primary_email=email, proposed_org=web_hints.org_name
+                )
             ):
                 domain: str | None = None
                 if "@" in email:
@@ -405,21 +456,23 @@ class IngestEnrichmentService:
                     role_title=web_hints.current_role,
                     contributor_user_id=user_id,
                     contributor_source_kind=source_kind,
-                    confidence=0.7,
+                    confidence=claim_confidence,
                 )
 
-            for cat in web_hints.categories:
-                await record_person_attribute(
-                    self._db,
-                    person_id=person.id,
-                    kind="category",
-                    value=cat.lower(),
-                    contributor_user_id=user_id,
-                    contributor_source_kind=source_kind,
-                    confidence=0.65,
-                )
+            if not verified.skip_categories:
+                for cat in web_hints.categories:
+                    await record_person_attribute(
+                        self._db,
+                        person_id=person.id,
+                        kind="category",
+                        value=cat.lower(),
+                        contributor_user_id=user_id,
+                        contributor_source_kind=source_kind,
+                        confidence=claim_confidence,
+                    )
 
-            for platform, url in web_hints.social_profiles.items():
+            social_profiles_to_write: dict[str, str] = verified.verified_social_profiles
+            for platform, url in social_profiles_to_write.items():
                 await record_person_attribute(
                     self._db,
                     person_id=person.id,
@@ -443,7 +496,7 @@ class IngestEnrichmentService:
                             alias_kind, url,
                         )
 
-            if activity_blob.strip():
+            if activity_blob.strip() and not verified.skip_employment:
                 await record_person_attribute(
                     self._db,
                     person_id=person.id,

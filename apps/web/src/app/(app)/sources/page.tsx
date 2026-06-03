@@ -15,6 +15,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
   ConnectSourceResult,
@@ -27,6 +29,7 @@ import type {
   SyncSourceResult,
   SyncState,
   UploadSourceResult,
+  UserProfileResult,
 } from "@/lib/api-types";
 import { formatSourceType, SyncStateBadge } from "@/lib/formatters";
 import { proxyPost } from "@/lib/proxy-client";
@@ -72,14 +75,15 @@ const setupSteps: ReadonlyArray<SetupStep> = [
   {
     id: "linkedin",
     title: "Upload LinkedIn export",
-    description: "Import Connections.csv when you have your LinkedIn data export.",
+    description:
+      "Import Connections.csv before enriching — it dramatically improves identity matching.",
     optional: true,
   },
   {
     id: "enrich",
     title: "Enrich contacts",
     description:
-      "Find current employers and recent activity for your top contacts (uses web search).",
+      "Find where your contacts work now. Add your name and location below first for best results.",
   },
 ];
 
@@ -159,6 +163,10 @@ export default function SourcesPage() {
   const [connectMessage, setConnectMessage] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [profileName, setProfileName] = useState<string>("");
+  const [profileEmail, setProfileEmail] = useState<string>("");
+  const [profileLocation, setProfileLocation] = useState<string>("");
+  const [profileSaved, setProfileSaved] = useState<boolean>(false);
 
   const clearPollTimer = useCallback((): void => {
     if (pollTimerRef.current) {
@@ -193,6 +201,31 @@ export default function SourcesPage() {
       const state: EnrichmentStatusResult["state"] | undefined =
         query.state.data?.state;
       return state === "running" ? 4000 : false;
+    },
+  });
+
+  const profileQuery = useQuery({
+    queryKey: ["user-profile"],
+    queryFn: () => proxyPost<UserProfileResult>("get-user-profile"),
+  });
+
+  useEffect(() => {
+    const profile: UserProfileResult | undefined = profileQuery.data;
+    if (profile === undefined) {
+      return;
+    }
+    setProfileName(profile.display_name ?? "");
+    setProfileEmail(profile.email ?? "");
+    setProfileLocation(profile.location ?? "");
+  }, [profileQuery.data]);
+
+  const profileMutation = useMutation({
+    mutationFn: (payload: { display_name: string; location: string }) =>
+      proxyPost<UserProfileResult>("update-user-profile", payload),
+    onSuccess: async () => {
+      setProfileSaved(true);
+      await queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+      window.setTimeout(() => setProfileSaved(false), 2500);
     },
   });
 
@@ -364,6 +397,75 @@ export default function SourcesPage() {
           <AlertDescription>{connectMessage}</AlertDescription>
         </Alert>
       ) : null}
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Your info</CardTitle>
+          <CardDescription>
+            Name and email come from Google sign-in. Location helps enrichment
+            identify the right person for common names.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {profileQuery.isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : (
+            <>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="profile-email">Your email</Label>
+                  <Input
+                    id="profile-email"
+                    value={profileEmail}
+                    readOnly
+                    disabled
+                    className="bg-muted"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="profile-name">Your name</Label>
+                  <Input
+                    id="profile-name"
+                    placeholder="From Google account"
+                    value={profileName}
+                    onChange={(event) => setProfileName(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-2 sm:col-span-2">
+                  <Label htmlFor="profile-location">Your location</Label>
+                  <Input
+                    id="profile-location"
+                    placeholder="San Francisco, CA"
+                    value={profileLocation}
+                    onChange={(event) => setProfileLocation(event.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={profileMutation.isPending}
+                  onClick={() =>
+                    profileMutation.mutate({
+                      display_name: profileName.trim(),
+                      location: profileLocation.trim(),
+                    })
+                  }
+                >
+                  {profileMutation.isPending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : null}
+                  Save
+                </Button>
+                {profileSaved ? (
+                  <span className="text-sm text-muted-foreground">Saved</span>
+                ) : null}
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

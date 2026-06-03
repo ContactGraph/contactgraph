@@ -200,14 +200,14 @@ class OAuthService:
         """
         existing_user: User | None = await self._find_user_by_email(email)
         if existing_user is not None:
-            existing_user.google_profile_name = userinfo.get("name")
-            existing_user.google_profile_picture = userinfo.get("picture")
+            _apply_google_userinfo(existing_user, userinfo)
             return existing_user
 
         if session.user_id is not None:
             user = await self._db.get(User, session.user_id)
             if user is None:
                 raise ValueError("Session references a non-existent user")
+            _seed_display_name_if_empty(user, userinfo)
             identity = UserIdentity(
                 user_id=user.id,
                 kind=IdentityKind.EMAIL.value,
@@ -219,10 +219,12 @@ class OAuthService:
             await self._db.flush()
             return user
 
+        google_name: str | None = _google_display_name(userinfo)
         user = User(
             email=email,
-            google_profile_name=userinfo.get("name"),
-            google_profile_picture=userinfo.get("picture"),
+            google_profile_name=google_name,
+            google_profile_picture=_google_picture_url(userinfo),
+            display_name=google_name,
         )
         self._db.add(user)
         await self._db.flush()
@@ -294,3 +296,38 @@ class OAuthService:
 
     async def _get_session(self, session_id: uuid.UUID) -> ConnectSession | None:
         return await self._db.get(ConnectSession, session_id)
+
+
+def _google_display_name(userinfo: GoogleUserInfo) -> str | None:
+    raw: str | None = userinfo.get("name")
+    if not isinstance(raw, str):
+        return None
+    cleaned: str = raw.strip()
+    return cleaned or None
+
+
+def _google_picture_url(userinfo: GoogleUserInfo) -> str | None:
+    raw: str | None = userinfo.get("picture")
+    if not isinstance(raw, str):
+        return None
+    cleaned: str = raw.strip()
+    return cleaned or None
+
+
+def _seed_display_name_if_empty(user: User, userinfo: GoogleUserInfo) -> None:
+    if user.display_name:
+        return
+    seed: str | None = user.google_profile_name or _google_display_name(userinfo)
+    if seed:
+        user.display_name = seed
+
+
+def _apply_google_userinfo(user: User, userinfo: GoogleUserInfo) -> None:
+    name: str | None = _google_display_name(userinfo)
+    picture: str | None = _google_picture_url(userinfo)
+    if picture is not None:
+        user.google_profile_picture = picture
+    if name is not None:
+        user.google_profile_name = name
+        if not user.display_name:
+            user.display_name = name

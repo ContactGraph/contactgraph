@@ -20,13 +20,25 @@ def test_build_employer_discovery_query_includes_domain() -> None:
     query: str = build_employer_discovery_query("Jane Doe", "jane@acmeventures.com", "Acme Ventures")
     assert "Jane Doe" in query
     assert "acmeventures.com" in query
-    assert "investor" in query
+    assert "investor" not in query
+
+
+def test_build_employer_discovery_query_includes_location_and_context() -> None:
+    query: str = build_employer_discovery_query(
+        "Jane Doe",
+        "jane@gmail.com",
+        None,
+        user_location="San Francisco, CA",
+        context_hints=["Lincoln Elementary"],
+    )
+    assert "San Francisco" in query
+    assert "Lincoln Elementary" in query
 
 
 def test_build_activity_discovery_query() -> None:
-    query: str = build_activity_discovery_query("Jane Doe", "Acme Ventures")
+    query: str = build_activity_discovery_query("Jane Doe", "Acme Ventures", user_location="Boston")
     assert "bluesky" in query
-    assert "github" in query
+    assert "Boston" in query
 
 
 def test_exa_parse_results_with_provider() -> None:

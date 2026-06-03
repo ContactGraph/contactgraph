@@ -33,7 +33,9 @@ from contactsafe_core.schemas import (
     SourceStatusResult,
     StartEnrichmentResult,
     SyncSourceResult,
+    UpdateUserProfileRequest,
     UploadSourceResult,
+    UserProfileResult,
     ViewTrustedUsersResult,
 )
 
@@ -221,6 +223,55 @@ async def get_enrichment_status(
     async with ctx.session_factory() as db:
         enrichment = build_enrichment_service(db)
         return await enrichment.get_enrichment_status(user_id)
+
+
+async def get_user_profile(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> UserProfileResult:
+    if user_id is None:
+        return UserProfileResult(message="Authentication required. Provide a Bearer token.")
+    async with ctx.session_factory() as db:
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return UserProfileResult(message="User not found.")
+        return UserProfileResult(
+            email=user.email,
+            display_name=user.display_name or user.google_profile_name,
+            location=user.location,
+            google_profile_name=user.google_profile_name,
+            message="User profile loaded.",
+        )
+
+
+async def update_user_profile(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    display_name: str | None = None,
+    location: str | None = None,
+) -> UserProfileResult:
+    if user_id is None:
+        return UserProfileResult(message="Authentication required. Provide a Bearer token.")
+    async with ctx.session_factory() as db:
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return UserProfileResult(message="User not found.")
+        if display_name is not None:
+            cleaned_name: str = display_name.strip()
+            user.display_name = cleaned_name or None
+        if location is not None:
+            cleaned_location: str = location.strip()
+            user.location = cleaned_location or None
+        await db.commit()
+        await db.refresh(user)
+        return UserProfileResult(
+            email=user.email,
+            display_name=user.display_name or user.google_profile_name,
+            location=user.location,
+            google_profile_name=user.google_profile_name,
+            message="Profile updated.",
+        )
 
 
 async def upload_source(

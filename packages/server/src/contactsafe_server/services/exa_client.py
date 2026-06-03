@@ -9,7 +9,7 @@ from contactsafe_server.services.person_search_query import (
     build_activity_discovery_query,
     build_employer_discovery_query,
 )
-from contactsafe_server.services.web_search_types import ExaSearchCategory, ExaSearchHit, WebSearchHit
+from contactsafe_server.services.web_search_types import ExaSearchCategory, WebSearchHit
 
 
 class ExaClient:
@@ -26,11 +26,19 @@ class ExaClient:
         email: str,
         org_hint: str | None,
         category: ExaSearchCategory | None = "people",
+        user_location: str | None = None,
+        context_hints: list[str] | None = None,
     ) -> list[WebSearchHit]:
         if not self._api_key:
             return []
 
-        query: str = build_employer_discovery_query(name, email, org_hint)
+        query: str = build_employer_discovery_query(
+            name,
+            email,
+            org_hint,
+            user_location=user_location,
+            context_hints=context_hints,
+        )
         return await self._search(
             query=query,
             category=category,
@@ -42,15 +50,34 @@ class ExaClient:
         *,
         name: str,
         org_hint: str | None,
+        user_location: str | None = None,
     ) -> list[WebSearchHit]:
         if not self._api_key:
             return []
 
-        query: str = build_activity_discovery_query(name, org_hint)
+        query: str = build_activity_discovery_query(
+            name,
+            org_hint,
+            user_location=user_location,
+        )
         return await self._search(
             query=query,
             category="personal_site",
             num_results=self._settings.exa_activity_search_num_results,
+        )
+
+    async def search_raw(
+        self,
+        *,
+        query: str,
+        num_results: int = 3,
+    ) -> list[WebSearchHit]:
+        if not self._api_key:
+            return []
+        return await self._search(
+            query=query,
+            category=None,
+            num_results=num_results,
         )
 
     async def _search(

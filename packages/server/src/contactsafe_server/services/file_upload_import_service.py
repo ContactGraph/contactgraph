@@ -223,6 +223,24 @@ class FileUploadImportService:
                         connection.linkedin_url,
                     )
 
+            if connection.company:
+                domain: str | None = None
+                if connection.email and "@" in connection.email:
+                    email_domain: str = connection.email.rsplit("@", 1)[1].lower()
+                    if not is_automation_or_generic_domain(email_domain):
+                        domain = email_domain
+                org = await resolver.resolve_org(domain=domain, name=connection.company)
+                await record_employment(
+                    self._db,
+                    person_id=person.id,
+                    org_id=org.id,
+                    role_title=connection.position,
+                    contributor_user_id=source.user_id,
+                    contributor_source_kind="linkedin_connections_upload",
+                    contributor_source_id=source.id,
+                    confidence=0.5,
+                )
+
             now = datetime.now(tz=UTC)
             stmt = pg_insert(UserPersonObservation).values(
                 user_id=source.user_id,
