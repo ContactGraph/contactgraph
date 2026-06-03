@@ -114,6 +114,7 @@ class EnrichmentService:
             contacts_enriched=run.contacts_enriched,
             started_at=run.started_at,
             completed_at=run.completed_at,
+            progress_message=run.progress_message,
             error=run.error,
             message=self._status_message(run),
         )

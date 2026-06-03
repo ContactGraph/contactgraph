@@ -88,6 +88,7 @@ class IngestEnrichmentService:
 
         if run is not None:
             run.contacts_total = len(people)
+            run.progress_message = "Analyzing email patterns and signatures…"
             await self._db.flush()
 
         enriched_count: int = 0
@@ -110,6 +111,9 @@ class IngestEnrichmentService:
         if self._has_web_enrichment_provider():
             limit: int = self._web_enrichment_limit()
             top_for_web = await self._load_top_people_by_tie_strength(user_id, limit=limit)
+            if run is not None:
+                run.progress_message = f"Searching the web for your top {len(top_for_web)} contacts…"
+                await self._db.flush()
             user_context: tuple[str | None, str | None, list[str] | None] = (
                 await self._load_user_enrichment_context(user_id)
             )
@@ -122,16 +126,24 @@ class IngestEnrichmentService:
             )
 
         if self._settings.openai_api_key:
+            if run is not None:
+                run.progress_message = "Categorizing contacts with AI…"
+                await self._db.flush()
             top_for_llm = await self._load_top_people_by_tie_strength(
                 user_id, limit=self._settings.enrichment_contact_limit
             )
             await self._llm_enrich_batch(top_for_llm, contact_by_email, user_id=user_id)
 
+        if run is not None:
+            run.progress_message = "Finalizing profiles…"
+            await self._db.flush()
         await self._recompute.recompute_for_user(user_id)
         await rebuild_user_org_observations(self._db, user_id)
 
         excerpt_service = InteractionExcerptService(self._db, self._settings)
         await excerpt_service.seed_excerpts_for_user(user_id)
+        if run is not None:
+            run.progress_message = None
         await self._db.flush()
 
     async def _build_contact_accumulators(

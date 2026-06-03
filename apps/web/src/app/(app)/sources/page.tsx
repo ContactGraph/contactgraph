@@ -526,14 +526,21 @@ export default function SourcesPage() {
                       {step.description}
                     </p>
                     {step.id === "enrich" && enrichment ? (
-                      <p className="text-xs text-muted-foreground">
-                        {enrichment.state === "running" && enrichment.contacts_total > 0
-                          ? `Processed ${enrichment.contacts_enriched} of ${enrichment.contacts_total} contacts…`
-                          : enrichment.message}
-                        {enrichment.state === "complete" && enrichment.completed_at
-                          ? ` · ${new Date(enrichment.completed_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-                          : null}
-                      </p>
+                      <div className="space-y-0.5">
+                        {enrichment.state === "running" && enrichment.progress_message ? (
+                          <p className="text-xs text-muted-foreground">
+                            {enrichment.progress_message}
+                          </p>
+                        ) : null}
+                        <p className="text-xs text-muted-foreground">
+                          {enrichment.state === "running" && enrichment.contacts_total > 0
+                            ? `Processed ${enrichment.contacts_enriched} of ${enrichment.contacts_total} contacts`
+                            : enrichment.message}
+                          {enrichment.state === "complete" && enrichment.completed_at
+                            ? ` · ${new Date(enrichment.completed_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+                            : null}
+                        </p>
+                      </div>
                     ) : null}
                   </div>
                 </div>
