@@ -76,6 +76,8 @@ class ConnectSourceResult(BaseModel):
     access_token: str | None = None
     refresh_token: str | None = None
     system_messages: list[str] = Field(default_factory=list)
+    upload_url: str | None = None
+    upload_instructions: str | None = None
 
 
 class SourceStatusResult(BaseModel):

@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from contactsafe_core.contact_schemas import DedupPersonsResult
 from contactsafe_core.enums import SourceType
 from contactsafe_core.schemas import (
     ConnectSourceResult,
@@ -81,10 +82,12 @@ def create_mcp_server(settings: Settings) -> FastMCP:
         user_token: str | None = None,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> ConnectSourceResult:
-        """Connect Gmail or Google Calendar for a Google account.
+        """Connect a data source.
 
-        source_type: "google_mail" or "google_calendar". Gmail sync also seeds
-        Google Contacts. Calendar uses the same Google OAuth consent.
+        source_type: "google_mail", "google_calendar", or "phone_contacts_upload".
+        Gmail sync also seeds Google Contacts. Calendar uses the same Google OAuth
+        consent. For phone_contacts_upload, returns upload_url and
+        upload_instructions (requires Bearer token).
 
         Returns oauth_url when browser authorization is needed, or
         access_token when the account is already connected.
@@ -259,6 +262,19 @@ def create_mcp_server(settings: Settings) -> FastMCP:
             decline=decline,
             set_privacy=set_privacy,
         )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def dedup_persons(
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> DedupPersonsResult:
+        """Merge duplicate people in your graph that share the same name.
+
+        Run this after importing phone contacts if the same person appears as
+        separate records (e.g. one from email, one from phone-only vCard).
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.dedup_persons(lifespan.app_context, user_id)
 
     return mcp
 

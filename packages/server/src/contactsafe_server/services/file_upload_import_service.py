@@ -2,16 +2,19 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.enums import SourceConnectionStatus, SourceType, SyncState
-from contactsafe_server.db.models import Source, UserPersonObservation
+from contactsafe_server.db.models import Person, Source, UserPersonObservation
+from contactsafe_server.services.claim_writer import record_employment
 from contactsafe_server.services.entity_resolution import EntityResolver
 from contactsafe_server.services.linkedin_connections_parser import (
     ParsedLinkedInConnection,
     parse_linkedin_connections_csv,
 )
+from contactsafe_server.services.org_search import is_automation_or_generic_domain
 from contactsafe_server.services.phone_contacts_parser import (
     ParsedPhoneContact,
     parse_phone_contacts_upload,
@@ -79,25 +82,73 @@ class FileUploadImportService:
     ) -> None:
         contacts: list[ParsedPhoneContact] = parse_phone_contacts_upload(content, filename)
         resolver = EntityResolver(self._db)
+        user_id: uuid.UUID = source.user_id
+        source_id: uuid.UUID = source.id
+
         for contact in contacts:
-            emails: list[str] = [contact.email] if contact.email else []
-            person = await resolver.resolve_person(
-                emails=emails or None,
-                display_name=contact.display_name,
+            if not contact.emails and not contact.phone_numbers:
+                continue
+
+            display_name: str = contact.display_name
+            primary_phone: str | None = (
+                contact.phone_numbers[0] if contact.phone_numbers else None
             )
-            if contact.phone:
+            person: Person = await resolver.resolve_person(
+                emails=list(contact.emails),
+                display_name=display_name,
+                phone=primary_phone,
+                linkedin_url=contact.linkedin_url,
+            )
+
+            if contact.display_name and (
+                not person.canonical_name
+                or person.canonical_name == (person.primary_email or "")
+            ):
+                person.canonical_name = contact.display_name
+
+            if contact.phone_numbers:
+                existing_phones: set[str] = set(person.phone_numbers or [])
+                new_phones: list[str] = list(existing_phones)
+                for phone_num in contact.phone_numbers:
+                    if phone_num not in existing_phones:
+                        new_phones.append(phone_num)
+                        try:
+                            await resolver.add_person_alias(
+                                person_id=person.id,
+                                kind="phone",
+                                value=phone_num,
+                            )
+                        except Exception:
+                            logger.debug(
+                                "Phone alias %s already mapped, skipping",
+                                phone_num,
+                            )
+                if len(new_phones) > len(person.phone_numbers or []):
+                    person.phone_numbers = new_phones
+
+            for extra_email in contact.emails[1:]:
                 try:
                     await resolver.add_person_alias(
                         person_id=person.id,
-                        kind="phone",
-                        value=contact.phone,
+                        kind="email",
+                        value=extra_email,
                     )
                 except Exception:
-                    logger.debug("Phone alias already mapped for %s", contact.phone)
+                    pass
+
+            if contact.linkedin_url:
+                try:
+                    await resolver.add_person_alias(
+                        person_id=person.id,
+                        kind="linkedin_url",
+                        value=contact.linkedin_url,
+                    )
+                except Exception:
+                    pass
 
             now = datetime.now(tz=UTC)
             stmt = pg_insert(UserPersonObservation).values(
-                user_id=source.user_id,
+                user_id=user_id,
                 person_id=person.id,
                 first_observed_at=now,
                 last_observed_at=now,
@@ -105,21 +156,43 @@ class FileUploadImportService:
                 outbound_count=0,
                 inbound_count=0,
                 thread_count=0,
-                tie_strength_score=0.25,
+                tie_strength_score=0.5,
                 is_human=True,
                 is_broadcast=False,
                 is_automated=False,
                 relationship_types=["phone_contacts_upload"],
                 notes="Imported from phone contacts upload",
-                source_id=source.id,
+                source_id=source_id,
             ).on_conflict_do_update(
                 constraint="pk_user_person_obs",
                 set_={
                     "last_observed_at": now,
                     "relationship_types": ["phone_contacts_upload"],
+                    "tie_strength_score": func.least(
+                        1.0,
+                        UserPersonObservation.tie_strength_score
+                        + stmt.excluded.tie_strength_score,
+                    ),
+                    "updated_at": now,
                 },
             )
             await self._db.execute(stmt)
+
+            if contact.org_name and contact.emails:
+                domain: str = contact.emails[0].rsplit("@", 1)[-1].lower()
+                if not is_automation_or_generic_domain(domain):
+                    org = await resolver.resolve_org(domain=domain, name=contact.org_name)
+                    await record_employment(
+                        self._db,
+                        person_id=person.id,
+                        org_id=org.id,
+                        role_title=contact.org_title,
+                        contributor_user_id=user_id,
+                        contributor_source_kind="phone_contacts_upload",
+                        contributor_source_id=source_id,
+                        confidence=0.7,
+                    )
+
             source.contacts_found += 1
             source.contacts_resolved += 1
         await self._db.flush()
@@ -134,7 +207,7 @@ class FileUploadImportService:
         for connection in connections:
             emails: list[str] = [connection.email] if connection.email else []
             person = await resolver.resolve_person(
-                emails=emails or None,
+                emails=emails,
                 display_name=connection.display_name,
             )
             if connection.linkedin_url:

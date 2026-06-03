@@ -100,12 +100,31 @@ All requests are `POST`. All request bodies are JSON. Omit the body for endpoint
 
 ### POST /api/connect-source
 
-Connect a data source. **No auth required** (for first-time users). Both `google_mail` and `google_contacts` are auto-created on first Google connect.
+Connect a data source. **No auth required** (for first-time Google users). Both `google_mail` and `google_contacts` are auto-created on first Google connect.
 
-- `source_type` (string, default `"google_mail"`) — `"google_mail"` or `"google_contacts"`
+- `source_type` (string, default `"google_mail"`) — `"google_mail"`, `"google_contacts"`, `"google_calendar"`, `"phone_contacts_upload"`, `"linkedin_connections_upload"`
 - `user_token` (string, optional) — user email to check existing connection
 
-Returns `connect_session_id`, `oauth_url` to open in browser, or `access_token` if already connected. Key fields: `already_connected`, `source_id`, `message`.
+Returns `connect_session_id`, `oauth_url` to open in browser, or `access_token` if already connected. For `phone_contacts_upload`, returns `upload_url` and `upload_instructions` instead of OAuth. Key fields: `already_connected`, `source_id`, `message`.
+
+### POST /api/upload-contacts
+
+Upload a phone contacts file to an existing `phone_contacts_upload` source. **Requires Bearer token.** Multipart form:
+
+- `file` — `.vcf`, `.vcard`, or `.csv`
+- `source_id` — from `connect_source` or `list_sources`
+
+Returns `scheduled`, `sync_state`, `source_id`, `message`. Poll `get-source-status` until complete.
+
+### POST /api/upload-source
+
+Upload file content as JSON (alternative to multipart). **Requires Bearer token.**
+
+- `source_type` — `"phone_contacts_upload"` or `"linkedin_connections_upload"`
+- `filename` — original filename
+- `content` — file text content
+
+Returns `source_id`, `scheduled`, `sync_state`, `message`.
 
 ### POST /api/poll-connect/{connect_session_id}
 
@@ -174,9 +193,23 @@ All errors return `{"detail": "..."}`.
 
 - `google_mail` — Gmail metadata (contacts, orgs, tie strength)
 - `google_contacts` — Google Contacts (names, phones, orgs)
-- `google_calendar` — planned
+- `google_calendar` — Google Calendar attendees
+- `phone_contacts_upload` — Upload iPhone/Android `.vcf` or CSV export (names, phones, orgs)
+- `linkedin_connections_upload` — Upload LinkedIn `Connections.csv`
 
-Both Google sources share one OAuth consent. Connecting either auto-creates both. Multiple Gmail accounts can be linked; all contacts merge into one graph.
+Google sources share one OAuth consent. Connecting either auto-creates Gmail + Contacts. Multiple Gmail accounts can be linked; all contacts merge into one graph.
+
+### Suggesting phone contacts
+
+After Google sync completes (or when a user asks about contacts not found in email), suggest:
+
+> Want to add your phone contacts? Export from your iPhone (Settings → Contacts → Export) and upload — it adds phone numbers and catches contacts who don't email you.
+
+Call `connect_source` with `source_type="phone_contacts_upload"` (requires Bearer token). The response includes `upload_url` and `upload_instructions` to relay to the user.
+
+Upload options:
+- **Web UI:** send the user to `upload_url` (e.g. `https://www.contactgraph.ai/sources/upload/{source_id}`)
+- **API:** `POST /api/upload-contacts` with multipart form (`file`, `source_id`) or `POST /api/upload-source` with JSON (`source_type`, `filename`, `content`)
 
 ## Privacy
 

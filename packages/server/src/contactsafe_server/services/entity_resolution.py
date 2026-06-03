@@ -1,8 +1,7 @@
-"""Strict alias-based entity resolution for persons and orgs.
+"""Alias-based entity resolution for persons and orgs.
 
 Lookup priority (first hit wins): linkedin_url → github_url → email → phone.
-On miss: create a new entity and insert all provided aliases.
-Never merges on name alone — that's the LLM merger's job (Phase 2).
+On miss: fall back to exact canonical_name match, then create a new entity.
 """
 
 from __future__ import annotations
@@ -10,7 +9,7 @@ from __future__ import annotations
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.db.models import Org, OrgAlias, Person, PersonAlias
@@ -54,7 +53,7 @@ class EntityResolver:
     ) -> Person:
         """Return an existing person or create a new one.
 
-        Tries strong aliases in priority order; first hit wins.
+        Tries strong aliases in priority order; falls back to canonical_name.
         """
         candidates: list[tuple[str, str]] = []
         if linkedin_url:
@@ -84,6 +83,16 @@ class EntityResolver:
                 person_result = await self._session.execute(person_stmt)
                 matched_person = person_result.scalar_one()
                 break
+
+        if matched_person is None and display_name.strip():
+            normalized_name: str = display_name.strip().lower()
+            name_stmt = (
+                select(Person)
+                .where(func.lower(Person.canonical_name) == normalized_name)
+                .limit(1)
+            )
+            name_result = await self._session.execute(name_stmt)
+            matched_person = name_result.scalar_one_or_none()
 
         if matched_person is None:
             primary_email: str | None = emails[0].lower().strip() if emails else None

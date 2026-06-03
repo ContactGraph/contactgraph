@@ -13,11 +13,12 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import (
+    DedupPersonsResult,
     GetOrgRequest,
     GetPersonRequest,
     ListOrgsResult,
@@ -286,6 +287,37 @@ async def api_upload_source(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+@router.post("/upload-contacts", response_model=SyncSourceResult)
+async def api_upload_contacts(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    file: UploadFile = File(...),
+    source_id: str = Form(...),
+) -> SyncSourceResult:
+    raw: bytes = await file.read()
+    max_bytes: int = ctx.settings.upload_max_file_size_bytes
+    if len(raw) > max_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File exceeds {ctx.settings.upload_max_file_size_mb}MB limit",
+        )
+    filename: str = file.filename or "contacts.vcf"
+    try:
+        content: str = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise HTTPException(status_code=400, detail="File must be UTF-8 text") from exc
+    try:
+        return await actions.upload_contacts(
+            ctx,
+            user_id,
+            source_id=source_id,
+            filename=filename,
+            content=content,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 @router.post("/query-network", response_model=QueryNetworkResult)
 async def api_query_network(
     ctx: Ctx,
@@ -354,3 +386,11 @@ async def api_get_org(
         return await actions.get_org(ctx, user_id, org_id=body.org_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/dedup-persons", response_model=DedupPersonsResult)
+async def api_dedup_persons(ctx: Ctx, user_id: EffectiveUser) -> DedupPersonsResult:
+    try:
+        return await actions.dedup_persons(ctx, user_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=401, detail=str(exc))

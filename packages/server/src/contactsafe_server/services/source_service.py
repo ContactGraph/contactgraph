@@ -130,6 +130,34 @@ class SourceService:
         await self._db.flush()
         return source
 
+    async def ensure_phone_contacts_source(self, user_id: uuid.UUID, email: str) -> Source:
+        normalized: str = email.strip().lower()
+        result = await self._db.execute(
+            select(Source).where(
+                Source.user_id == user_id,
+                Source.source_type == SourceType.PHONE_CONTACTS_UPLOAD.value,
+                Source.external_account_id == normalized,
+            )
+        )
+        existing: Source | None = result.scalar_one_or_none()
+        if existing is not None:
+            existing.connection_status = SourceConnectionStatus.CONNECTED.value
+            existing.label = "Phone contacts"
+            await self._db.flush()
+            return existing
+
+        source = Source(
+            user_id=user_id,
+            source_type=SourceType.PHONE_CONTACTS_UPLOAD.value,
+            label="Phone contacts",
+            external_account_id=normalized,
+            connection_status=SourceConnectionStatus.CONNECTED.value,
+            sync_state=SyncState.PENDING.value,
+        )
+        self._db.add(source)
+        await self._db.flush()
+        return source
+
     async def ensure_upload_source(
         self,
         user_id: uuid.UUID,

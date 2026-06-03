@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Circle, Loader2, Plus, RefreshCw, Sparkles } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -64,7 +65,8 @@ const setupSteps: ReadonlyArray<SetupStep> = [
   {
     id: "phone",
     title: "Upload phone contacts",
-    description: "Import a vCard (.vcf) or CSV export from your phone.",
+    description:
+      "Export from the Contacts app (Lists → long-press → Export), then upload the .vcf file.",
     optional: true,
   },
   {
@@ -148,6 +150,7 @@ function anyImportReady(sources: ReadonlyArray<SourceSummary>): boolean {
 }
 
 export default function SourcesPage() {
+  const router = useRouter();
   const queryClient = useQueryClient();
   const popupRef = useRef<Window | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -286,6 +289,28 @@ export default function SourcesPage() {
           setConnectError("OAuth polling failed");
         });
       }, 4000);
+    },
+    onError: (error: Error) => {
+      setConnectError(error.message);
+    },
+  });
+
+  const connectPhoneMutation = useMutation({
+    mutationFn: () =>
+      proxyPost<ConnectSourceResult>("connect-source", {
+        source_type: "phone_contacts_upload",
+      }),
+    onSuccess: async (result: ConnectSourceResult) => {
+      setConnectError(null);
+      if (result.source_id) {
+        router.push(`/sources/upload/${result.source_id}`);
+        return;
+      }
+      if (result.upload_url) {
+        window.location.href = result.upload_url;
+        return;
+      }
+      setConnectError("Could not start phone contacts upload.");
     },
     onError: (error: Error) => {
       setConnectError(error.message);
@@ -432,10 +457,22 @@ export default function SourcesPage() {
                       <Button
                         variant="outline"
                         size="sm"
+                        onClick={() => connectPhoneMutation.mutate()}
+                        disabled={
+                          connectPhoneMutation.isPending ||
+                          uploadMutation.isPending ||
+                          inProgress
+                        }
+                      >
+                        Upload contacts
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => phoneInputRef.current?.click()}
                         disabled={uploadMutation.isPending || inProgress}
                       >
-                        Upload file
+                        Quick upload
                       </Button>
                     </>
                   ) : null}
