@@ -27,6 +27,7 @@ _SYNCABLE_SOURCE_TYPES: frozenset[SourceType] = frozenset({
     SourceType.GOOGLE_CALENDAR,
     SourceType.PHONE_CONTACTS_UPLOAD,
     SourceType.LINKEDIN_CONNECTIONS_UPLOAD,
+    SourceType.LINKEDIN_PROFILE_UPLOAD,
 })
 
 _OAUTH_SOURCE_TYPES: frozenset[SourceType] = frozenset({
@@ -169,6 +170,7 @@ class SourceService:
         if source_type not in {
             SourceType.PHONE_CONTACTS_UPLOAD,
             SourceType.LINKEDIN_CONNECTIONS_UPLOAD,
+            SourceType.LINKEDIN_PROFILE_UPLOAD,
         }:
             raise ValueError(f"Upload not supported for {source_type.value}")
 
@@ -181,11 +183,12 @@ class SourceService:
             )
         )
         existing: Source | None = result.scalar_one_or_none()
-        label: str = (
-            "Phone contacts"
-            if source_type == SourceType.PHONE_CONTACTS_UPLOAD
-            else "LinkedIn connections"
-        )
+        upload_labels: dict[SourceType, str] = {
+            SourceType.PHONE_CONTACTS_UPLOAD: "Phone contacts",
+            SourceType.LINKEDIN_CONNECTIONS_UPLOAD: "LinkedIn connections",
+            SourceType.LINKEDIN_PROFILE_UPLOAD: "LinkedIn profile",
+        }
+        label: str = upload_labels[source_type]
         payload: dict[str, object] = {"filename": filename, "content": content}
 
         if existing is not None:
@@ -702,6 +705,7 @@ class SourceService:
             SourceType.GOOGLE_CALENDAR: "Google Calendar",
             SourceType.PHONE_CONTACTS_UPLOAD: "Phone contacts",
             SourceType.LINKEDIN_CONNECTIONS_UPLOAD: "LinkedIn connections",
+            SourceType.LINKEDIN_PROFILE_UPLOAD: "LinkedIn profile",
             SourceType.GOOGLE_CONTACTS: "Gmail",
         }
         label: str = label_map.get(source_type, source.label)
