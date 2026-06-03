@@ -39,6 +39,8 @@ class User(Base):
     email: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     google_profile_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     google_profile_picture: Mapped[str | None] = mapped_column(Text, nullable=True)
+    display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    location: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

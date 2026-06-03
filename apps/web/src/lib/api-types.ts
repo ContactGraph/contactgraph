@@ -134,6 +134,18 @@ export interface UploadSourceResult {
   system_messages: string[];
 }
 
+export interface UserProfileResult {
+  display_name: string | null;
+  location: string | null;
+  google_profile_name: string | null;
+  message: string;
+}
+
+export interface UpdateUserProfileRequest {
+  display_name?: string | null;
+  location?: string | null;
+}
+
 export interface PersonMatch {
   person_id: string;
   name: string;

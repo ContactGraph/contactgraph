@@ -20,7 +20,8 @@ from contactsafe_server.db.models import (
     UserRelationshipObservation,
 )
 from contactsafe_server.oauth.google import GoogleTokens
-from contactsafe_server.services.claim_writer import record_relationship
+from contactsafe_server.services.claim_writer import record_employment, record_relationship
+from contactsafe_server.services.org_search import is_automation_or_generic_domain
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.email_parse import (
     ContactAccumulator,
@@ -508,6 +509,24 @@ class ImportService:
                         )
             if len(new_phones) > len(person.phone_numbers or []):
                 person.phone_numbers = new_phones
+
+        if contact.org_name and not person.current_org_name:
+            domain: str | None = None
+            if "@" in email:
+                email_domain: str = email.rsplit("@", 1)[1].lower()
+                if not is_automation_or_generic_domain(email_domain):
+                    domain = email_domain
+            org = await resolver.resolve_org(domain=domain, name=contact.org_name)
+            await record_employment(
+                self._db,
+                person_id=person.id,
+                org_id=org.id,
+                role_title=contact.org_title,
+                contributor_user_id=user_id,
+                contributor_source_kind="google_contacts",
+                contributor_source_id=source_id,
+                confidence=0.5,
+            )
 
     async def _flush_ingest_progress(
         self,

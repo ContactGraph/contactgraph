@@ -286,6 +286,18 @@ class UploadSourceResult(BaseModel):
     system_messages: list[str] = Field(default_factory=list)
 
 
+class UserProfileResult(BaseModel):
+    display_name: str | None = None
+    location: str | None = None
+    google_profile_name: str | None = None
+    message: str = ""
+
+
+class UpdateUserProfileRequest(BaseModel):
+    display_name: str | None = None
+    location: str | None = None
+
+
 class QueryNetworkRequest(BaseModel):
     question: str
 

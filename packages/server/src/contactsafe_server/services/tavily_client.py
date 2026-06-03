@@ -25,8 +25,16 @@ class TavilyClient:
         name: str,
         email: str,
         org_hint: str | None,
+        user_location: str | None = None,
+        context_hints: list[str] | None = None,
     ) -> list[WebSearchHit]:
-        query: str = build_employer_discovery_query(name, email, org_hint)
+        query: str = build_employer_discovery_query(
+            name,
+            email,
+            org_hint,
+            user_location=user_location,
+            context_hints=context_hints,
+        )
         return await self._search(query=query)
 
     async def search_person_activity(
@@ -34,8 +42,16 @@ class TavilyClient:
         *,
         name: str,
         org_hint: str | None,
+        user_location: str | None = None,
     ) -> list[WebSearchHit]:
-        query: str = build_activity_discovery_query(name, org_hint)
+        query: str = build_activity_discovery_query(
+            name,
+            org_hint,
+            user_location=user_location,
+        )
+        return await self._search(query=query)
+
+    async def search_raw(self, *, query: str) -> list[WebSearchHit]:
         return await self._search(query=query)
 
     async def _search(self, *, query: str) -> list[WebSearchHit]:
