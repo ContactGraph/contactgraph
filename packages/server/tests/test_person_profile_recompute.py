@@ -177,6 +177,31 @@ def test_sanitize_empty_string() -> None:
     assert sanitize_display_name("") == ""
 
 
+async def test_recompute_rejects_postgres_role(
+    db_session: AsyncSession, user: User, person: Person, org: Org,
+) -> None:
+    db_session.add(UserPersonObservation(
+        user_id=user.id, person_id=person.id, email_count=10,
+    ))
+    db_session.add(EmploymentClaim(
+        person_id=person.id,
+        org_id=org.id,
+        role_title="postgres",
+        is_current=True,
+        contributor_user_id=user.id,
+        contributor_source_kind="exa",
+        confidence=0.9,
+    ))
+    await db_session.flush()
+
+    recompute = PersonProfileRecompute(db_session)
+    await recompute.recompute_for_user(user.id)
+
+    result = await db_session.execute(select(Person).where(Person.id == person.id))
+    updated: Person = result.scalar_one()
+    assert updated.current_role is None
+
+
 async def test_recompute_strips_quoted_name(
     db_session: AsyncSession, user: User,
 ) -> None:

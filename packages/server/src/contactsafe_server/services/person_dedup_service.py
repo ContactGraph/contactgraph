@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass
@@ -25,7 +26,11 @@ from contactsafe_server.db.models import (
     UserRelationshipObservation,
 )
 
+from contactsafe_server.services.phone_normalization import normalize_phone
+
 logger: logging.Logger = logging.getLogger(__name__)
+
+_EMAIL_RE: re.Pattern[str] = re.compile(r"@")
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +58,8 @@ class PersonDedupService:
 
         groups_merged: int = 0
         persons_removed: int = 0
+        merged_ids: set[uuid.UUID] = set()
+
         for group in groups:
             if len(group.persons) < 2:
                 continue
@@ -64,8 +71,25 @@ class PersonDedupService:
                     duplicate=duplicate,
                 )
                 await self._db.delete(duplicate)
+                merged_ids.add(duplicate.id)
                 persons_removed += 1
             groups_merged += 1
+
+        phone_groups_merged, phone_removed = await self._dedup_by_phone(
+            person_ids=person_ids,
+            alias_counts=alias_counts,
+            merged_ids=merged_ids,
+        )
+        groups_merged += phone_groups_merged
+        persons_removed += phone_removed
+
+        email_groups_merged, email_removed = await self._dedup_by_email_as_name(
+            person_ids=[pid for pid in person_ids if pid not in merged_ids],
+            alias_counts=alias_counts,
+            merged_ids=merged_ids,
+        )
+        groups_merged += email_groups_merged
+        persons_removed += email_removed
 
         await self._db.flush()
         message: str = (
@@ -125,12 +149,104 @@ class PersonDedupService:
         return max(
             persons,
             key=lambda person: (
+                0 if _looks_like_email(person.canonical_name) else 1,
                 alias_counts.get(person.id, 0),
                 1 if person.primary_email else 0,
                 len(person.phone_numbers or []),
+                1 if person.current_org_id else 0,
                 -person.created_at.timestamp(),
             ),
         )
+
+    async def _dedup_by_phone(
+        self,
+        *,
+        person_ids: list[uuid.UUID],
+        alias_counts: dict[uuid.UUID, int],
+        merged_ids: set[uuid.UUID],
+    ) -> tuple[int, int]:
+        active_ids: list[uuid.UUID] = [pid for pid in person_ids if pid not in merged_ids]
+        if len(active_ids) < 2:
+            return 0, 0
+
+        stmt = select(PersonAlias).where(
+            PersonAlias.person_id.in_(active_ids),
+            PersonAlias.kind == "phone",
+        )
+        result = await self._db.execute(stmt)
+        aliases: list[PersonAlias] = list(result.scalars().all())
+
+        grouped: dict[str, list[uuid.UUID]] = defaultdict(list)
+        for alias in aliases:
+            normalized: str = normalize_phone(alias.value)
+            if normalized:
+                grouped[normalized].append(alias.person_id)
+
+        groups_merged: int = 0
+        persons_removed: int = 0
+        for person_ids_for_phone in grouped.values():
+            unique_ids: list[uuid.UUID] = sorted(set(person_ids_for_phone))
+            if len(unique_ids) < 2:
+                continue
+            persons: list[Person] = await self._load_persons(unique_ids)
+            survivor: Person = self._pick_survivor(tuple(persons), alias_counts)
+            for duplicate in persons:
+                if duplicate.id == survivor.id or duplicate.id in merged_ids:
+                    continue
+                await self._merge_person(survivor=survivor, duplicate=duplicate)
+                await self._db.delete(duplicate)
+                merged_ids.add(duplicate.id)
+                persons_removed += 1
+            groups_merged += 1
+        return groups_merged, persons_removed
+
+    async def _dedup_by_email_as_name(
+        self,
+        *,
+        person_ids: list[uuid.UUID],
+        alias_counts: dict[uuid.UUID, int],
+        merged_ids: set[uuid.UUID],
+    ) -> tuple[int, int]:
+        active_ids: list[uuid.UUID] = [pid for pid in person_ids if pid not in merged_ids]
+        if len(active_ids) < 2:
+            return 0, 0
+
+        persons: list[Person] = await self._load_persons(active_ids)
+        email_to_person_ids: dict[str, list[uuid.UUID]] = defaultdict(list)
+        for person in persons:
+            if _looks_like_email(person.canonical_name):
+                email_to_person_ids[person.canonical_name.lower()].append(person.id)
+            if person.primary_email:
+                email_to_person_ids[person.primary_email.lower()].append(person.id)
+
+        stmt = select(PersonAlias).where(
+            PersonAlias.person_id.in_(active_ids),
+            PersonAlias.kind == "email",
+        )
+        result = await self._db.execute(stmt)
+        for alias in result.scalars().all():
+            email_to_person_ids[alias.value.lower()].append(alias.person_id)
+
+        groups_merged: int = 0
+        persons_removed: int = 0
+        for linked_person_ids in email_to_person_ids.values():
+            unique_ids: list[uuid.UUID] = sorted(set(linked_person_ids))
+            if len(unique_ids) < 2:
+                continue
+            group_persons: list[Person] = await self._load_persons(unique_ids)
+            if not any(_looks_like_email(p.canonical_name) for p in group_persons):
+                if len({p.canonical_name.strip().lower() for p in group_persons}) == 1:
+                    continue
+            survivor: Person = self._pick_survivor(tuple(group_persons), alias_counts)
+            for duplicate in group_persons:
+                if duplicate.id == survivor.id or duplicate.id in merged_ids:
+                    continue
+                await self._merge_person(survivor=survivor, duplicate=duplicate)
+                await self._db.delete(duplicate)
+                merged_ids.add(duplicate.id)
+                persons_removed += 1
+            groups_merged += 1
+        return groups_merged, persons_removed
 
     async def _merge_person(
         self,
@@ -159,6 +275,8 @@ class PersonDedupService:
                     merged_phones.append(phone)
                     existing.add(phone)
             survivor.phone_numbers = merged_phones
+        if not survivor.current_org_id and duplicate.current_org_id:
+            survivor.current_org_id = duplicate.current_org_id
         if not survivor.current_org_name and duplicate.current_org_name:
             survivor.current_org_name = duplicate.current_org_name
         if not survivor.current_role and duplicate.current_role:
@@ -440,3 +558,7 @@ class PersonDedupService:
         if right is None:
             return left
         return max(left, right)
+
+
+def _looks_like_email(name: str) -> bool:
+    return bool(_EMAIL_RE.search(name))

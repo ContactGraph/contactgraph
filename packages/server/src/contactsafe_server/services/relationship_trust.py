@@ -19,6 +19,9 @@ RELATIONSHIP_KIND_TRUST: Final[dict[str, float]] = {
 # Minimum trust for "high-trust connection" (North Star #1).
 HIGH_TRUST_THRESHOLD: Final[float] = 0.7
 
+# First-degree target companies: user deliberately saved these contacts.
+FIRST_DEGREE_TRUST_THRESHOLD: Final[float] = 0.4
+
 # Map observation relationship_types to canonical edge kinds.
 OBSERVATION_KIND_MAP: Final[dict[str, str]] = {
     "phone_contacts_upload": "phone_contact",

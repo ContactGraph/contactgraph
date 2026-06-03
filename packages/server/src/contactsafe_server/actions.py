@@ -662,6 +662,12 @@ async def get_target_companies(
                 ),
             )
 
+        dedup_service: PersonDedupService = PersonDedupService(db)
+        await dedup_service.dedup_for_user(user_id)
+        recompute: PersonProfileRecompute = PersonProfileRecompute(db)
+        await recompute.recompute_for_user(user_id)
+        await db.commit()
+
         service = TargetCompaniesService(db)
         matches: list[TargetCompanyMatch] = await service.list_first_degree(user_id)
         companies: list[TargetCompanySummary] = [

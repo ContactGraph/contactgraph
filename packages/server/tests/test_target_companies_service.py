@@ -14,6 +14,7 @@ from contactsafe_server.db.models import (
     User,
     UserPersonObservation,
 )
+from contactsafe_server.services.relationship_trust import FIRST_DEGREE_TRUST_THRESHOLD
 from contactsafe_server.services.target_companies_service import (
     TargetCompaniesService,
     _looks_like_email,
@@ -254,3 +255,47 @@ async def test_team_account_filtered(
     service = TargetCompaniesService(db_session)
     matches = await service.list_first_degree(user.id)
     assert len(matches) == 0, "Team accounts should be filtered"
+
+
+async def test_google_contact_only_can_appear(
+    db_session: AsyncSession,
+    user: User,
+    user_person: Person,
+) -> None:
+    """Google Contacts with no outbound email should still surface at first-degree trust."""
+    org = Org(canonical_name="EquityBee", primary_domain="equitybee.com")
+    db_session.add(org)
+    await db_session.flush()
+
+    person = Person(
+        canonical_name="Yaeli Gila",
+        primary_email="yaeli@equitybee.com",
+        current_org_id=org.id,
+        current_org_name=org.canonical_name,
+    )
+    db_session.add(person)
+    await db_session.flush()
+
+    db_session.add(EmploymentClaim(
+        person_id=person.id,
+        org_id=org.id,
+        is_current=True,
+        contributor_user_id=user.id,
+        contributor_source_kind="google_contacts",
+        confidence=0.8,
+    ))
+    db_session.add(UserPersonObservation(
+        user_id=user.id,
+        person_id=person.id,
+        tie_strength_score=0.3,
+        outbound_count=0,
+        relationship_types=["contact", "google_contact"],
+        is_human=True,
+    ))
+    await db_session.flush()
+
+    service = TargetCompaniesService(db_session)
+    matches = await service.list_first_degree(user.id, min_trust=FIRST_DEGREE_TRUST_THRESHOLD)
+    assert len(matches) == 1
+    assert matches[0].org_name == "EquityBee"
+    assert matches[0].insiders[0].person_name == "Yaeli Gila"

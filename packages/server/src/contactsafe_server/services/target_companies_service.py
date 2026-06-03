@@ -17,11 +17,15 @@ from contactsafe_server.db.models import (
     UserPersonObservation,
 )
 from contactsafe_server.services.relationship_trust import (
+    FIRST_DEGREE_TRUST_THRESHOLD,
     HIGH_TRUST_THRESHOLD,
     best_relationship_kind,
     compute_trust_score,
     is_high_trust_connection,
 )
+
+# Domain-only heuristic employment is not reliable enough for target companies.
+_DOMAIN_HEURISTIC_EMPLOYMENT_SOURCES: frozenset[str] = frozenset({"heuristic"})
 
 # ---------------------------------------------------------------------------
 # Data-quality filters
@@ -51,16 +55,16 @@ def _looks_like_team_account(name: str, org_name: str | None) -> bool:
     return False
 
 
-async def _has_non_heuristic_current_employment(
+async def _has_authoritative_current_employment(
     db: AsyncSession,
     person_id: uuid.UUID,
 ) -> bool:
-    """Return True if *person_id* has at least one ``is_current`` employment
-    claim whose ``contributor_source_kind`` is NOT ``'heuristic'``."""
+    """Return True if *person_id* has at least one current employment claim
+    from a source other than domain-only inference."""
     stmt = select(EmploymentClaim.id).where(
         EmploymentClaim.person_id == person_id,
         EmploymentClaim.is_current.is_(True),
-        EmploymentClaim.contributor_source_kind != "heuristic",
+        EmploymentClaim.contributor_source_kind.notin_(_DOMAIN_HEURISTIC_EMPLOYMENT_SOURCES),
     ).limit(1)
     result = await db.execute(stmt)
     return result.scalar_one_or_none() is not None
@@ -118,17 +122,12 @@ class TargetCompaniesService:
         self,
         user_id: uuid.UUID,
         *,
-        min_trust: float = HIGH_TRUST_THRESHOLD,
+        min_trust: float = FIRST_DEGREE_TRUST_THRESHOLD,
         limit: int = 50,
     ) -> list[TargetCompanyMatch]:
         user: User | None = await self._db.get(User, user_id)
         exclude_person_id: uuid.UUID | None = user.person_id if user is not None else None
 
-        from sqlalchemy import or_
-        from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, array as pg_array
-        from sqlalchemy import Text, cast
-
-        phone_rhs = cast(pg_array(["phone_contacts_upload"]), PG_ARRAY(Text))
         stmt = (
             select(Person, UserPersonObservation)
             .join(
@@ -141,10 +140,6 @@ class TargetCompaniesService:
                 UserPersonObservation.is_broadcast.is_(False),
                 UserPersonObservation.is_automated.is_(False),
                 UserPersonObservation.is_human.is_(True),
-                or_(
-                    UserPersonObservation.outbound_count > 0,
-                    UserPersonObservation.relationship_types.op("&&")(phone_rhs),
-                ),
             )
         )
         result = await self._db.execute(stmt)
@@ -156,7 +151,7 @@ class TargetCompaniesService:
                 continue
             if not _passes_display_quality(person.canonical_name, person.current_org_name):
                 continue
-            if not await _has_non_heuristic_current_employment(self._db, person.id):
+            if not await _has_authoritative_current_employment(self._db, person.id):
                 continue
             rel_kind: str | None = await self._relationship_kind_for_pair(
                 user_id=user_id,
@@ -244,7 +239,7 @@ class TargetCompaniesService:
                     continue
                 if not _passes_display_quality(person.canonical_name, person.current_org_name):
                     continue
-                if not await _has_non_heuristic_current_employment(self._db, person.id):
+                if not await _has_authoritative_current_employment(self._db, person.id):
                     continue
                 rel_kind: str | None = await self._relationship_kind_for_pair(
                     user_id=member_id,
