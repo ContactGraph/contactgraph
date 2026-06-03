@@ -114,6 +114,7 @@ class EnrichmentService:
             contacts_enriched=run.contacts_enriched,
             started_at=run.started_at,
             completed_at=run.completed_at,
+            progress_message=run.progress_message,
             error=run.error,
             message=self._status_message(run),
         )
@@ -169,5 +170,8 @@ class EnrichmentService:
         if state == EnrichmentRunState.COMPLETE:
             return f"Enrichment complete ({run.contacts_enriched} contacts enriched)."
         if state == EnrichmentRunState.FAILED:
-            return run.error or "Enrichment failed."
+            error: str = run.error or "Enrichment failed."
+            if "sqlalchemy" in error.lower() or "asyncpg" in error.lower():
+                return "Enrichment failed due to a server error. Try again."
+            return error
         return "Enrichment is pending."

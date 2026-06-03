@@ -310,6 +310,7 @@ class EnrichmentStatusResult(BaseModel):
     contacts_enriched: int = 0
     started_at: datetime | None = None
     completed_at: datetime | None = None
+    progress_message: str | None = None
     error: str | None = None
     message: str
     system_messages: list[str] = Field(default_factory=list)
