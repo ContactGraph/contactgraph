@@ -15,7 +15,10 @@ from contactsafe_server.db.models import (
     User,
     UserPersonObservation,
 )
-from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
+from contactsafe_server.services.person_profile_recompute import (
+    PersonProfileRecompute,
+    sanitize_display_name,
+)
 
 @pytest.fixture(autouse=True)
 async def _setup_tables(db_engine):
@@ -147,3 +150,72 @@ async def test_recompute_categories_and_social(
     assert "founder" in updated.inferred_categories
     assert updated.social_profiles.get("github") == "https://github.com/test"
     assert updated.bio_summary == "A short bio."
+
+
+# ---------------------------------------------------------------------------
+# sanitize_display_name
+# ---------------------------------------------------------------------------
+
+
+def test_sanitize_strips_single_quotes() -> None:
+    assert sanitize_display_name("'Kelli Stockdale'") == "Kelli Stockdale"
+
+
+def test_sanitize_strips_unicode_quotes() -> None:
+    assert sanitize_display_name("\u2018Wiraj W. Karve\u2019") == "Wiraj W. Karve"
+
+
+def test_sanitize_strips_double_quotes() -> None:
+    assert sanitize_display_name('"Bob Smith"') == "Bob Smith"
+
+
+def test_sanitize_leaves_clean_names_alone() -> None:
+    assert sanitize_display_name("Jane Doe") == "Jane Doe"
+
+
+def test_sanitize_empty_string() -> None:
+    assert sanitize_display_name("") == ""
+
+
+async def test_recompute_rejects_postgres_role(
+    db_session: AsyncSession, user: User, person: Person, org: Org,
+) -> None:
+    db_session.add(UserPersonObservation(
+        user_id=user.id, person_id=person.id, email_count=10,
+    ))
+    db_session.add(EmploymentClaim(
+        person_id=person.id,
+        org_id=org.id,
+        role_title="postgres",
+        is_current=True,
+        contributor_user_id=user.id,
+        contributor_source_kind="exa",
+        confidence=0.9,
+    ))
+    await db_session.flush()
+
+    recompute = PersonProfileRecompute(db_session)
+    await recompute.recompute_for_user(user.id)
+
+    result = await db_session.execute(select(Person).where(Person.id == person.id))
+    updated: Person = result.scalar_one()
+    assert updated.current_role is None
+
+
+async def test_recompute_strips_quoted_name(
+    db_session: AsyncSession, user: User,
+) -> None:
+    p = Person(canonical_name="'Kelli Stockdale'", primary_email="kelli@test.com")
+    db_session.add(p)
+    await db_session.flush()
+    db_session.add(UserPersonObservation(
+        user_id=user.id, person_id=p.id, email_count=1,
+    ))
+    await db_session.flush()
+
+    recompute = PersonProfileRecompute(db_session)
+    await recompute.recompute_for_user(user.id)
+
+    result = await db_session.execute(select(Person).where(Person.id == p.id))
+    updated: Person = result.scalar_one()
+    assert updated.canonical_name == "Kelli Stockdale"

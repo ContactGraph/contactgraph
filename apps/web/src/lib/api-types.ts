@@ -122,6 +122,7 @@ export interface EnrichmentStatusResult {
   contacts_enriched: number;
   started_at: string | null;
   completed_at: string | null;
+  progress_message: string | null;
   error: string | null;
   message: string;
   system_messages: string[];

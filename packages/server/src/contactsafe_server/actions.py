@@ -243,7 +243,9 @@ async def get_enrichment_status(
         )
     async with ctx.session_factory() as db:
         enrichment = build_enrichment_service(db)
-        return await enrichment.get_enrichment_status(user_id)
+        result = await enrichment.get_enrichment_status(user_id)
+        await db.commit()
+        return result
 
 
 async def _load_user_experiences(
@@ -659,6 +661,12 @@ async def get_target_companies(
                     "Sync still running or not started. Complete onboarding and enrichment first."
                 ),
             )
+
+        dedup_service: PersonDedupService = PersonDedupService(db)
+        await dedup_service.dedup_for_user(user_id)
+        recompute: PersonProfileRecompute = PersonProfileRecompute(db)
+        await recompute.recompute_for_user(user_id)
+        await db.commit()
 
         service = TargetCompaniesService(db)
         matches: list[TargetCompanyMatch] = await service.list_first_degree(user_id)

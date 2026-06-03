@@ -75,14 +75,22 @@ async def _run_enrichment_task(user_id: uuid.UUID, run_id: uuid.UUID) -> None:
                 await enricher.enrich_user_graph(user_id=user_id, run=run)
                 run.state = EnrichmentRunState.COMPLETE.value
                 run.completed_at = datetime.now(tz=UTC)
+                run.progress_message = None
                 await db.commit()
                 logger.info("Enrichment completed for user %s", user_id)
             except Exception as exc:
-                run.state = EnrichmentRunState.FAILED.value
-                run.error = str(exc)[:500]
-                run.completed_at = datetime.now(tz=UTC)
-                await db.commit()
                 logger.exception("Enrichment failed for user %s", user_id)
+                await db.rollback()
+                run_refresh: EnrichmentRun | None = await db.get(EnrichmentRun, run_id)
+                if run_refresh is not None:
+                    run_refresh.state = EnrichmentRunState.FAILED.value
+                    error_msg: str = str(exc)[:500]
+                    if "sqlalchemy" in error_msg.lower() or "asyncpg" in error_msg.lower():
+                        error_msg = "Enrichment failed due to a server error. Try again."
+                    run_refresh.error = error_msg
+                    run_refresh.completed_at = datetime.now(tz=UTC)
+                    run_refresh.progress_message = None
+                    await db.commit()
     except Exception as exc:
         logger.exception("Background enrichment task failed for user %s", user_id)
         try:

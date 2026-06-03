@@ -13,6 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.db.models import Org, OrgAlias, Person, PersonAlias
+from contactsafe_server.services.phone_normalization import normalize_phone
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ class EntityResolver:
         for email in emails:
             candidates.append(("email", email.lower().strip()))
         if phone:
-            candidates.append(("phone", phone.strip()))
+            candidates.append(("phone", normalize_phone(phone)))
         if bluesky_handle:
             candidates.append(("bluesky_handle", bluesky_handle.lower().strip()))
         if twitter_handle:
@@ -71,13 +72,10 @@ class EntityResolver:
 
         matched_person: Person | None = None
         for kind, value in candidates:
-            stmt = (
-                select(PersonAlias)
-                .where(PersonAlias.kind == kind, PersonAlias.value == value)
-                .limit(1)
-            )
-            result = await self._session.execute(stmt)
-            alias: PersonAlias | None = result.scalar_one_or_none()
+            if kind == "phone":
+                alias = await self._find_phone_alias(value)
+            else:
+                alias = await self._find_alias(kind, value)
             if alias is not None:
                 person_stmt = select(Person).where(Person.id == alias.person_id)
                 person_result = await self._session.execute(person_stmt)
@@ -106,6 +104,26 @@ class EntityResolver:
         await self._ensure_aliases(matched_person, candidates)
         return matched_person
 
+    async def _find_alias(self, kind: str, value: str) -> PersonAlias | None:
+        stmt = (
+            select(PersonAlias)
+            .where(PersonAlias.kind == kind, PersonAlias.value == value)
+            .limit(1)
+        )
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def _find_phone_alias(self, normalized_phone: str) -> PersonAlias | None:
+        direct: PersonAlias | None = await self._find_alias("phone", normalized_phone)
+        if direct is not None:
+            return direct
+        stmt = select(PersonAlias).where(PersonAlias.kind == "phone")
+        result = await self._session.execute(stmt)
+        for alias in result.scalars():
+            if normalize_phone(alias.value) == normalized_phone:
+                return alias
+        return None
+
     async def add_person_alias(
         self,
         *,
@@ -116,7 +134,9 @@ class EntityResolver:
     ) -> bool:
         """Try to add an alias. Returns True if added, False if it already exists
         on this person. Raises MergeConflict if mapped to a different person."""
-        normalised: str = value.lower().strip().rstrip("/")
+        normalised: str = (
+            normalize_phone(value) if kind == "phone" else value.lower().strip().rstrip("/")
+        )
         stmt = (
             select(PersonAlias)
             .where(PersonAlias.kind == kind, PersonAlias.value == normalised)

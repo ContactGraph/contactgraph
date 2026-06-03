@@ -2,19 +2,81 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from contactsafe_server.db.models import Person, RelationshipClaim, User, UserPersonObservation
+from contactsafe_server.db.models import (
+    EmploymentClaim,
+    Person,
+    RelationshipClaim,
+    User,
+    UserPersonObservation,
+)
 from contactsafe_server.services.relationship_trust import (
+    FIRST_DEGREE_TRUST_THRESHOLD,
     HIGH_TRUST_THRESHOLD,
     best_relationship_kind,
     compute_trust_score,
     is_high_trust_connection,
 )
+
+# Domain-only heuristic employment is not reliable enough for target companies.
+_DOMAIN_HEURISTIC_EMPLOYMENT_SOURCES: frozenset[str] = frozenset({"heuristic"})
+
+# ---------------------------------------------------------------------------
+# Data-quality filters
+# ---------------------------------------------------------------------------
+
+_EMAIL_RE: re.Pattern[str] = re.compile(r"@")
+_QUOTE_CHARS: frozenset[str] = frozenset({"'", '"', "\u2018", "\u2019", "\u201c", "\u201d"})
+_TEAM_TOKENS: frozenset[str] = frozenset({
+    "team", "group", "dept", "department", "committee", "staff",
+    "office", "bureau", "division", "unit",
+})
+
+
+def _looks_like_email(name: str) -> bool:
+    """True if *name* looks like an email address rather than a person name."""
+    return bool(_EMAIL_RE.search(name))
+
+
+def _looks_like_team_account(name: str, org_name: str | None) -> bool:
+    """Heuristic: name is a team/group account, not an individual."""
+    lower: str = name.lower()
+    words: list[str] = lower.split()
+    if any(w in _TEAM_TOKENS for w in words):
+        return True
+    if org_name and lower.strip() == org_name.strip().lower():
+        return True
+    return False
+
+
+async def _has_authoritative_current_employment(
+    db: AsyncSession,
+    person_id: uuid.UUID,
+) -> bool:
+    """Return True if *person_id* has at least one current employment claim
+    from a source other than domain-only inference."""
+    stmt = select(EmploymentClaim.id).where(
+        EmploymentClaim.person_id == person_id,
+        EmploymentClaim.is_current.is_(True),
+        EmploymentClaim.contributor_source_kind.notin_(_DOMAIN_HEURISTIC_EMPLOYMENT_SOURCES),
+    ).limit(1)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none() is not None
+
+
+def _passes_display_quality(name: str, org_name: str | None) -> bool:
+    """Quick pre-filter on name quality (email-as-name, team accounts)."""
+    if _looks_like_email(name):
+        return False
+    if _looks_like_team_account(name, org_name):
+        return False
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,17 +122,12 @@ class TargetCompaniesService:
         self,
         user_id: uuid.UUID,
         *,
-        min_trust: float = HIGH_TRUST_THRESHOLD,
+        min_trust: float = FIRST_DEGREE_TRUST_THRESHOLD,
         limit: int = 50,
     ) -> list[TargetCompanyMatch]:
         user: User | None = await self._db.get(User, user_id)
         exclude_person_id: uuid.UUID | None = user.person_id if user is not None else None
 
-        from sqlalchemy import or_
-        from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY, array as pg_array
-        from sqlalchemy import Text, cast
-
-        phone_rhs = cast(pg_array(["phone_contacts_upload"]), PG_ARRAY(Text))
         stmt = (
             select(Person, UserPersonObservation)
             .join(
@@ -83,10 +140,6 @@ class TargetCompaniesService:
                 UserPersonObservation.is_broadcast.is_(False),
                 UserPersonObservation.is_automated.is_(False),
                 UserPersonObservation.is_human.is_(True),
-                or_(
-                    UserPersonObservation.outbound_count > 0,
-                    UserPersonObservation.relationship_types.op("&&")(phone_rhs),
-                ),
             )
         )
         result = await self._db.execute(stmt)
@@ -95,6 +148,10 @@ class TargetCompaniesService:
         by_org: dict[uuid.UUID, TargetCompanyMatch] = {}
         for person, obs in rows:
             if exclude_person_id is not None and person.id == exclude_person_id:
+                continue
+            if not _passes_display_quality(person.canonical_name, person.current_org_name):
+                continue
+            if not await _has_authoritative_current_employment(self._db, person.id):
                 continue
             rel_kind: str | None = await self._relationship_kind_for_pair(
                 user_id=user_id,
@@ -179,6 +236,10 @@ class TargetCompaniesService:
 
             for person, obs in rows:
                 if person.id in private_ids:
+                    continue
+                if not _passes_display_quality(person.canonical_name, person.current_org_name):
+                    continue
+                if not await _has_authoritative_current_employment(self._db, person.id):
                     continue
                 rel_kind: str | None = await self._relationship_kind_for_pair(
                     user_id=member_id,

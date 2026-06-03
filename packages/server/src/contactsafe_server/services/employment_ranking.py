@@ -21,6 +21,7 @@ _SOURCE_BASE_TIER: Final[dict[str, int]] = {
     "serper": 3,
     "google_contacts": 4,
     "phone_contacts_upload": 4,
+    "gmail_domain": 5,
     "heuristic": 5,
 }
 
@@ -73,7 +74,7 @@ def _freshness_anchor(
         return claim.observed_at
     if source_kind in _WEB_SOURCE_KINDS:
         return claim.observed_at
-    if source_kind in {"google_contacts", "phone_contacts_upload", "heuristic"}:
+    if source_kind in {"google_contacts", "phone_contacts_upload", "heuristic", "gmail_domain"}:
         return claim.observed_at
     return claim.observed_at
 

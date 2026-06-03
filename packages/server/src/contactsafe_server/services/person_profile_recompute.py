@@ -10,7 +10,7 @@ import logging
 import re
 import uuid
 
-from sqlalchemy import func, select, update
+from sqlalchemy import bindparam, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.config import Settings, get_settings
@@ -27,6 +27,18 @@ from contactsafe_server.services.employment_ranking import (
 )
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+# PostgreSQL exposes ``current_role`` as a session function; never persist it.
+_INVALID_ROLE_VALUES: frozenset[str] = frozenset({"postgres", "contactsafe"})
+
+_STRIP_QUOTE_RE: re.Pattern[str] = re.compile(
+    r"""^[\s'"'\u2018\u2019\u201c\u201d]+|[\s'"'\u2018\u2019\u201c\u201d]+$"""
+)
+
+
+def sanitize_display_name(name: str) -> str:
+    """Strip stray quote characters and whitespace from a display name."""
+    return _STRIP_QUOTE_RE.sub("", name)
 
 
 class PersonProfileRecompute:
@@ -84,6 +96,8 @@ class PersonProfileRecompute:
         current_org_id: uuid.UUID | None = best_emp.org_id if best_emp else None
         current_org_name: str | None = None
         current_role: str | None = best_emp.role_title if best_emp else None
+        if current_role is not None and current_role.strip().lower() in _INVALID_ROLE_VALUES:
+            current_role = None
 
         if best_emp and best_emp.org_id:
             from contactsafe_server.db.models import Org
@@ -132,6 +146,10 @@ class PersonProfileRecompute:
         # enrichment still get properly categorized.
         person_row: Person | None = await self._session.get(Person, person_id)
         if person_row is not None:
+            sanitized_name: str = sanitize_display_name(person_row.canonical_name or "")
+            if sanitized_name and sanitized_name != person_row.canonical_name:
+                person_row.canonical_name = sanitized_name
+
             primary_email: str = person_row.primary_email or ""
             display_name: str = person_row.canonical_name or ""
             inferred: list[str] = infer_categories_from_contact(
@@ -157,20 +175,29 @@ class PersonProfileRecompute:
                 if cat not in categories:
                     categories.append(cat)
 
+        if current_role is None:
+            for attr in attrs:
+                if attr.kind == "role" and attr.value.strip():
+                    candidate_role: str = attr.value.strip()
+                    if candidate_role.lower() not in _INVALID_ROLE_VALUES:
+                        current_role = candidate_role
+                        break
+
         await self._session.execute(
             update(Person)
             .where(Person.id == person_id)
             .values(
                 current_org_id=current_org_id,
                 current_org_name=current_org_name,
-                current_role=current_role,
+                current_role=bindparam("recomputed_current_role"),
                 bio_summary=bio_summary,
                 social_profiles=social_profiles,
                 inferred_categories=categories,
                 descriptive_tags=descriptive_tags,
                 phone_numbers=phone_numbers,
                 location=location,
-            )
+            ),
+            {"recomputed_current_role": current_role},
         )
 
     async def _latest_genuine_interaction(self, person_id: uuid.UUID) -> datetime | None:

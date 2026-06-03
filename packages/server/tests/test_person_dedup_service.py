@@ -102,6 +102,121 @@ async def test_dedup_merges_same_name_and_adds_tie_strength(
     assert alias_kinds == {"email", "phone"}
 
 
+async def test_dedup_merges_same_phone_different_formats(
+    db_session: AsyncSession,
+) -> None:
+    user: User = User(email=f"dedup-phone-{uuid.uuid4()}@example.com")
+    db_session.add(user)
+    await db_session.flush()
+
+    gmail_person: Person = Person(
+        canonical_name="Katherine Ryan",
+        primary_email="kryan88@gmail.com",
+    )
+    phone_person: Person = Person(
+        canonical_name="Katherine Ryan",
+        phone_numbers=["+14157132682"],
+    )
+    db_session.add_all([gmail_person, phone_person])
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            PersonAlias(
+                person_id=gmail_person.id,
+                kind="email",
+                value="kryan88@gmail.com",
+            ),
+            PersonAlias(
+                person_id=gmail_person.id,
+                kind="phone",
+                value="(415) 713-2682",
+            ),
+            PersonAlias(
+                person_id=phone_person.id,
+                kind="phone",
+                value="+14157132682",
+            ),
+            UserPersonObservation(
+                user_id=user.id,
+                person_id=gmail_person.id,
+                tie_strength_score=0.3,
+                relationship_types=["google_contact"],
+            ),
+            UserPersonObservation(
+                user_id=user.id,
+                person_id=phone_person.id,
+                tie_strength_score=0.25,
+                relationship_types=["phone_contacts_upload"],
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    service: PersonDedupService = PersonDedupService(db_session)
+    result = await service.dedup_for_user(user.id)
+    await db_session.flush()
+
+    assert result.groups_merged >= 1
+    survivors: list[Person] = list(
+        (await db_session.execute(select(Person))).scalars().all()
+    )
+    assert len(survivors) == 1
+
+
+async def test_dedup_merges_email_as_name_with_real_record(
+    db_session: AsyncSession,
+) -> None:
+    user: User = User(email=f"dedup-email-{uuid.uuid4()}@example.com")
+    db_session.add(user)
+    await db_session.flush()
+
+    email_as_name: Person = Person(
+        canonical_name="jane@acme.com",
+        primary_email="jane@acme.com",
+    )
+    named_person: Person = Person(
+        canonical_name="Jane Doe",
+        primary_email="jane@acme.com",
+    )
+    db_session.add_all([email_as_name, named_person])
+    await db_session.flush()
+
+    db_session.add_all(
+        [
+            PersonAlias(
+                person_id=email_as_name.id,
+                kind="email",
+                value="jane@acme.com",
+            ),
+            UserPersonObservation(
+                user_id=user.id,
+                person_id=email_as_name.id,
+                tie_strength_score=0.25,
+                relationship_types=["contact"],
+            ),
+            UserPersonObservation(
+                user_id=user.id,
+                person_id=named_person.id,
+                tie_strength_score=0.3,
+                relationship_types=["google_contact"],
+            ),
+        ]
+    )
+    await db_session.flush()
+
+    service: PersonDedupService = PersonDedupService(db_session)
+    result = await service.dedup_for_user(user.id)
+    await db_session.flush()
+
+    assert result.groups_merged >= 1
+    survivors: list[Person] = list(
+        (await db_session.execute(select(Person))).scalars().all()
+    )
+    assert len(survivors) == 1
+    assert survivors[0].canonical_name == "Jane Doe"
+
+
 async def test_dedup_keeps_distinct_names(db_session: AsyncSession) -> None:
     user: User = User(email=f"dedup-distinct-{uuid.uuid4()}@example.com")
     db_session.add(user)
