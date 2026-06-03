@@ -243,7 +243,9 @@ async def get_enrichment_status(
         )
     async with ctx.session_factory() as db:
         enrichment = build_enrichment_service(db)
-        return await enrichment.get_enrichment_status(user_id)
+        result = await enrichment.get_enrichment_status(user_id)
+        await db.commit()
+        return result
 
 
 async def _load_user_experiences(
