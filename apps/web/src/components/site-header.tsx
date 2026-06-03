@@ -17,6 +17,7 @@ const appLinks: readonly NavLink[] = [
   { kind: "internal", href: "/organizations", label: "Organizations" },
   { kind: "internal", href: "/sources", label: "Sources" },
   { kind: "internal", href: "/profile", label: "Profile" },
+  { kind: "internal", href: "/target-companies", label: "Targets" },
   { kind: "internal", href: "/trust", label: "Trust List" },
 ];
 

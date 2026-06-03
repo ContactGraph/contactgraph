@@ -371,3 +371,46 @@ export interface OrgDetailResult {
   contact_count: number;
   message: string;
 }
+
+export interface TargetCompanyInsiderSummary {
+  person_id: string;
+  person_name: string;
+  person_role: string | null;
+  trust_score: number;
+  relationship_kind: string | null;
+}
+
+export interface TargetCompanySummary {
+  org_id: string;
+  org_name: string;
+  insiders: TargetCompanyInsiderSummary[];
+  best_trust_score: number;
+}
+
+export interface TargetCompaniesResult {
+  companies: TargetCompanySummary[];
+  message: string;
+  system_messages: string[];
+}
+
+export interface SecondDegreeTargetInsiderSummary {
+  person_id: string;
+  person_name: string;
+  person_role: string | null;
+  bridge_user_id: string;
+  bridge_name: string;
+  trust_score: number;
+}
+
+export interface SecondDegreeTargetCompanySummary {
+  org_id: string;
+  org_name: string;
+  insiders: SecondDegreeTargetInsiderSummary[];
+  best_trust_score: number;
+}
+
+export interface SecondDegreeTargetCompaniesResult {
+  companies: SecondDegreeTargetCompanySummary[];
+  message: string;
+  system_messages: string[];
+}

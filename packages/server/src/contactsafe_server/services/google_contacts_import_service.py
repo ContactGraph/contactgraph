@@ -17,7 +17,7 @@ from contactsafe_server.db.models import (
     UserPersonObservation,
 )
 from contactsafe_server.oauth.google import GoogleTokens
-from contactsafe_server.services.claim_writer import record_employment
+from contactsafe_server.services.claim_writer import record_employment, record_relationship
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.entity_resolution import EntityResolver
 from contactsafe_server.services.org_search import is_automation_or_generic_domain
@@ -25,6 +25,7 @@ from contactsafe_server.services.people_api_client import (
     GoogleContact,
     PeopleApiClient,
 )
+from contactsafe_server.services.user_person_service import ensure_user_person
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -113,6 +114,10 @@ class GoogleContactsImportService:
         max_results: int = self._settings.import_contacts_max_results
         page_size: int = self._settings.import_contacts_page_size
         final_sync_token: str | None = None
+        user: User | None = await self._db.get(User, user_id)
+        user_person: Person | None = None
+        if user is not None:
+            user_person = await ensure_user_person(self._db, user)
 
         while total_fetched < max_results:
             try:
@@ -149,6 +154,7 @@ class GoogleContactsImportService:
                     user_id=user_id,
                     source_id=source.id,
                     resolver=resolver,
+                    user_person=user_person,
                 )
                 total_resolved += 1
                 source.contacts_resolved = total_resolved
@@ -187,6 +193,7 @@ class GoogleContactsImportService:
         user_id: uuid.UUID,
         source_id: uuid.UUID,
         resolver: EntityResolver,
+        user_person: Person | None = None,
     ) -> None:
         display_name: str = contact.display_name or (
             contact.emails[0] if contact.emails else contact.phone_numbers[0]
@@ -260,6 +267,16 @@ class GoogleContactsImportService:
             },
         )
         await self._db.execute(stmt)
+
+        if user_person is not None and user_person.id != person.id:
+            await record_relationship(
+                self._db,
+                person_a_id=user_person.id,
+                person_b_id=person.id,
+                kind="google_contact",
+                contributor_user_id=user_id,
+                contributor_source_kind="google_contacts",
+            )
 
         if contact.org_name and contact.emails:
             domain: str = contact.emails[0].rsplit("@", 1)[-1].lower()

@@ -173,6 +173,49 @@ class QueryNetworkResult(BaseModel):
     system_messages: list[str] = Field(default_factory=list)
 
 
+class TargetCompanyInsiderSummary(BaseModel):
+    person_id: UUID
+    person_name: str
+    person_role: str | None = None
+    trust_score: float
+    relationship_kind: str | None = None
+
+
+class TargetCompanySummary(BaseModel):
+    org_id: UUID
+    org_name: str
+    insiders: list[TargetCompanyInsiderSummary] = Field(default_factory=list)
+    best_trust_score: float = 0.0
+
+
+class TargetCompaniesResult(BaseModel):
+    companies: list[TargetCompanySummary] = Field(default_factory=list)
+    message: str
+    system_messages: list[str] = Field(default_factory=list)
+
+
+class SecondDegreeTargetInsiderSummary(BaseModel):
+    person_id: UUID
+    person_name: str
+    person_role: str | None = None
+    bridge_user_id: UUID
+    bridge_name: str
+    trust_score: float
+
+
+class SecondDegreeTargetCompanySummary(BaseModel):
+    org_id: UUID
+    org_name: str
+    insiders: list[SecondDegreeTargetInsiderSummary] = Field(default_factory=list)
+    best_trust_score: float = 0.0
+
+
+class SecondDegreeTargetCompaniesResult(BaseModel):
+    companies: list[SecondDegreeTargetCompanySummary] = Field(default_factory=list)
+    message: str
+    system_messages: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Trust List schemas
 # ---------------------------------------------------------------------------

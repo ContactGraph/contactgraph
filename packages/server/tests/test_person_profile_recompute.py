@@ -105,6 +105,14 @@ async def test_recompute_highest_confidence_wins(
     assert updated.current_org_id == org2.id
     assert updated.current_role == "CTO"
 
+    emp_result = await db_session.execute(
+        select(EmploymentClaim).where(EmploymentClaim.person_id == person.id),
+    )
+    claims: list[EmploymentClaim] = list(emp_result.scalars().all())
+    org1_claim = next(c for c in claims if c.org_id == org1.id)
+    assert org1_claim.is_current is False
+    assert org1_claim.ended_at is not None
+
 
 async def test_recompute_categories_and_social(
     db_session: AsyncSession, user: User, person: Person,
