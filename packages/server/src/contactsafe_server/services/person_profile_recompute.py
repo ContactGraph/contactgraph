@@ -28,6 +28,15 @@ from contactsafe_server.services.employment_ranking import (
 
 logger: logging.Logger = logging.getLogger(__name__)
 
+_STRIP_QUOTE_RE: re.Pattern[str] = re.compile(
+    r"""^[\s'"'\u2018\u2019\u201c\u201d]+|[\s'"'\u2018\u2019\u201c\u201d]+$"""
+)
+
+
+def sanitize_display_name(name: str) -> str:
+    """Strip stray quote characters and whitespace from a display name."""
+    return _STRIP_QUOTE_RE.sub("", name)
+
 
 class PersonProfileRecompute:
     def __init__(self, session: AsyncSession, settings: Settings | None = None) -> None:
@@ -132,6 +141,10 @@ class PersonProfileRecompute:
         # enrichment still get properly categorized.
         person_row: Person | None = await self._session.get(Person, person_id)
         if person_row is not None:
+            sanitized_name: str = sanitize_display_name(person_row.canonical_name or "")
+            if sanitized_name and sanitized_name != person_row.canonical_name:
+                person_row.canonical_name = sanitized_name
+
             primary_email: str = person_row.primary_email or ""
             display_name: str = person_row.canonical_name or ""
             inferred: list[str] = infer_categories_from_contact(

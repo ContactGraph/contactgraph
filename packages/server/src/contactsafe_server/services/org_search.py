@@ -95,10 +95,43 @@ def is_automation_domain(domain: str) -> bool:
     return any(domain_lower.startswith(marker) for marker in automation_markers)
 
 
+_NON_COMPANY_TLDS: frozenset[str] = frozenset({
+    "gov", "edu", "mil", "museum", "int",
+})
+
+_GOV_EDU_SUBDOMAIN_SUFFIXES: tuple[str, ...] = (
+    ".gov",
+    ".edu",
+    ".mil",
+    ".k12.",
+    ".ac.",
+    ".gov.",
+)
+
+
+def is_non_company_domain(domain: str) -> bool:
+    """Domains that should never produce heuristic Org records
+    (.gov, .edu, multi-part subdomains of those, etc.)."""
+    domain_lower: str = domain.lower()
+    labels: list[str] = [label for label in domain_lower.split(".") if label]
+    if not labels:
+        return True
+    tld: str = labels[-1]
+    if tld in _NON_COMPANY_TLDS:
+        return True
+    if any(domain_lower.endswith(suffix) or f".{suffix.strip('.')}." in f".{domain_lower}" for suffix in _GOV_EDU_SUBDOMAIN_SUFFIXES):
+        return True
+    return False
+
+
 def is_automation_or_generic_domain(domain: str) -> bool:
     """Skip org resolution for personal inboxes and automation domains."""
     domain_lower: str = domain.lower()
-    return is_generic_personal_domain(domain_lower) or is_automation_domain(domain_lower)
+    return (
+        is_generic_personal_domain(domain_lower)
+        or is_automation_domain(domain_lower)
+        or is_non_company_domain(domain_lower)
+    )
 
 
 def org_name_from_email(email: str) -> str | None:
@@ -110,7 +143,7 @@ def org_name_from_email(email: str) -> str | None:
     local_lower: str = local.lower()
     if local_lower in NO_REPLY_LOCAL_PARTS or local_lower in BROADCAST_LOCAL_PARTS:
         return None
-    if domain in _GENERIC_EMAIL_DOMAINS or is_automation_domain(domain):
+    if domain in _GENERIC_EMAIL_DOMAINS or is_automation_domain(domain) or is_non_company_domain(domain):
         return None
 
     known_brand: str | None = _KNOWN_DOMAIN_BRANDS.get(domain)

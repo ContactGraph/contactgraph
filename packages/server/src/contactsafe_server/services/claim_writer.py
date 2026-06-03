@@ -107,6 +107,11 @@ async def record_relationship(
     await session.execute(stmt)
 
 
+def _sanitize_text(value: str) -> str:
+    """Remove null bytes and other non-printable control chars that Postgres rejects."""
+    return value.replace("\x00", "")
+
+
 async def record_person_attribute(
     session: AsyncSession,
     *,
@@ -119,10 +124,11 @@ async def record_person_attribute(
     confidence: float = 0.7,
     evidence: dict[str, object] | None = None,
 ) -> None:
+    clean_value: str = _sanitize_text(value)
     stmt = pg_insert(PersonAttributeClaim).values(
         person_id=person_id,
         kind=kind,
-        value=value,
+        value=clean_value,
         contributor_user_id=contributor_user_id,
         contributor_source_kind=contributor_source_kind,
         contributor_source_id=contributor_source_id,

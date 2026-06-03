@@ -214,7 +214,7 @@ export default function SourcesPage() {
     refetchInterval: (query) => {
       const state: EnrichmentStatusResult["state"] | undefined =
         query.state.data?.state;
-      return state === "running" ? 4000 : false;
+      return state === "running" || state === "pending" ? 3000 : false;
     },
   });
 
@@ -525,10 +525,22 @@ export default function SourcesPage() {
                     <p className="text-sm text-muted-foreground">
                       {step.description}
                     </p>
-                    {step.id === "enrich" && enrichment?.message ? (
-                      <p className="text-xs text-muted-foreground">
-                        {enrichment.message}
-                      </p>
+                    {step.id === "enrich" && enrichment ? (
+                      <div className="space-y-0.5">
+                        {enrichment.state === "running" && enrichment.progress_message ? (
+                          <p className="text-xs text-muted-foreground">
+                            {enrichment.progress_message}
+                          </p>
+                        ) : null}
+                        <p className="text-xs text-muted-foreground">
+                          {enrichment.state === "running" && enrichment.contacts_total > 0
+                            ? `Processed ${enrichment.contacts_enriched} of ${enrichment.contacts_total} contacts`
+                            : enrichment.message}
+                          {enrichment.state === "complete" && enrichment.completed_at
+                            ? ` · ${new Date(enrichment.completed_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+                            : null}
+                        </p>
+                      </div>
                     ) : null}
                   </div>
                 </div>
@@ -636,12 +648,19 @@ export default function SourcesPage() {
                       disabled={
                         !enrichEnabled ||
                         enrichMutation.isPending ||
-                        inProgress ||
-                        complete
+                        inProgress
                       }
                     >
-                      <Sparkles className="size-4" />
-                      {inProgress ? "Enriching…" : "Enrich now"}
+                      {enrichMutation.isPending || inProgress ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Sparkles className="size-4" />
+                      )}
+                      {inProgress
+                        ? "Enriching…"
+                        : complete
+                          ? "Re-enrich"
+                          : "Enrich now"}
                     </Button>
                   ) : null}
                 </div>
