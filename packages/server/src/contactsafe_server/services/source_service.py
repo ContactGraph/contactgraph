@@ -35,6 +35,8 @@ _OAUTH_SOURCE_TYPES: frozenset[SourceType] = frozenset({
     SourceType.GOOGLE_CALENDAR,
 })
 
+from contactsafe_server.services.crypto import TokenEncryptor
+from contactsafe_server.services.upload_payload_crypto import build_upload_payload
 from contactsafe_server.services.import_scheduler import (
     is_source_sync_running,
     is_user_sync_running,
@@ -166,6 +168,7 @@ class SourceService:
         source_type: SourceType,
         filename: str,
         content: str,
+        encryptor: TokenEncryptor | None = None,
     ) -> Source:
         if source_type not in {
             SourceType.PHONE_CONTACTS_UPLOAD,
@@ -189,7 +192,13 @@ class SourceService:
             SourceType.LINKEDIN_PROFILE_UPLOAD: "LinkedIn profile",
         }
         label: str = upload_labels[source_type]
-        payload: dict[str, object] = {"filename": filename, "content": content}
+        if encryptor is None:
+            raise ValueError("encryptor is required for upload sources")
+        payload: dict[str, object] = build_upload_payload(
+            filename=filename,
+            content=content,
+            encryptor=encryptor,
+        )
 
         if existing is not None:
             existing.upload_payload = payload
@@ -245,6 +254,16 @@ class SourceService:
             sources=[self._to_summary(s) for s in visible_sources],
             message=f"Found {len(visible_sources)} source(s).",
         )
+
+    async def require_source_owned_by(
+        self,
+        source_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> Source:
+        source: Source | None = await self._db.get(Source, source_id)
+        if source is None or source.user_id != user_id:
+            raise ValueError(f"Unknown source_id: {source_id}")
+        return source
 
     async def get_source_status(
         self,

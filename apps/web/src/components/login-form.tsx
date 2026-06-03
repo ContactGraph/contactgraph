@@ -39,9 +39,9 @@ export function LoginForm() {
   }, [clearPollTimer]);
 
   const pollConnect = useCallback(
-    async (sessionId: string): Promise<void> => {
+    async (sessionId: string, pollSecret: string): Promise<void> => {
       const response: Response = await fetch(
-        `/api/auth/poll?sid=${encodeURIComponent(sessionId)}`,
+        `/api/auth/poll?sid=${encodeURIComponent(sessionId)}&poll_secret=${encodeURIComponent(pollSecret)}`,
       );
       if (!response.ok) {
         const payload: unknown = await response.json().catch(() => null);
@@ -127,9 +127,14 @@ export function LoginForm() {
       setState("polling");
       setStatusMessage("Complete Google sign-in in the popup window…");
 
-      await pollConnect(result.connect_session_id);
+      const pollSecret: string | null = result.poll_secret;
+      if (!pollSecret) {
+        throw new Error("Server did not return a poll secret. Try signing in again.");
+      }
+
+      await pollConnect(result.connect_session_id, pollSecret);
       pollTimerRef.current = setInterval(() => {
-        void pollConnect(result.connect_session_id).catch((pollError: unknown) => {
+        void pollConnect(result.connect_session_id, pollSecret).catch((pollError: unknown) => {
           clearPollTimer();
           setState("error");
           setError(

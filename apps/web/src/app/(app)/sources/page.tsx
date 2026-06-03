@@ -274,9 +274,9 @@ export default function SourcesPage() {
   });
 
   const pollConnect = useCallback(
-    async (sessionId: string): Promise<void> => {
+    async (sessionId: string, pollSecret: string): Promise<void> => {
       const response: Response = await fetch(
-        `/api/auth/poll?sid=${encodeURIComponent(sessionId)}`,
+        `/api/auth/poll?sid=${encodeURIComponent(sessionId)}&poll_secret=${encodeURIComponent(pollSecret)}`,
       );
       if (!response.ok) {
         throw new Error("Failed to poll OAuth status");
@@ -329,9 +329,14 @@ export default function SourcesPage() {
       }
       popupRef.current = popup;
       setConnectMessage("Complete authorization in the popup…");
-      await pollConnect(result.connect_session_id);
+      const pollSecret: string | null = result.poll_secret;
+      if (!pollSecret) {
+        setConnectError("Server did not return a poll secret. Try connecting again.");
+        return;
+      }
+      await pollConnect(result.connect_session_id, pollSecret);
       pollTimerRef.current = setInterval(() => {
-        void pollConnect(result.connect_session_id).catch(() => {
+        void pollConnect(result.connect_session_id, pollSecret).catch(() => {
           clearPollTimer();
           setConnectError("OAuth polling failed");
         });

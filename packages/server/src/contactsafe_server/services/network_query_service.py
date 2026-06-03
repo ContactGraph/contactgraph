@@ -23,6 +23,7 @@ from contactsafe_server.db.models import (
     UserRelationshipObservation,
 )
 from contactsafe_server.services.org_search import expand_org_search_terms
+from contactsafe_server.services.second_degree_ref import opaque_second_degree_person_ref
 
 if TYPE_CHECKING:
     from contactsafe_server.services.trust_list_service import TrustListService
@@ -235,6 +236,7 @@ class NetworkQueryService:
         user_id: uuid.UUID,
         plan: QueryPlan,
         trust_list_service: "TrustListService",
+        signing_key: str,
     ) -> list[SecondDegreeMatch]:
         """Search trust-list members' graphs and return identity-level matches."""
 
@@ -267,7 +269,12 @@ class NetworkQueryService:
                 second_degree_matches.append(SecondDegreeMatch(
                     holder_name=holder_name,
                     holder_user_id=member_id,
-                    person_id=person.id,
+                    opaque_person_ref=opaque_second_degree_person_ref(
+                        person_id=person.id,
+                        holder_user_id=member_id,
+                        viewer_user_id=user_id,
+                        signing_key=signing_key,
+                    ),
                     person_name=person.canonical_name,
                     person_org=person.current_org_name,
                     person_role=person.current_role,

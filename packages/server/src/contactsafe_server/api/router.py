@@ -146,26 +146,41 @@ async def _resolve_effective_user(
             detail="X-On-Behalf-Of requires contactsafe:admin scope",
         )
 
-    # Try as UUID first, then fall back to email lookup.
-    try:
-        return UUID(x_on_behalf_of)
-    except ValueError:
-        pass
-
     ctx: AppContext = _get_app_context(request)
-    async with ctx.session_factory() as db:
-        session: AsyncSession = db
-        row = (
-            await session.execute(
-                select(User.id).where(User.email == x_on_behalf_of)
-            )
-        ).scalar_one_or_none()
-        if row is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"User not found: {x_on_behalf_of}",
-            )
-        return row  # type: ignore[return-value]
+    effective_id: UUID
+    try:
+        effective_id = UUID(x_on_behalf_of)
+        async with ctx.session_factory() as db:
+            if await db.get(User, effective_id) is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"User not found: {x_on_behalf_of}",
+                )
+    except ValueError:
+        async with ctx.session_factory() as db:
+            session: AsyncSession = db
+            row = (
+                await session.execute(
+                    select(User.id).where(User.email == x_on_behalf_of)
+                )
+            ).scalar_one_or_none()
+            if row is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"User not found: {x_on_behalf_of}",
+                )
+            effective_id = row  # type: ignore[assignment]
+
+    logger.warning(
+        "Admin impersonation",
+        extra={
+            "admin_user_id": str(auth.user_id),
+            "effective_user_id": str(effective_id),
+            "path": request.url.path,
+            "method": request.method,
+        },
+    )
+    return effective_id
 
 
 EffectiveUser = Annotated[UUID, Depends(_resolve_effective_user)]
@@ -230,11 +245,21 @@ async def api_connect_source(
 async def api_poll_connect(
     ctx: Ctx,
     connect_session_id: UUID,
+    poll_secret: Annotated[str, Header(alias="X-Poll-Secret")],
 ) -> PollConnectResult:
+    if not poll_secret.strip():
+        raise HTTPException(status_code=401, detail="X-Poll-Secret header required")
     try:
-        return await actions.poll_connect(ctx, connect_session_id=connect_session_id)
+        return await actions.poll_connect(
+            ctx,
+            connect_session_id=connect_session_id,
+            poll_secret=poll_secret,
+        )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        detail: str = str(exc)
+        if detail == "Invalid poll credentials":
+            raise HTTPException(status_code=401, detail=detail) from exc
+        raise HTTPException(status_code=404, detail=detail) from exc
 
 
 @router.post("/list-sources", response_model=ListSourcesResult)
