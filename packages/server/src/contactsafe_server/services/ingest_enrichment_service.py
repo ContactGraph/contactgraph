@@ -114,6 +114,7 @@ class IngestEnrichmentService:
                 )
             enriched_count += 1
             if run is not None:
+                await self._db.refresh(run)
                 run.contacts_enriched = enriched_count
                 await self._db.flush()
 
