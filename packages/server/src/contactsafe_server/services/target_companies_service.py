@@ -2,19 +2,77 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from contactsafe_server.db.models import Person, RelationshipClaim, User, UserPersonObservation
+from contactsafe_server.db.models import (
+    EmploymentClaim,
+    Person,
+    RelationshipClaim,
+    User,
+    UserPersonObservation,
+)
 from contactsafe_server.services.relationship_trust import (
     HIGH_TRUST_THRESHOLD,
     best_relationship_kind,
     compute_trust_score,
     is_high_trust_connection,
 )
+
+# ---------------------------------------------------------------------------
+# Data-quality filters
+# ---------------------------------------------------------------------------
+
+_EMAIL_RE: re.Pattern[str] = re.compile(r"@")
+_QUOTE_CHARS: frozenset[str] = frozenset({"'", '"', "\u2018", "\u2019", "\u201c", "\u201d"})
+_TEAM_TOKENS: frozenset[str] = frozenset({
+    "team", "group", "dept", "department", "committee", "staff",
+    "office", "bureau", "division", "unit",
+})
+
+
+def _looks_like_email(name: str) -> bool:
+    """True if *name* looks like an email address rather than a person name."""
+    return bool(_EMAIL_RE.search(name))
+
+
+def _looks_like_team_account(name: str, org_name: str | None) -> bool:
+    """Heuristic: name is a team/group account, not an individual."""
+    lower: str = name.lower()
+    words: list[str] = lower.split()
+    if any(w in _TEAM_TOKENS for w in words):
+        return True
+    if org_name and lower.strip() == org_name.strip().lower():
+        return True
+    return False
+
+
+async def _has_non_heuristic_current_employment(
+    db: AsyncSession,
+    person_id: uuid.UUID,
+) -> bool:
+    """Return True if *person_id* has at least one ``is_current`` employment
+    claim whose ``contributor_source_kind`` is NOT ``'heuristic'``."""
+    stmt = select(EmploymentClaim.id).where(
+        EmploymentClaim.person_id == person_id,
+        EmploymentClaim.is_current.is_(True),
+        EmploymentClaim.contributor_source_kind != "heuristic",
+    ).limit(1)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none() is not None
+
+
+def _passes_display_quality(name: str, org_name: str | None) -> bool:
+    """Quick pre-filter on name quality (email-as-name, team accounts)."""
+    if _looks_like_email(name):
+        return False
+    if _looks_like_team_account(name, org_name):
+        return False
+    return True
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +153,10 @@ class TargetCompaniesService:
         by_org: dict[uuid.UUID, TargetCompanyMatch] = {}
         for person, obs in rows:
             if exclude_person_id is not None and person.id == exclude_person_id:
+                continue
+            if not _passes_display_quality(person.canonical_name, person.current_org_name):
+                continue
+            if not await _has_non_heuristic_current_employment(self._db, person.id):
                 continue
             rel_kind: str | None = await self._relationship_kind_for_pair(
                 user_id=user_id,
@@ -179,6 +241,10 @@ class TargetCompaniesService:
 
             for person, obs in rows:
                 if person.id in private_ids:
+                    continue
+                if not _passes_display_quality(person.canonical_name, person.current_org_name):
+                    continue
+                if not await _has_non_heuristic_current_employment(self._db, person.id):
                     continue
                 rel_kind: str | None = await self._relationship_kind_for_pair(
                     user_id=member_id,
