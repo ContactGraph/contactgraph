@@ -20,7 +20,8 @@ RELATIONSHIP_KIND_TRUST: Final[dict[str, float]] = {
 HIGH_TRUST_THRESHOLD: Final[float] = 0.7
 
 # First-degree target companies: user deliberately saved these contacts.
-FIRST_DEGREE_TRUST_THRESHOLD: Final[float] = 0.4
+# google_contact at tie_strength 0.3 scores ~0.385 (0.35*0.5 + 0.3*0.2 + 0.15).
+FIRST_DEGREE_TRUST_THRESHOLD: Final[float] = 0.35
 
 # Map observation relationship_types to canonical edge kinds.
 OBSERVATION_KIND_MAP: Final[dict[str, str]] = {
