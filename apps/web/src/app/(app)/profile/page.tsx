@@ -9,7 +9,7 @@ import {
   Trash2,
   Upload,
 } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -33,6 +33,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
   DeleteUserExperienceRequest,
+  ListSourcesResult,
   SaveUserExperienceRequest,
   SourceType,
   UploadSourceResult,
@@ -89,18 +90,45 @@ export default function ProfilePage() {
   const [form, setForm] = useState<ExperienceFormState>(EMPTY_FORM);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [profileSaved, setProfileSaved] = useState<boolean>(false);
+  const [awaitingSync, setAwaitingSync] = useState<boolean>(false);
 
   const [profileName, setProfileName] = useState<string>("");
   const [profileLocation, setProfileLocation] = useState<string>("");
+  const profileInitialized = useRef<boolean>(false);
 
   const profileQuery = useQuery({
     queryKey: ["user-profile"],
     queryFn: () => proxyPost<UserProfileResult>("get-user-profile"),
   });
 
+  const sourcesQuery = useQuery({
+    queryKey: ["sources"],
+    queryFn: () => proxyPost<ListSourcesResult>("list-sources"),
+    refetchInterval: awaitingSync ? 2000 : false,
+  });
+
+  useEffect(() => {
+    if (!awaitingSync) {
+      return;
+    }
+    const source = sourcesQuery.data?.sources.find(
+      (s) => s.source_type === "linkedin_profile_upload",
+    );
+    if (source === undefined) {
+      return;
+    }
+    if (source.sync_state === "complete" || source.sync_state === "failed") {
+      setAwaitingSync(false);
+      if (source.sync_state === "failed") {
+        setUploadError("Could not read that PDF. Try re-exporting from LinkedIn.");
+      }
+      profileInitialized.current = false;
+      void queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+    }
+  }, [awaitingSync, sourcesQuery.data, queryClient]);
+
   const profile: UserProfileResult | undefined = profileQuery.data;
 
-  const profileInitialized = useRef<boolean>(false);
   if (profile && !profileInitialized.current) {
     profileInitialized.current = true;
     setProfileName(profile.display_name ?? "");
@@ -146,8 +174,7 @@ export default function ProfilePage() {
     }) => proxyPost<UploadSourceResult>("upload-source", payload),
     onSuccess: async () => {
       setUploadError(null);
-      profileInitialized.current = false;
-      await queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+      setAwaitingSync(true);
       await queryClient.invalidateQueries({ queryKey: ["sources"] });
     },
     onError: (error: Error) => {
@@ -407,14 +434,14 @@ export default function ProfilePage() {
           <Button
             variant="outline"
             onClick={() => fileInputRef.current?.click()}
-            disabled={uploadMutation.isPending}
+            disabled={uploadMutation.isPending || awaitingSync}
           >
-            {uploadMutation.isPending ? (
+            {uploadMutation.isPending || awaitingSync ? (
               <Loader2 className="size-4 animate-spin" />
             ) : (
               <Upload className="size-4" />
             )}
-            Upload LinkedIn PDF
+            {awaitingSync ? "Processing PDF…" : "Upload LinkedIn PDF"}
           </Button>
         </CardContent>
       </Card>
