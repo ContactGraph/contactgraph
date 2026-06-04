@@ -3,6 +3,8 @@
 :root {
   --background: 0 0% 100%;
   --foreground: 0 0% 0%;
+  --site-header-height: 3.25rem;
+  --table-page-chrome: 9rem;
   --card: 0 0% 100%;
   --card-foreground: 0 0% 0%;
   --popover: 0 0% 100%;

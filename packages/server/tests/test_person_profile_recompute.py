@@ -11,6 +11,7 @@ from contactsafe_server.db.models import (
     EmploymentClaim,
     Org,
     Person,
+    PersonAlias,
     PersonAttributeClaim,
     User,
     UserPersonObservation,
@@ -200,6 +201,34 @@ async def test_recompute_rejects_postgres_role(
     result = await db_session.execute(select(Person).where(Person.id == person.id))
     updated: Person = result.scalar_one()
     assert updated.current_role is None
+
+
+async def test_recompute_preserves_phone_numbers_from_aliases(
+    db_session: AsyncSession, user: User,
+) -> None:
+    person = Person(
+        canonical_name="Jane Doe",
+        primary_email="jane@example.com",
+        phone_numbers=["+15550100"],
+    )
+    db_session.add(person)
+    await db_session.flush()
+    db_session.add(UserPersonObservation(
+        user_id=user.id, person_id=person.id, email_count=1,
+    ))
+    db_session.add(PersonAlias(
+        person_id=person.id,
+        kind="phone",
+        value="+15550101",
+    ))
+    await db_session.flush()
+
+    recompute = PersonProfileRecompute(db_session)
+    await recompute.recompute_for_user(user.id)
+
+    result = await db_session.execute(select(Person).where(Person.id == person.id))
+    updated: Person = result.scalar_one()
+    assert updated.phone_numbers == ["+15550100", "+15550101"]
 
 
 async def test_recompute_strips_quoted_name(

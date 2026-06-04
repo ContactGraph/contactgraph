@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { useEffect, useRef } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -31,7 +32,29 @@ const marketingLinks: readonly NavLink[] = [
 export function SiteHeader({ email }: { email: string | null }) {
   const pathname: string = usePathname();
   const router = useRouter();
+  const headerRef = useRef<HTMLElement>(null);
   const links: readonly NavLink[] = email ? appLinks : marketingLinks;
+
+  useEffect(() => {
+    const header: HTMLElement | null = headerRef.current;
+    if (header === null) {
+      return;
+    }
+
+    const updateHeight = (): void => {
+      document.documentElement.style.setProperty(
+        "--site-header-height",
+        `${header.offsetHeight}px`,
+      );
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(header);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   const handleSignOut = async (): Promise<void> => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -48,7 +71,10 @@ export function SiteHeader({ email }: { email: string | null }) {
     );
 
   return (
-    <header className="border-b border-border">
+    <header
+      ref={headerRef}
+      className="sticky top-0 z-40 border-b border-border bg-background"
+    >
       <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-4 sm:gap-6">
           <Link

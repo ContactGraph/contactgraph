@@ -17,6 +17,7 @@ from contactsafe_server.config import Settings, get_settings
 from contactsafe_server.db.models import (
     EmploymentClaim,
     Person,
+    PersonAlias,
     PersonAttributeClaim,
     UserPersonObservation,
 )
@@ -118,7 +119,7 @@ class PersonProfileRecompute:
         descriptive_tags: list[str] = []
         bio_summary: str | None = None
         location: str | None = None
-        phone_numbers: list[str] = []
+        claim_phones: list[str] = []
 
         best_bio_len: int = 0
         for attr in attrs:
@@ -138,13 +139,27 @@ class PersonProfileRecompute:
             elif attr.kind == "location":
                 location = attr.value
             elif attr.kind == "phone":
-                if attr.value not in phone_numbers:
-                    phone_numbers.append(attr.value)
+                if attr.value not in claim_phones:
+                    claim_phones.append(attr.value)
 
-        # Re-infer categories from the now-resolved person data so that
-        # contacts whose org/role was only populated after initial heuristic
-        # enrichment still get properly categorized.
         person_row: Person | None = await self._session.get(Person, person_id)
+        phone_numbers: list[str] = []
+        if person_row is not None:
+            for existing_phone in person_row.phone_numbers or []:
+                if existing_phone not in phone_numbers:
+                    phone_numbers.append(existing_phone)
+            alias_stmt = select(PersonAlias.value).where(
+                PersonAlias.person_id == person_id,
+                PersonAlias.kind == "phone",
+            )
+            alias_result = await self._session.execute(alias_stmt)
+            for alias_phone in alias_result.scalars():
+                if alias_phone not in phone_numbers:
+                    phone_numbers.append(alias_phone)
+        for claim_phone in claim_phones:
+            if claim_phone not in phone_numbers:
+                phone_numbers.append(claim_phone)
+
         if person_row is not None:
             sanitized_name: str = sanitize_display_name(person_row.canonical_name or "")
             if sanitized_name and sanitized_name != person_row.canonical_name:

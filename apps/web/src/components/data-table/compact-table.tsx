@@ -16,12 +16,14 @@ declare module "@tanstack/react-table" {
 
 export const compactTableStyles = {
   table: "w-full min-w-full table-fixed border-separate border-spacing-0 text-xs leading-tight",
-  thead: "border-b bg-muted/40",
-  th: "overflow-hidden px-1.5 py-1 text-left font-medium text-muted-foreground",
+  scrollContainer:
+    "max-h-[calc(100dvh-var(--site-header-height)-var(--table-page-chrome))] overflow-auto",
+  thead: "border-b",
+  th: "sticky top-0 z-20 overflow-hidden border-b border-border bg-muted px-1.5 py-1 text-left font-medium text-muted-foreground",
   td: "overflow-hidden px-1.5 py-1 align-middle",
   row: "group border-b transition-colors hover:bg-muted/30",
   stickyRightHeader:
-    "sticky right-0 z-20 border-l bg-muted/40 shadow-[-4px_0_6px_-4px_rgba(0,0,0,0.12)]",
+    "sticky right-0 z-30 border-l bg-muted shadow-[-4px_0_6px_-4px_rgba(0,0,0,0.12)]",
   stickyRightCell:
     "sticky right-0 z-10 border-l bg-card shadow-[-4px_0_6px_-4px_rgba(0,0,0,0.08)] group-hover:bg-muted/30",
 } as const;
@@ -51,7 +53,7 @@ export function CompactTableShell<TData>({
   const rows: Row<TData>[] = table.getRowModel().rows;
 
   return (
-    <div className="overflow-x-auto">
+    <div className={compactTableStyles.scrollContainer}>
       <table
         className={compactTableStyles.table}
         style={minWidth ? { minWidth } : undefined}
