@@ -165,7 +165,7 @@ export default function PhoneContactsUploadPage({
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
           <p>1. Open the Contacts app (or Phone → Contacts tab).</p>
-          <p>2. Tap Lists (or back button) in the top-left.</p>
+          <p>2. Tap back button (or Lists) in the top-left.</p>
           <p>
             3. Press and hold All Contacts (or All iCloud), then tap Export.
           </p>

@@ -17,6 +17,7 @@ from contactsafe_server.config import Settings, get_settings
 from contactsafe_server.db.models import (
     EmploymentClaim,
     Person,
+    PersonAlias,
     PersonAttributeClaim,
     UserPersonObservation,
 )
@@ -141,10 +142,20 @@ class PersonProfileRecompute:
                 if attr.value not in phone_numbers:
                     phone_numbers.append(attr.value)
 
-        # Re-infer categories from the now-resolved person data so that
-        # contacts whose org/role was only populated after initial heuristic
-        # enrichment still get properly categorized.
         person_row: Person | None = await self._session.get(Person, person_id)
+        if person_row is not None:
+            alias_stmt = select(PersonAlias.value).where(
+                PersonAlias.person_id == person_id,
+                PersonAlias.kind == "phone",
+            )
+            alias_result = await self._session.execute(alias_stmt)
+            for alias_phone in alias_result.scalars():
+                if alias_phone not in phone_numbers:
+                    phone_numbers.append(alias_phone)
+            for existing_phone in person_row.phone_numbers or []:
+                if existing_phone not in phone_numbers:
+                    phone_numbers.append(existing_phone)
+
         if person_row is not None:
             sanitized_name: str = sanitize_display_name(person_row.canonical_name or "")
             if sanitized_name and sanitized_name != person_row.canonical_name:

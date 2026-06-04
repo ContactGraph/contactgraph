@@ -1,11 +1,12 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Circle, Loader2, Plus, RefreshCw, Sparkles, User } from "lucide-react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { CheckCircle2, Circle, Loader2, Plus, RefreshCw, Sparkles } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { LinkedInConnectionsUploadDialog } from "@/components/setup/linkedin-connections-upload-dialog";
+import { LinkedInProfileUploadDialog } from "@/components/setup/linkedin-profile-upload-dialog";
+import { PhoneContactsUploadDialog } from "@/components/setup/phone-contacts-upload-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,8 +17,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
   ConnectSourceResult,
@@ -30,7 +29,6 @@ import type {
   SyncSourceResult,
   SyncState,
   UploadSourceResult,
-  UserProfileResult,
 } from "@/lib/api-types";
 import { formatSourceType, SyncStateBadge } from "@/lib/formatters";
 import { proxyPost } from "@/lib/proxy-client";
@@ -41,10 +39,9 @@ const IMPORT_COMPLETE_STATES: ReadonlySet<SyncState> = new Set([
 ]);
 
 type SetupStepId =
-  | "gmail"
-  | "calendar"
-  | "phone"
   | "linkedin_profile"
+  | "gmail"
+  | "phone"
   | "linkedin"
   | "enrich";
 
@@ -57,15 +54,15 @@ interface SetupStep {
 
 const setupSteps: ReadonlyArray<SetupStep> = [
   {
+    id: "linkedin_profile",
+    title: "Set up your profile",
+    description:
+      "Upload your LinkedIn PDF (Profile → Save to PDF) so we can identify you and your contacts.",
+  },
+  {
     id: "gmail",
     title: "Connect Gmail",
     description: "Import contacts and email relationships from your inbox.",
-  },
-  {
-    id: "calendar",
-    title: "Connect Google Calendar",
-    description: "Add people you've met via calendar events.",
-    optional: true,
   },
   {
     id: "phone",
@@ -75,24 +72,17 @@ const setupSteps: ReadonlyArray<SetupStep> = [
     optional: true,
   },
   {
-    id: "linkedin_profile",
-    title: "Set up your profile",
-    description:
-      "Upload your LinkedIn PDF (Profile \u2192 Save to PDF) to help identify your contacts.",
-    optional: true,
-  },
-  {
     id: "linkedin",
     title: "Upload LinkedIn connections",
     description:
-      "Import Connections.csv (Settings \u2192 Get a copy of your data, takes 24h) for identity matching.",
+      "Import Connections.csv (Settings → Get a copy of your data, takes 24h) for identity matching.",
     optional: true,
   },
   {
     id: "enrich",
     title: "Enrich contacts",
     description:
-      "Find where your contacts work now. Add your name and location below first for best results.",
+      "Find where your contacts work now and what they are posting about.",
   },
 ];
 
@@ -111,10 +101,6 @@ function stepComplete(
   switch (stepId) {
     case "gmail": {
       const source = sourceForType(sources, "google_mail");
-      return source !== undefined && IMPORT_COMPLETE_STATES.has(source.sync_state);
-    }
-    case "calendar": {
-      const source = sourceForType(sources, "google_calendar");
       return source !== undefined && IMPORT_COMPLETE_STATES.has(source.sync_state);
     }
     case "phone": {
@@ -146,7 +132,6 @@ function stepInProgress(
   }
   const typeMap: Partial<Record<SetupStepId, SourceType>> = {
     gmail: "google_mail",
-    calendar: "google_calendar",
     phone: "phone_contacts_upload",
     linkedin_profile: "linkedin_profile_upload",
     linkedin: "linkedin_connections_upload",
@@ -156,7 +141,9 @@ function stepInProgress(
     return false;
   }
   const source = sourceForType(sources, sourceType);
-  return source?.sync_state === "syncing";
+  return (
+    source?.sync_state === "syncing" || source?.sync_state === "pending"
+  );
 }
 
 function anyImportReady(sources: ReadonlyArray<SourceSummary>): boolean {
@@ -168,19 +155,23 @@ function anyImportReady(sources: ReadonlyArray<SourceSummary>): boolean {
 }
 
 export default function SourcesPage() {
-  const router = useRouter();
   const queryClient = useQueryClient();
   const popupRef = useRef<Window | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const phoneInputRef = useRef<HTMLInputElement>(null);
-  const linkedinInputRef = useRef<HTMLInputElement>(null);
   const [connectMessage, setConnectMessage] = useState<string | null>(null);
   const [connectError, setConnectError] = useState<string | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const [profileName, setProfileName] = useState<string>("");
-  const [profileEmail, setProfileEmail] = useState<string>("");
-  const [profileLocation, setProfileLocation] = useState<string>("");
-  const [profileSaved, setProfileSaved] = useState<boolean>(false);
+  const [phoneUploadError, setPhoneUploadError] = useState<string | null>(null);
+  const [linkedinProfileUploadError, setLinkedinProfileUploadError] =
+    useState<string | null>(null);
+  const [connectionsUploadError, setConnectionsUploadError] =
+    useState<string | null>(null);
+  const [phoneDialogOpen, setPhoneDialogOpen] = useState<boolean>(false);
+  const [linkedinConnectionsDialogOpen, setLinkedinConnectionsDialogOpen] =
+    useState<boolean>(false);
+  const [linkedinProfileDialogOpen, setLinkedinProfileDialogOpen] =
+    useState<boolean>(false);
+  const [linkedinProfileProcessing, setLinkedinProfileProcessing] =
+    useState<boolean>(false);
 
   const clearPollTimer = useCallback((): void => {
     if (pollTimerRef.current) {
@@ -203,7 +194,9 @@ export default function SourcesPage() {
       const data: ListSourcesResult | undefined = query.state.data;
       const syncing: boolean =
         data?.sources.some((source) => source.sync_state === "syncing") ?? false;
-      return syncing ? 4000 : false;
+      const pending: boolean =
+        data?.sources.some((source) => source.sync_state === "pending") ?? false;
+      return syncing || pending || linkedinProfileProcessing ? 4000 : false;
     },
   });
 
@@ -215,31 +208,6 @@ export default function SourcesPage() {
       const state: EnrichmentStatusResult["state"] | undefined =
         query.state.data?.state;
       return state === "running" || state === "pending" ? 3000 : false;
-    },
-  });
-
-  const profileQuery = useQuery({
-    queryKey: ["user-profile"],
-    queryFn: () => proxyPost<UserProfileResult>("get-user-profile"),
-  });
-
-  useEffect(() => {
-    const profile: UserProfileResult | undefined = profileQuery.data;
-    if (profile === undefined) {
-      return;
-    }
-    setProfileName(profile.display_name ?? "");
-    setProfileEmail(profile.email ?? "");
-    setProfileLocation(profile.location ?? "");
-  }, [profileQuery.data]);
-
-  const profileMutation = useMutation({
-    mutationFn: (payload: { display_name: string; location: string }) =>
-      proxyPost<UserProfileResult>("update-user-profile", payload),
-    onSuccess: async () => {
-      setProfileSaved(true);
-      await queryClient.invalidateQueries({ queryKey: ["user-profile"] });
-      window.setTimeout(() => setProfileSaved(false), 2500);
     },
   });
 
@@ -264,14 +232,63 @@ export default function SourcesPage() {
       filename: string;
       content: string;
     }) => proxyPost<UploadSourceResult>("upload-source", payload),
-    onSuccess: async () => {
-      setUploadError(null);
+    onSuccess: async (_result, variables) => {
+      if (variables.source_type === "phone_contacts_upload") {
+        setPhoneUploadError(null);
+      } else if (variables.source_type === "linkedin_profile_upload") {
+        setLinkedinProfileUploadError(null);
+        setLinkedinProfileProcessing(true);
+      } else if (variables.source_type === "linkedin_connections_upload") {
+        setConnectionsUploadError(null);
+      }
       await queryClient.invalidateQueries({ queryKey: ["sources"] });
     },
-    onError: (error: Error) => {
-      setUploadError(error.message);
+    onError: (error: Error, variables) => {
+      if (variables.source_type === "phone_contacts_upload") {
+        setPhoneUploadError(error.message);
+      } else if (variables.source_type === "linkedin_profile_upload") {
+        setLinkedinProfileUploadError(error.message);
+      } else if (variables.source_type === "linkedin_connections_upload") {
+        setConnectionsUploadError(error.message);
+      }
     },
   });
+
+  const sources: SourceSummary[] = sourcesQuery.data?.sources ?? [];
+  const linkedinProfileSource: SourceSummary | undefined = sourceForType(
+    sources,
+    "linkedin_profile_upload",
+  );
+  const phoneSource: SourceSummary | undefined = sourceForType(
+    sources,
+    "phone_contacts_upload",
+  );
+  const linkedinConnectionsSource: SourceSummary | undefined = sourceForType(
+    sources,
+    "linkedin_connections_upload",
+  );
+
+  useEffect(() => {
+    if (!linkedinProfileProcessing) {
+      return;
+    }
+    if (linkedinProfileSource === undefined) {
+      return;
+    }
+    if (
+      linkedinProfileSource.sync_state === "complete" ||
+      linkedinProfileSource.sync_state === "failed"
+    ) {
+      setLinkedinProfileProcessing(false);
+      if (linkedinProfileSource.sync_state === "failed") {
+        setLinkedinProfileUploadError(
+          "Could not read that PDF. Try re-exporting from LinkedIn.",
+        );
+      } else {
+        void queryClient.invalidateQueries({ queryKey: ["user-profile"] });
+      }
+    }
+  }, [linkedinProfileProcessing, linkedinProfileSource, queryClient]);
 
   const pollConnect = useCallback(
     async (sessionId: string, pollSecret: string): Promise<void> => {
@@ -347,36 +364,11 @@ export default function SourcesPage() {
     },
   });
 
-  const connectPhoneMutation = useMutation({
-    mutationFn: () =>
-      proxyPost<ConnectSourceResult>("connect-source", {
-        source_type: "phone_contacts_upload",
-      }),
-    onSuccess: async (result: ConnectSourceResult) => {
-      setConnectError(null);
-      if (result.source_id) {
-        router.push(`/sources/upload/${result.source_id}`);
-        return;
-      }
-      if (result.upload_url) {
-        window.location.href = result.upload_url;
-        return;
-      }
-      setConnectError("Could not start phone contacts upload.");
-    },
-    onError: (error: Error) => {
-      setConnectError(error.message);
-    },
-  });
-
-  const handleFileUpload = useCallback(
+  const handleTextFileUpload = useCallback(
     async (
       sourceType: SourceType,
-      file: File | undefined,
+      file: File,
     ): Promise<void> => {
-      if (file === undefined) {
-        return;
-      }
       const content: string = await file.text();
       uploadMutation.mutate({
         source_type: sourceType,
@@ -387,7 +379,38 @@ export default function SourcesPage() {
     [uploadMutation],
   );
 
-  const sources: SourceSummary[] = sourcesQuery.data?.sources ?? [];
+  const handleLinkedInProfileUpload = useCallback(
+    async (file: File): Promise<void> => {
+      const buffer: ArrayBuffer = await file.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+      let binary = "";
+      for (const byte of bytes) {
+        binary += String.fromCharCode(byte);
+      }
+      const base64: string = btoa(binary);
+      uploadMutation.mutate({
+        source_type: "linkedin_profile_upload",
+        filename: file.name,
+        content: base64,
+      });
+    },
+    [uploadMutation],
+  );
+
+  const handlePhoneFileUpload = useCallback(
+    (file: File): void => {
+      void handleTextFileUpload("phone_contacts_upload", file);
+    },
+    [handleTextFileUpload],
+  );
+
+  const handleLinkedInConnectionsFileUpload = useCallback(
+    (file: File): void => {
+      void handleTextFileUpload("linkedin_connections_upload", file);
+    },
+    [handleTextFileUpload],
+  );
+
   const enrichment: EnrichmentStatusResult | undefined = enrichmentQuery.data;
   const importReady: boolean = anyImportReady(sources);
 
@@ -406,11 +429,6 @@ export default function SourcesPage() {
           <AlertDescription>{connectError}</AlertDescription>
         </Alert>
       ) : null}
-      {uploadError ? (
-        <Alert variant="destructive">
-          <AlertDescription>{uploadError}</AlertDescription>
-        </Alert>
-      ) : null}
       {connectMessage ? (
         <Alert>
           <AlertDescription>{connectMessage}</AlertDescription>
@@ -419,79 +437,10 @@ export default function SourcesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Your info</CardTitle>
-          <CardDescription>
-            Name and email come from Google sign-in. Location helps enrichment
-            identify the right person for common names.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {profileQuery.isLoading ? (
-            <Skeleton className="h-24 w-full" />
-          ) : (
-            <>
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-2">
-                  <Label htmlFor="profile-email">Your email</Label>
-                  <Input
-                    id="profile-email"
-                    value={profileEmail}
-                    readOnly
-                    disabled
-                    className="bg-muted"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="profile-name">Your name</Label>
-                  <Input
-                    id="profile-name"
-                    placeholder="From Google account"
-                    value={profileName}
-                    onChange={(event) => setProfileName(event.target.value)}
-                  />
-                </div>
-                <div className="space-y-2 sm:col-span-2">
-                  <Label htmlFor="profile-location">Your location</Label>
-                  <Input
-                    id="profile-location"
-                    placeholder="San Francisco, CA"
-                    value={profileLocation}
-                    onChange={(event) => setProfileLocation(event.target.value)}
-                  />
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={profileMutation.isPending}
-                  onClick={() =>
-                    profileMutation.mutate({
-                      display_name: profileName.trim(),
-                      location: profileLocation.trim(),
-                    })
-                  }
-                >
-                  {profileMutation.isPending ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : null}
-                  Save
-                </Button>
-                {profileSaved ? (
-                  <span className="text-sm text-muted-foreground">Saved</span>
-                ) : null}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
           <CardTitle>Getting started</CardTitle>
           <CardDescription>
-            Complete imports in any order. Enrichment runs once across your
-            merged graph.
+            Start with your LinkedIn profile, then connect your other sources.
+            Enrichment runs once across your merged graph.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -550,6 +499,25 @@ export default function SourcesPage() {
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2 sm:justify-end">
+                  {step.id === "linkedin_profile" ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setLinkedinProfileDialogOpen(true)}
+                      disabled={
+                        uploadMutation.isPending ||
+                        linkedinProfileProcessing ||
+                        inProgress
+                      }
+                    >
+                      {inProgress ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Plus className="size-4" />
+                      )}
+                      {complete ? "Re-upload" : "Upload"}
+                    </Button>
+                  ) : null}
                   {step.id === "gmail" ? (
                     <Button
                       variant="outline"
@@ -558,93 +526,38 @@ export default function SourcesPage() {
                       disabled={connectMutation.isPending || inProgress}
                     >
                       <Plus className="size-4" />
-                      Connect
-                    </Button>
-                  ) : null}
-                  {step.id === "calendar" ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => connectMutation.mutate("google_calendar")}
-                      disabled={connectMutation.isPending || inProgress}
-                    >
-                      <Plus className="size-4" />
-                      Connect
+                      {complete ? "Reconnect" : "Connect"}
                     </Button>
                   ) : null}
                   {step.id === "phone" ? (
-                    <>
-                      <input
-                        ref={phoneInputRef}
-                        type="file"
-                        accept=".vcf,.vcard,.csv,text/vcard,text/csv"
-                        className="hidden"
-                        onChange={(event) => {
-                          void handleFileUpload(
-                            "phone_contacts_upload",
-                            event.target.files?.[0],
-                          );
-                          event.target.value = "";
-                        }}
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => connectPhoneMutation.mutate()}
-                        disabled={
-                          connectPhoneMutation.isPending ||
-                          uploadMutation.isPending ||
-                          inProgress
-                        }
-                      >
-                        Upload contacts
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => phoneInputRef.current?.click()}
-                        disabled={uploadMutation.isPending || inProgress}
-                      >
-                        Quick upload
-                      </Button>
-                    </>
-                  ) : null}
-                  {step.id === "linkedin_profile" ? (
                     <Button
                       variant="outline"
                       size="sm"
-                      asChild
+                      onClick={() => setPhoneDialogOpen(true)}
+                      disabled={uploadMutation.isPending || inProgress}
                     >
-                      <Link href="/profile">
-                        <User className="size-4" />
-                        Set up profile
-                      </Link>
+                      {inProgress ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Plus className="size-4" />
+                      )}
+                      {complete ? "Re-upload" : "Upload"}
                     </Button>
                   ) : null}
                   {step.id === "linkedin" ? (
-                    <>
-                      <input
-                        ref={linkedinInputRef}
-                        type="file"
-                        accept=".csv,text/csv"
-                        className="hidden"
-                        onChange={(event) => {
-                          void handleFileUpload(
-                            "linkedin_connections_upload",
-                            event.target.files?.[0],
-                          );
-                          event.target.value = "";
-                        }}
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => linkedinInputRef.current?.click()}
-                        disabled={uploadMutation.isPending || inProgress}
-                      >
-                        Upload CSV
-                      </Button>
-                    </>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setLinkedinConnectionsDialogOpen(true)}
+                      disabled={uploadMutation.isPending || inProgress}
+                    >
+                      {inProgress ? (
+                        <Loader2 className="size-4 animate-spin" />
+                      ) : (
+                        <Plus className="size-4" />
+                      )}
+                      {complete ? "Re-upload" : "Upload"}
+                    </Button>
                   ) : null}
                   {step.id === "enrich" ? (
                     <Button
@@ -706,7 +619,7 @@ export default function SourcesPage() {
             </div>
           ) : sources.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No sources connected yet. Start with Gmail above.
+              No sources connected yet. Start with your LinkedIn profile above.
             </p>
           ) : (
             <ul className="divide-y">
@@ -749,6 +662,38 @@ export default function SourcesPage() {
           )}
         </CardContent>
       </Card>
+
+      <PhoneContactsUploadDialog
+        open={phoneDialogOpen}
+        onOpenChange={setPhoneDialogOpen}
+        onFileSelect={handlePhoneFileUpload}
+        isPending={uploadMutation.isPending}
+        error={phoneUploadError}
+        syncState={phoneSource?.sync_state}
+        contactsResolved={phoneSource?.contacts_resolved}
+      />
+
+      <LinkedInConnectionsUploadDialog
+        open={linkedinConnectionsDialogOpen}
+        onOpenChange={setLinkedinConnectionsDialogOpen}
+        onFileSelect={handleLinkedInConnectionsFileUpload}
+        isPending={uploadMutation.isPending}
+        error={connectionsUploadError}
+        syncState={linkedinConnectionsSource?.sync_state}
+        contactsResolved={linkedinConnectionsSource?.contacts_resolved}
+      />
+
+      <LinkedInProfileUploadDialog
+        open={linkedinProfileDialogOpen}
+        onOpenChange={setLinkedinProfileDialogOpen}
+        onFileSelect={(file) => {
+          void handleLinkedInProfileUpload(file);
+        }}
+        isPending={uploadMutation.isPending}
+        isProcessing={linkedinProfileProcessing}
+        error={linkedinProfileUploadError}
+        isComplete={linkedinProfileSource?.sync_state === "complete"}
+      />
     </div>
   );
 }
