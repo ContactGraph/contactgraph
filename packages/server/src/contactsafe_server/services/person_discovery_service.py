@@ -201,6 +201,71 @@ class PersonDiscoveryService:
 
         return []
 
+    async def search_employer(
+        self,
+        *,
+        name: str,
+        email: str,
+        org_hint: str | None,
+        user_location: str | None = None,
+        context_hints: list[str] | None = None,
+    ) -> tuple[list[WebSearchHit], str | None]:
+        providers_used: list[str] = []
+        hits: list[WebSearchHit] = await self._search_employer(
+            name=name,
+            email=email,
+            org_hint=org_hint,
+            user_location=user_location,
+            context_hints=context_hints,
+            providers_used=providers_used,
+        )
+        provider: str | None = providers_used[0] if providers_used else None
+        return hits, provider
+
+    async def search_relational(
+        self,
+        *,
+        user_name: str,
+        contact_name: str,
+    ) -> list[WebSearchHit]:
+        providers_used: list[str] = []
+        return await self._search_relational_context(
+            user_name=user_name,
+            contact_name=contact_name,
+            providers_used=providers_used,
+        )
+
+    async def search_raw_query(self, query: str) -> tuple[list[WebSearchHit], str | None]:
+        providers_used: list[str] = []
+        if self._settings.exa_api_key:
+            try:
+                hits = await self._exa.search_raw(query=query, num_results=3)
+                if hits:
+                    providers_used.append("exa")
+                    return hits, providers_used[0]
+            except Exception:
+                logger.exception("Exa raw search failed for query: %s", query)
+
+        if self._settings.tavily_api_key:
+            try:
+                hits = await self._tavily.search_raw(query=query)
+                if hits:
+                    providers_used.append("tavily")
+                    return hits[:3], providers_used[0]
+            except Exception:
+                logger.exception("Tavily raw search failed for query: %s", query)
+
+        if self._settings.serper_api_key:
+            try:
+                hits = await self._serper.search_raw(query=query)
+                if hits:
+                    providers_used.append("serper")
+                    return hits[:3], providers_used[0]
+            except Exception:
+                logger.exception("Serper raw search failed for query: %s", query)
+
+        return [], None
+
     async def _search_employer(
         self,
         *,

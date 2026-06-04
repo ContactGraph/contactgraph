@@ -179,6 +179,34 @@ class Settings(BaseSettings):
         default=365,
         description="Max age (days) for a signal to count as current employment",
     )
+    enrichment_worker_concurrency: int = Field(
+        default=3,
+        description="Max concurrent per-contact enrichment workers",
+    )
+    enrichment_confidence_threshold: float = Field(
+        default=0.7,
+        description="Stop enrichment strategies when confidence reaches this score",
+    )
+    enrichment_max_retries: int = Field(
+        default=3,
+        description="Max attempts before marking a queue item failed",
+    )
+    enrichment_backoff_base_seconds: int = Field(
+        default=300,
+        description="Base backoff seconds between enrichment retries (exponential)",
+    )
+    enrichment_queue_poll_interval_seconds: float = Field(
+        default=10.0,
+        description="How often the enrichment poller checks for pending work",
+    )
+    enrichment_max_strategies_per_contact: int = Field(
+        default=8,
+        description="Max strategies to run per contact per attempt",
+    )
+    enrichment_email_domain_freshness_days: int = Field(
+        default=180,
+        description="Only trust email domain as current employer if seen within this window",
+    )
 
     @field_validator("database_url", mode="before")
     @classmethod

@@ -35,6 +35,7 @@ from contactsafe_core.schemas import (
     EditTrustedUsersResult,
     EnrichmentStatusResult,
     GetSourceStatusRequest,
+    ListContactEnrichmentStatusResult,
     ListSourcesResult,
     PollConnectResult,
     QueryNetworkRequest,
@@ -298,6 +299,14 @@ async def api_get_enrichment_status(
     user_id: EffectiveUser,
 ) -> EnrichmentStatusResult:
     return await actions.get_enrichment_status(ctx, user_id)
+
+
+@router.post("/list-contact-enrichment-status", response_model=ListContactEnrichmentStatusResult)
+async def api_list_contact_enrichment_status(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> ListContactEnrichmentStatusResult:
+    return await actions.list_contact_enrichment_status(ctx, user_id)
 
 
 @router.post("/get-user-profile", response_model=UserProfileResult)

@@ -227,12 +227,21 @@ class FileUploadImportService:
                         role_title=contact.org_title,
                         contributor_user_id=user_id,
                         contributor_source_kind="phone_contacts_upload",
-                        contributor_source_id=source_id,
-                        confidence=0.7,
+                    contributor_source_id=source_id,
+                    confidence=0.7,
                     )
 
             source.contacts_found += 1
             source.contacts_resolved += 1
+
+            from contactsafe_server.services.enrichment_queue_service import enqueue_enrichment
+
+            await enqueue_enrichment(
+                self._db,
+                self._settings,
+                person_id=person.id,
+                trigger_user_id=user_id,
+            )
         await self._db.flush()
 
     async def _ingest_linkedin_connections(
@@ -322,6 +331,15 @@ class FileUploadImportService:
 
             source.contacts_found += 1
             source.contacts_resolved += 1
+
+            from contactsafe_server.services.enrichment_queue_service import enqueue_enrichment
+
+            await enqueue_enrichment(
+                self._db,
+                self._settings,
+                person_id=person.id,
+                trigger_user_id=source.user_id,
+            )
         await self._db.flush()
 
     async def _ingest_linkedin_profile(
