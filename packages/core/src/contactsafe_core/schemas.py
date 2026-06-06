@@ -55,6 +55,7 @@ class SourceSummary(BaseModel):
     contacts_found: int = 0
     contacts_resolved: int = 0
     contacts_pending: int = 0
+    sync_error: str | None = None
 
 
 class ListSourcesResult(BaseModel):

@@ -91,7 +91,13 @@ function sourceForType(
   sources: ReadonlyArray<SourceSummary>,
   type: SourceType,
 ): SourceSummary | undefined {
-  return sources.find((source) => source.source_type === type);
+  let latest: SourceSummary | undefined;
+  for (const source of sources) {
+    if (source.source_type === type) {
+      latest = source;
+    }
+  }
+  return latest;
 }
 
 function stepComplete(
@@ -173,6 +179,8 @@ export default function SourcesPage() {
     useState<boolean>(false);
   const [linkedinProfileProcessing, setLinkedinProfileProcessing] =
     useState<boolean>(false);
+  const [linkedinConnectionsProcessing, setLinkedinConnectionsProcessing] =
+    useState<boolean>(false);
 
   const clearPollTimer = useCallback((): void => {
     if (pollTimerRef.current) {
@@ -197,7 +205,9 @@ export default function SourcesPage() {
         data?.sources.some((source) => source.sync_state === "syncing") ?? false;
       const pending: boolean =
         data?.sources.some((source) => source.sync_state === "pending") ?? false;
-      return syncing || pending || linkedinProfileProcessing ? 4000 : false;
+      return syncing || pending || linkedinProfileProcessing || linkedinConnectionsProcessing
+        ? 4000
+        : false;
     },
   });
 
@@ -241,6 +251,7 @@ export default function SourcesPage() {
         setLinkedinProfileProcessing(true);
       } else if (variables.source_type === "linkedin_connections_upload") {
         setConnectionsUploadError(null);
+        setLinkedinConnectionsProcessing(true);
       }
       await queryClient.invalidateQueries({ queryKey: ["sources"] });
     },
@@ -290,6 +301,27 @@ export default function SourcesPage() {
       }
     }
   }, [linkedinProfileProcessing, linkedinProfileSource, queryClient]);
+
+  useEffect(() => {
+    if (!linkedinConnectionsProcessing) {
+      return;
+    }
+    if (linkedinConnectionsSource === undefined) {
+      return;
+    }
+    if (
+      linkedinConnectionsSource.sync_state === "complete" ||
+      linkedinConnectionsSource.sync_state === "failed"
+    ) {
+      setLinkedinConnectionsProcessing(false);
+      if (linkedinConnectionsSource.sync_state === "failed") {
+        setConnectionsUploadError(
+          linkedinConnectionsSource.sync_error ??
+            "Import failed. Try uploading again.",
+        );
+      }
+    }
+  }, [linkedinConnectionsProcessing, linkedinConnectionsSource, queryClient]);
 
   const pollConnect = useCallback(
     async (sessionId: string, pollSecret: string): Promise<void> => {
@@ -454,11 +486,11 @@ export default function SourcesPage() {
         <CardContent className="space-y-4">
           {setupSteps.map((step) => {
             const complete: boolean = stepComplete(step.id, sources, enrichment);
-            const inProgress: boolean = stepInProgress(
-              step.id,
-              sources,
-              enrichment,
-            );
+            const inProgress: boolean =
+              step.id === "linkedin"
+                ? stepInProgress(step.id, sources, enrichment) ||
+                  linkedinConnectionsProcessing
+                : stepInProgress(step.id, sources, enrichment);
             const enrichEnabled: boolean =
               step.id !== "enrich" || importReady;
 
@@ -503,6 +535,21 @@ export default function SourcesPage() {
                             : null}
                         </p>
                       </div>
+                    ) : null}
+                    {step.id === "linkedin" && linkedinConnectionsSource ? (
+                      <p className="text-xs text-muted-foreground">
+                        {linkedinConnectionsSource.sync_state === "syncing" ||
+                        linkedinConnectionsSource.sync_state === "pending"
+                          ? linkedinConnectionsSource.contacts_resolved > 0
+                            ? `Importing ${linkedinConnectionsSource.contacts_resolved.toLocaleString()} connections…`
+                            : "Importing… large exports can take several minutes"
+                          : linkedinConnectionsSource.sync_state === "complete"
+                            ? `${linkedinConnectionsSource.contacts_resolved.toLocaleString()} connections imported`
+                            : linkedinConnectionsSource.sync_state === "failed"
+                              ? (linkedinConnectionsSource.sync_error ??
+                                "Import failed — try uploading again")
+                              : null}
+                      </p>
                     ) : null}
                   </div>
                 </div>
@@ -645,10 +692,13 @@ export default function SourcesPage() {
                       <SyncStateBadge state={source.sync_state} />
                     </div>
                     <p className="text-sm text-muted-foreground">
-                      {source.contacts_resolved} resolved ·{" "}
-                      {source.contacts_pending} pending ·{" "}
-                      {source.contacts_found} found
+                      {source.contacts_resolved.toLocaleString()} resolved ·{" "}
+                      {source.contacts_pending.toLocaleString()} pending ·{" "}
+                      {source.contacts_found.toLocaleString()} found
                     </p>
+                    {source.sync_state === "failed" && source.sync_error ? (
+                      <p className="text-sm text-destructive">{source.sync_error}</p>
+                    ) : null}
                   </div>
                   <Button
                     size="sm"
@@ -686,8 +736,10 @@ export default function SourcesPage() {
         onOpenChange={setLinkedinConnectionsDialogOpen}
         onFileSelect={handleLinkedInConnectionsFileUpload}
         isPending={uploadMutation.isPending}
+        isProcessing={linkedinConnectionsProcessing}
         error={connectionsUploadError}
         syncState={linkedinConnectionsSource?.sync_state}
+        syncError={linkedinConnectionsSource?.sync_error}
         contactsResolved={linkedinConnectionsSource?.contacts_resolved}
       />
 
