@@ -805,11 +805,16 @@ class TestAccumulatePairStats:
 # _upsert_person (mocked resolver + db)
 # ---------------------------------------------------------------------------
 
+@patch(
+    "contactsafe_server.services.enrichment_queue_service.enqueue_enrichment",
+    new_callable=AsyncMock,
+)
 class TestUpsertPerson:
     @patch("contactsafe_server.services.import_service.classify_contact")
     async def test_creates_observation(
         self,
         mock_classify: MagicMock,
+        _mock_enqueue: AsyncMock,
     ) -> None:
         classification: MagicMock = MagicMock()
         classification.is_human = True
@@ -852,6 +857,7 @@ class TestUpsertPerson:
     async def test_skips_employment_for_automated(
         self,
         mock_classify: MagicMock,
+        _mock_enqueue: AsyncMock,
     ) -> None:
         classification: MagicMock = MagicMock()
         classification.is_human = False
@@ -887,6 +893,7 @@ class TestUpsertPerson:
     async def test_does_not_record_employment_during_import(
         self,
         mock_classify: MagicMock,
+        _mock_enqueue: AsyncMock,
     ) -> None:
         classification: MagicMock = MagicMock()
         classification.is_human = True
@@ -921,6 +928,7 @@ class TestUpsertPerson:
     async def test_updates_canonical_name_when_newer(
         self,
         mock_classify: MagicMock,
+        _mock_enqueue: AsyncMock,
     ) -> None:
         classification: MagicMock = MagicMock()
         classification.is_human = True
@@ -954,6 +962,7 @@ class TestUpsertPerson:
     async def test_keeps_canonical_name_when_email_placeholder(
         self,
         mock_classify: MagicMock,
+        _mock_enqueue: AsyncMock,
     ) -> None:
         """canonical_name == email triggers an update even if person.updated_at is newer."""
         classification: MagicMock = MagicMock()
