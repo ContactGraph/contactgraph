@@ -100,19 +100,15 @@ export function LinkedInConnectionsUploadDialog({
             </p>
             <p>
               5. Upload the{" "}
-              <span className="text-foreground">.zip</span> file directly, or
-              unzip it and upload{" "}
-              <span className="text-foreground">Connections.csv</span> from
-              inside (often in a folder like{" "}
-              <span className="text-foreground">Basic_LinkedInDataExport</span>
-              ).
+              <span className="text-foreground">.zip</span> from Downloads, or
+              open the unzipped folder and select{" "}
+              <span className="text-foreground">Connections.csv</span>.
             </p>
           </div>
 
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.zip,text/csv,application/zip"
             className="hidden"
             onChange={(event) => {
               handleFile(event.target.files?.[0]);
