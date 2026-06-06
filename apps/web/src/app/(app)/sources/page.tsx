@@ -18,6 +18,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { resolveLinkedInConnectionsUpload } from "@/lib/linkedin-connections-upload";
 import type {
   ConnectSourceResult,
   EnrichmentStatusResult,
@@ -405,8 +406,15 @@ export default function SourcesPage() {
   );
 
   const handleLinkedInConnectionsFileUpload = useCallback(
-    (file: File): void => {
-      void handleTextFileUpload("linkedin_connections_upload", file);
+    async (file: File): Promise<void> => {
+      try {
+        const resolved: File = await resolveLinkedInConnectionsUpload(file);
+        await handleTextFileUpload("linkedin_connections_upload", resolved);
+      } catch (error: unknown) {
+        const message: string =
+          error instanceof Error ? error.message : "Failed to read upload file";
+        setConnectionsUploadError(message);
+      }
     },
     [handleTextFileUpload],
   );

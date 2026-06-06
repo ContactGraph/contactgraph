@@ -293,12 +293,16 @@ class FileUploadImportService:
                     confidence=0.5,
                 )
 
-            now = datetime.now(tz=UTC)
+            observed_at: datetime = (
+                datetime.combine(connection.connected_on, datetime.min.time(), tzinfo=UTC)
+                if connection.connected_on is not None
+                else datetime.now(tz=UTC)
+            )
             stmt = pg_insert(UserPersonObservation).values(
                 user_id=source.user_id,
                 person_id=person.id,
-                first_observed_at=now,
-                last_observed_at=now,
+                first_observed_at=observed_at,
+                last_observed_at=observed_at,
                 email_count=0,
                 outbound_count=0,
                 inbound_count=0,
@@ -313,7 +317,7 @@ class FileUploadImportService:
             ).on_conflict_do_update(
                 constraint="pk_user_person_obs",
                 set_={
-                    "last_observed_at": now,
+                    "last_observed_at": observed_at,
                     "relationship_types": ["linkedin_connections_upload"],
                 },
             )

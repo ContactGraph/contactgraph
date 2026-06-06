@@ -64,7 +64,8 @@ export function LinkedInConnectionsUploadDialog({
         <DialogHeader>
           <DialogTitle>Upload LinkedIn connections</DialogTitle>
           <DialogDescription>
-            Request your data from LinkedIn, then upload Connections.csv here.
+            Request your data from LinkedIn, then upload the .zip or
+            Connections.csv here.
           </DialogDescription>
         </DialogHeader>
 
@@ -98,18 +99,20 @@ export function LinkedInConnectionsUploadDialog({
               <span className="text-foreground">.zip</span> file from the link.
             </p>
             <p>
-              5. Unzip the file on your computer. Look inside for{" "}
-              <span className="text-foreground">Connections.csv</span> — it is
-              often in a folder named something like{" "}
-              <span className="text-foreground">Basic_LinkedInDataExport</span>.
+              5. Upload the{" "}
+              <span className="text-foreground">.zip</span> file directly, or
+              unzip it and upload{" "}
+              <span className="text-foreground">Connections.csv</span> from
+              inside (often in a folder like{" "}
+              <span className="text-foreground">Basic_LinkedInDataExport</span>
+              ).
             </p>
-            <p>6. Upload that CSV below.</p>
           </div>
 
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.zip,text/csv,application/zip"
             className="hidden"
             onChange={(event) => {
               handleFile(event.target.files?.[0]);
@@ -153,10 +156,10 @@ export function LinkedInConnectionsUploadDialog({
               <>
                 <Upload className="size-7 text-muted-foreground" />
                 <p className="text-sm font-medium">
-                  Drag and drop Connections.csv here
+                  Drag and drop your .zip or Connections.csv here
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  or click to choose the file
+                  or click to choose a file
                 </p>
               </>
             )}
