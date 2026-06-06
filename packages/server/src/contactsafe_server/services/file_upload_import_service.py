@@ -50,6 +50,10 @@ class FileUploadImportService:
             self._settings.token_encryption_key
         )
 
+    async def _commit_progress(self, source: Source) -> None:
+        await self._db.commit()
+        await self._db.refresh(source)
+
     async def run_sync(self, source_id: uuid.UUID) -> None:
         source: Source | None = await self._db.get(Source, source_id)
         if source is None:
@@ -256,6 +260,11 @@ class FileUploadImportService:
         if user is not None:
             user_person = await ensure_user_person(self._db, user)
 
+        commit_interval: int = max(
+            1, self._settings.import_progress_commit_messages,
+        )
+        processed_since_commit: int = 0
+
         for connection in connections:
             emails: list[str] = [connection.email] if connection.email else []
             person = await resolver.resolve_person(
@@ -344,7 +353,15 @@ class FileUploadImportService:
                 person_id=person.id,
                 trigger_user_id=source.user_id,
             )
-        await self._db.flush()
+
+            processed_since_commit += 1
+            if processed_since_commit >= commit_interval:
+                await self._db.flush()
+                await self._commit_progress(source)
+                processed_since_commit = 0
+
+        if processed_since_commit > 0:
+            await self._db.flush()
 
     async def _ingest_linkedin_profile(
         self,

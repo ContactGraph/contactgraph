@@ -144,7 +144,9 @@ export function LinkedInConnectionsUploadDialog({
                 <Loader2 className="size-7 animate-spin text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">
                   {syncState === "syncing"
-                    ? `Importing… ${contactsResolved} connections so far`
+                    ? contactsResolved > 0
+                      ? `Importing… ${contactsResolved} connections so far`
+                      : "Importing… large exports can take several minutes"
                     : "Uploading…"}
                 </p>
               </>
