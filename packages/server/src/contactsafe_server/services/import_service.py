@@ -859,6 +859,15 @@ class ImportService:
         )
         await self._db.execute(stmt)
 
+        from contactsafe_server.services.enrichment_queue_service import enqueue_enrichment
+
+        await enqueue_enrichment(
+            self._db,
+            self._settings,
+            person_id=person.id,
+            trigger_user_id=user_id,
+        )
+
     async def _upsert_person_pair_observations(
         self,
         *,

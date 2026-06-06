@@ -4,6 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from contactsafe_core.enums import (
+    EnrichmentQueueStatus,
     EnrichmentRunState,
     SessionStatus,
     SourceConnectionStatus,
@@ -315,6 +316,22 @@ class EnrichmentStatusResult(BaseModel):
     error: str | None = None
     message: str
     system_messages: list[str] = Field(default_factory=list)
+
+
+class ContactEnrichmentQueueItemResult(BaseModel):
+    person_id: UUID
+    status: EnrichmentQueueStatus
+    result_confidence: float = 0.0
+    strategies_attempted: list[str] = Field(default_factory=list)
+    strategies_remaining: list[str] = Field(default_factory=list)
+    priority: int = 0
+    error: str | None = None
+    updated_at: datetime | None = None
+
+
+class ListContactEnrichmentStatusResult(BaseModel):
+    items: list[ContactEnrichmentQueueItemResult] = Field(default_factory=list)
+    message: str
 
 
 class UploadSourceRequest(BaseModel):

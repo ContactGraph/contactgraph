@@ -17,6 +17,7 @@ from contactsafe_server.services.email_parse import (
     org_name_from_email,
 )
 from contactsafe_server.services.enrichment_attempt_tracker import EnrichmentAttemptTracker
+from contactsafe_server.services.enrichment_strategies.base import email_domain_is_fresh
 from contactsafe_server.services.entity_resolution import EntityResolver, MergeConflict
 from contactsafe_server.services.category_inference import infer_categories_from_contact
 from contactsafe_server.services.interaction_excerpt_service import InteractionExcerptService
@@ -103,7 +104,9 @@ class IngestEnrichmentService:
 
             try:
                 async with self._db.begin_nested():
-                    await self._heuristic_enrich(person, acc, user_id=user_id)
+                    await self._heuristic_enrich(
+                        person, acc, user_id=user_id, obs=obs
+                    )
                     await self._signature_enrich(person, acc, user_id=user_id)
             except Exception:
                 logger.warning(
@@ -282,6 +285,7 @@ class IngestEnrichmentService:
         accumulator: ContactAccumulator | None,
         *,
         user_id: uuid.UUID,
+        obs: UserPersonObservation | None = None,
     ) -> None:
         email: str = person.primary_email or ""
         if email:
@@ -339,6 +343,10 @@ class IngestEnrichmentService:
             if inferred_org:
                 domain: str = email.rsplit("@", 1)[1].lower()
                 if not is_automation_or_generic_domain(domain):
+                    is_fresh: bool = email_domain_is_fresh(
+                        obs,
+                        freshness_days=self._settings.enrichment_email_domain_freshness_days,
+                    )
                     org = await self._resolver.resolve_org(domain=domain, name=inferred_org)
                     await record_employment(
                         self._db,
@@ -346,7 +354,8 @@ class IngestEnrichmentService:
                         org_id=org.id,
                         contributor_user_id=user_id,
                         contributor_source_kind="heuristic",
-                        confidence=0.4,
+                        is_current=is_fresh,
+                        confidence=0.4 if is_fresh else 0.2,
                     )
 
     async def _signature_enrich(

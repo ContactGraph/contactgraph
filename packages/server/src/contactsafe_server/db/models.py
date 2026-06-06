@@ -118,6 +118,42 @@ class Source(Base):
     oauth_credential: Mapped["OAuthCredential | None"] = relationship(back_populates="source", uselist=False)
 
 
+class EnrichmentQueueItem(Base):
+    __tablename__ = "enrichment_queue"
+    __table_args__ = (
+        {"comment": "Per-person enrichment work queue"},
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("persons.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    trigger_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    enrichment_run_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("enrichment_runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    strategies_attempted: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    strategies_remaining: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
+    result_confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    attempts_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_attempted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_attempt_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class EnrichmentRun(Base):
     __tablename__ = "enrichment_runs"
 

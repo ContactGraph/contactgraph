@@ -37,9 +37,15 @@ def create_app() -> FastAPI:
         ctx: AppContext = build_app_context()
         _app.state.app_context = ctx
         await init_db(settings)
+        from contactsafe_server.services.contact_enrichment_poller import start_enrichment_poller
+
+        start_enrichment_poller(settings)
         # Mounted Starlette apps do not run their own lifespan under FastAPI; start MCP here.
         async with mcp_server.session_manager.run():
             yield
+        from contactsafe_server.services.contact_enrichment_poller import stop_enrichment_poller
+
+        stop_enrichment_poller()
         await shutdown_db()
 
     app: FastAPI = FastAPI(

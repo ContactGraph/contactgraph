@@ -27,6 +27,7 @@ from contactsafe_core.schemas import (
     DescribeGraphResult,
     EditTrustedUsersResult,
     EnrichmentStatusResult,
+    ListContactEnrichmentStatusResult,
     ListSourcesResult,
     PersonMatch,
     PollConnectResult,
@@ -252,6 +253,24 @@ async def get_enrichment_status(
     async with ctx.session_factory() as db:
         enrichment = build_enrichment_service(db)
         result = await enrichment.get_enrichment_status(user_id)
+        await db.commit()
+        return result
+
+
+async def list_contact_enrichment_status(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    limit: int = 100,
+) -> ListContactEnrichmentStatusResult:
+    if user_id is None:
+        return ListContactEnrichmentStatusResult(
+            items=[],
+            message="Authentication required. Provide a Bearer token.",
+        )
+    async with ctx.session_factory() as db:
+        enrichment = build_enrichment_service(db)
+        result = await enrichment.list_contact_enrichment_status(user_id, limit=limit)
         await db.commit()
         return result
 

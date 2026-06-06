@@ -42,6 +42,14 @@ class EnrichmentRunState(StrEnum):
     FAILED = "failed"
 
 
+class EnrichmentQueueStatus(StrEnum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETE = "complete"
+    FAILED = "failed"
+    DEFERRED = "deferred"
+
+
 class IdentityKind(StrEnum):
     EMAIL = "email"
     PHONE = "phone"

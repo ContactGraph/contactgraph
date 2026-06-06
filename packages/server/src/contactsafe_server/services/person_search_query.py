@@ -65,3 +65,18 @@ def build_activity_discovery_query(
 
 def build_relational_context_query(user_name: str, contact_name: str) -> str:
     return f'"{user_name.strip()}" "{contact_name.strip()}"'
+
+
+def build_linkedin_discovery_query(
+    name: str,
+    *,
+    user_location: str | None = None,
+) -> str:
+    parts: list[str] = [f'site:linkedin.com/in "{name.strip()}"']
+    if user_location and user_location.strip():
+        parts.append(user_location.strip())
+    return " ".join(parts)
+
+
+def build_company_discovery_query(contact_name: str, company_name: str) -> str:
+    return f'"{contact_name.strip()}" "{company_name.strip()}"'
