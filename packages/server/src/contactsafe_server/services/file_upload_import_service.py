@@ -264,26 +264,15 @@ class FileUploadImportService:
             1, self._settings.import_progress_commit_messages,
         )
         processed_since_commit: int = 0
+        person_ids_to_enqueue: list[uuid.UUID] = []
 
         for connection in connections:
             emails: list[str] = [connection.email] if connection.email else []
             person = await resolver.resolve_person(
                 emails=emails,
                 display_name=connection.display_name,
+                linkedin_url=connection.linkedin_url,
             )
-            if connection.linkedin_url:
-                try:
-                    await resolver.add_person_alias(
-                        person_id=person.id,
-                        kind="linkedin_url",
-                        value=connection.linkedin_url,
-                    )
-                except Exception:
-                    logger.debug(
-                        "LinkedIn alias already mapped for %s",
-                        connection.linkedin_url,
-                    )
-
             if connection.company:
                 domain: str | None = None
                 if connection.email and "@" in connection.email:
@@ -344,15 +333,7 @@ class FileUploadImportService:
 
             source.contacts_found += 1
             source.contacts_resolved += 1
-
-            from contactsafe_server.services.enrichment_queue_service import enqueue_enrichment
-
-            await enqueue_enrichment(
-                self._db,
-                self._settings,
-                person_id=person.id,
-                trigger_user_id=source.user_id,
-            )
+            person_ids_to_enqueue.append(person.id)
 
             processed_since_commit += 1
             if processed_since_commit >= commit_interval:
@@ -362,6 +343,16 @@ class FileUploadImportService:
 
         if processed_since_commit > 0:
             await self._db.flush()
+
+        from contactsafe_server.services.enrichment_queue_service import EnrichmentQueueService
+
+        eq_service = EnrichmentQueueService(self._db, self._settings)
+        for person_id in person_ids_to_enqueue:
+            await eq_service.enqueue_enrichment(
+                person_id=person_id,
+                trigger_user_id=source.user_id,
+            )
+        await self._db.flush()
 
     async def _ingest_linkedin_profile(
         self,
