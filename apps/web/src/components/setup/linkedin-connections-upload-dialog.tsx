@@ -18,9 +18,24 @@ interface LinkedInConnectionsUploadDialogProps {
   onOpenChange: (open: boolean) => void;
   onFileSelect: (file: File) => void;
   isPending: boolean;
+  isProcessing: boolean;
   error: string | null;
   syncState?: SyncState;
+  syncError?: string | null;
   contactsResolved?: number;
+}
+
+function importStatusMessage(
+  syncState: SyncState | undefined,
+  contactsResolved: number,
+): string {
+  if (syncState === "syncing" || syncState === "pending") {
+    if (contactsResolved > 0) {
+      return `Importing… ${contactsResolved} connections so far`;
+    }
+    return "Importing… large exports can take several minutes";
+  }
+  return "Uploading…";
 }
 
 export function LinkedInConnectionsUploadDialog({
@@ -28,16 +43,24 @@ export function LinkedInConnectionsUploadDialog({
   onOpenChange,
   onFileSelect,
   isPending,
+  isProcessing,
   error,
   syncState,
+  syncError = null,
   contactsResolved = 0,
 }: LinkedInConnectionsUploadDialogProps): React.JSX.Element {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [dragActive, setDragActive] = useState<boolean>(false);
 
   const isSyncing: boolean =
-    isPending || syncState === "syncing" || syncState === "pending";
-  const isComplete: boolean = syncState === "complete";
+    isPending ||
+    isProcessing ||
+    syncState === "syncing" ||
+    syncState === "pending";
+  const isComplete: boolean = syncState === "complete" && !isProcessing;
+  const isFailed: boolean = syncState === "failed" && !isProcessing;
+  const failureMessage: string | null =
+    error ?? syncError ?? (isFailed ? "Import failed. Try uploading again." : null);
 
   const handleFile = useCallback(
     (file: File | undefined): void => {
@@ -64,20 +87,21 @@ export function LinkedInConnectionsUploadDialog({
         <DialogHeader>
           <DialogTitle>Upload LinkedIn connections</DialogTitle>
           <DialogDescription>
-            Request your data from LinkedIn, then upload Connections.csv here.
+            Request your data from LinkedIn, then upload the .zip or
+            Connections.csv here.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
-          {error ? (
+          {failureMessage ? (
             <Alert variant="destructive">
-              <AlertDescription>{error}</AlertDescription>
+              <AlertDescription>{failureMessage}</AlertDescription>
             </Alert>
           ) : null}
           {isComplete ? (
             <Alert>
               <AlertDescription>
-                Import complete ({contactsResolved} connections).
+                Import complete ({contactsResolved.toLocaleString()} connections).
               </AlertDescription>
             </Alert>
           ) : null}
@@ -98,18 +122,16 @@ export function LinkedInConnectionsUploadDialog({
               <span className="text-foreground">.zip</span> file from the link.
             </p>
             <p>
-              5. Unzip the file on your computer. Look inside for{" "}
-              <span className="text-foreground">Connections.csv</span> — it is
-              often in a folder named something like{" "}
-              <span className="text-foreground">Basic_LinkedInDataExport</span>.
+              5. Upload the{" "}
+              <span className="text-foreground">.zip</span> from Downloads, or
+              open the unzipped folder and select{" "}
+              <span className="text-foreground">Connections.csv</span>.
             </p>
-            <p>6. Upload that CSV below.</p>
           </div>
 
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,text/csv"
             className="hidden"
             onChange={(event) => {
               handleFile(event.target.files?.[0]);
@@ -144,19 +166,17 @@ export function LinkedInConnectionsUploadDialog({
               <>
                 <Loader2 className="size-7 animate-spin text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">
-                  {syncState === "syncing"
-                    ? `Importing… ${contactsResolved} connections so far`
-                    : "Uploading…"}
+                  {importStatusMessage(syncState, contactsResolved)}
                 </p>
               </>
             ) : (
               <>
                 <Upload className="size-7 text-muted-foreground" />
                 <p className="text-sm font-medium">
-                  Drag and drop Connections.csv here
+                  Drag and drop your .zip or Connections.csv here
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  or click to choose the file
+                  or click to choose a file
                 </p>
               </>
             )}

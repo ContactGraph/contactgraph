@@ -50,6 +50,10 @@ class FileUploadImportService:
             self._settings.token_encryption_key
         )
 
+    async def _commit_progress(self, source: Source) -> None:
+        await self._db.commit()
+        await self._db.refresh(source)
+
     async def run_sync(self, source_id: uuid.UUID) -> None:
         source: Source | None = await self._db.get(Source, source_id)
         if source is None:
@@ -256,25 +260,19 @@ class FileUploadImportService:
         if user is not None:
             user_person = await ensure_user_person(self._db, user)
 
+        commit_interval: int = max(
+            1, self._settings.import_progress_commit_messages,
+        )
+        processed_since_commit: int = 0
+        person_ids_to_enqueue: list[uuid.UUID] = []
+
         for connection in connections:
             emails: list[str] = [connection.email] if connection.email else []
             person = await resolver.resolve_person(
                 emails=emails,
                 display_name=connection.display_name,
+                linkedin_url=connection.linkedin_url,
             )
-            if connection.linkedin_url:
-                try:
-                    await resolver.add_person_alias(
-                        person_id=person.id,
-                        kind="linkedin_url",
-                        value=connection.linkedin_url,
-                    )
-                except Exception:
-                    logger.debug(
-                        "LinkedIn alias already mapped for %s",
-                        connection.linkedin_url,
-                    )
-
             if connection.company:
                 domain: str | None = None
                 if connection.email and "@" in connection.email:
@@ -293,12 +291,16 @@ class FileUploadImportService:
                     confidence=0.5,
                 )
 
-            now = datetime.now(tz=UTC)
+            observed_at: datetime = (
+                datetime.combine(connection.connected_on, datetime.min.time(), tzinfo=UTC)
+                if connection.connected_on is not None
+                else datetime.now(tz=UTC)
+            )
             stmt = pg_insert(UserPersonObservation).values(
                 user_id=source.user_id,
                 person_id=person.id,
-                first_observed_at=now,
-                last_observed_at=now,
+                first_observed_at=observed_at,
+                last_observed_at=observed_at,
                 email_count=0,
                 outbound_count=0,
                 inbound_count=0,
@@ -313,7 +315,7 @@ class FileUploadImportService:
             ).on_conflict_do_update(
                 constraint="pk_user_person_obs",
                 set_={
-                    "last_observed_at": now,
+                    "last_observed_at": observed_at,
                     "relationship_types": ["linkedin_connections_upload"],
                 },
             )
@@ -331,13 +333,23 @@ class FileUploadImportService:
 
             source.contacts_found += 1
             source.contacts_resolved += 1
+            person_ids_to_enqueue.append(person.id)
 
-            from contactsafe_server.services.enrichment_queue_service import enqueue_enrichment
+            processed_since_commit += 1
+            if processed_since_commit >= commit_interval:
+                await self._db.flush()
+                await self._commit_progress(source)
+                processed_since_commit = 0
 
-            await enqueue_enrichment(
-                self._db,
-                self._settings,
-                person_id=person.id,
+        if processed_since_commit > 0:
+            await self._db.flush()
+
+        from contactsafe_server.services.enrichment_queue_service import EnrichmentQueueService
+
+        eq_service = EnrichmentQueueService(self._db, self._settings)
+        for person_id in person_ids_to_enqueue:
+            await eq_service.enqueue_enrichment(
+                person_id=person_id,
                 trigger_user_id=source.user_id,
             )
         await self._db.flush()

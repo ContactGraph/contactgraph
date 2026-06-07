@@ -76,6 +76,7 @@ export interface SourceSummary {
   contacts_found: number;
   contacts_resolved: number;
   contacts_pending: number;
+  sync_error: string | null;
 }
 
 export interface ListSourcesResult {

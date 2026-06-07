@@ -700,6 +700,7 @@ class SourceService:
             contacts_found=source.contacts_found,
             contacts_resolved=source.contacts_resolved,
             contacts_pending=source.contacts_pending,
+            sync_error=source.sync_error,
         )
 
     @staticmethod

@@ -1,3 +1,5 @@
+from datetime import date
+
 from contactsafe_server.services.linkedin_connections_parser import (
     parse_linkedin_connections_csv,
 )
@@ -44,3 +46,39 @@ Ada,Lovelace,ada@example.com,Analytical Engines,Engineer,https://linkedin.com/in
     assert rows[0].display_name == "Ada Lovelace"
     assert rows[0].email == "ada@example.com"
     assert rows[0].company == "Analytical Engines"
+    assert rows[0].connected_on is None
+
+
+def test_parse_linkedin_connections_csv_with_notes_preamble() -> None:
+    content = """Notes:
+"When exporting your connection data, you may notice that some of the email addresses are missing."
+
+First Name,Last Name,URL,Email Address,Company,Position,Connected On
+Zeev,Neumeier,https://www.linkedin.com/in/zeev-neumeier,,Gray Swan,Founder,30 Apr 2026
+"""
+    rows = parse_linkedin_connections_csv(content)
+    assert len(rows) == 1
+    assert rows[0].display_name == "Zeev Neumeier"
+    assert rows[0].linkedin_url == "https://www.linkedin.com/in/zeev-neumeier"
+    assert rows[0].company == "Gray Swan"
+    assert rows[0].connected_on == date(2026, 4, 30)
+
+
+def test_parse_linkedin_connections_csv_skips_ghost_rows() -> None:
+    content = """First Name,Last Name,URL,Email Address,Company,Position,Connected On
+Ada,Lovelace,https://www.linkedin.com/in/ada,ada@example.com,Analytical Engines,Engineer,01 Jan 2024
+,,,,,,19 Jan 2024
+"""
+    rows = parse_linkedin_connections_csv(content)
+    assert len(rows) == 1
+    assert rows[0].display_name == "Ada Lovelace"
+    assert rows[0].connected_on == date(2024, 1, 1)
+
+
+def test_parse_linkedin_connections_csv_connected_on() -> None:
+    content = """First Name,Last Name,URL,Email Address,Company,Position,Connected On
+Tim,Williamson,https://www.linkedin.com/in/timhwilliamson,,NieuxCo,CEO,30 Apr 2026
+"""
+    rows = parse_linkedin_connections_csv(content)
+    assert len(rows) == 1
+    assert rows[0].connected_on == date(2026, 4, 30)
