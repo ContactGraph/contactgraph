@@ -20,6 +20,7 @@ from contactsafe_server.db.models import (
 )
 from contactsafe_server.services.enrichment_strategies.base import (
     DEFAULT_ENRICHMENT_STRATEGIES,
+    STRONG_TIE_ENRICHMENT_STRATEGIES,
     compute_enqueue_priority,
 )
 
@@ -45,6 +46,7 @@ class EnrichmentQueueService:
         priority: int | None = None,
         enrichment_run_id: uuid.UUID | None = None,
         manual_boost: int = 0,
+        strategies: list[str] | None = None,
     ) -> EnrichmentQueueItem:
         resolved_priority: int = priority
         if resolved_priority is None:
@@ -53,7 +55,9 @@ class EnrichmentQueueService:
             )
             resolved_priority = compute_enqueue_priority(obs, manual_boost=manual_boost)
 
-        strategies: list[str] = list(DEFAULT_ENRICHMENT_STRATEGIES)
+        resolved_strategies: list[str] = list(
+            strategies or DEFAULT_ENRICHMENT_STRATEGIES,
+        )
         result = await self._db.execute(
             select(EnrichmentQueueItem).where(
                 EnrichmentQueueItem.person_id == person_id
@@ -78,7 +82,7 @@ class EnrichmentQueueService:
             existing.trigger_user_id = trigger_user_id
             existing.enrichment_run_id = enrichment_run_id
             existing.strategies_attempted = []
-            existing.strategies_remaining = strategies
+            existing.strategies_remaining = resolved_strategies
             existing.result_confidence = 0.0
             existing.attempts_count = 0
             existing.last_attempted_at = None
@@ -94,7 +98,7 @@ class EnrichmentQueueService:
             priority=resolved_priority,
             status=EnrichmentQueueStatus.PENDING.value,
             strategies_attempted=[],
-            strategies_remaining=strategies,
+            strategies_remaining=resolved_strategies,
         )
         self._db.add(item)
         await self._db.flush()
@@ -180,18 +184,41 @@ class EnrichmentQueueService:
         item: EnrichmentQueueItem,
         *,
         error: str,
+        retry_after_seconds: float | None = None,
     ) -> None:
         if item.attempts_count >= self._settings.enrichment_max_retries:
             await self.mark_failed(item, error=error)
             return
 
-        backoff_seconds: int = self._settings.enrichment_backoff_base_seconds * (
-            item.attempts_count ** 2
-        )
+        if retry_after_seconds is not None:
+            backoff_seconds: float = retry_after_seconds
+        else:
+            backoff_seconds = float(
+                self._settings.enrichment_backoff_base_seconds * (item.attempts_count ** 2)
+            )
         item.status = EnrichmentQueueStatus.DEFERRED.value
         item.error = error[:500]
         item.next_attempt_after = datetime.now(tz=UTC) + timedelta(seconds=backoff_seconds)
         await self._db.flush()
+
+    async def enqueue_strong_tie_scrapes(
+        self,
+        *,
+        user_id: uuid.UUID,
+        person_ids: list[uuid.UUID],
+        enrichment_run_id: uuid.UUID | None = None,
+    ) -> int:
+        enqueued: int = 0
+        for person_id in person_ids:
+            await self.enqueue_enrichment(
+                person_id=person_id,
+                trigger_user_id=user_id,
+                enrichment_run_id=enrichment_run_id,
+                manual_boost=10_000,
+                strategies=list(STRONG_TIE_ENRICHMENT_STRATEGIES),
+            )
+            enqueued += 1
+        return enqueued
 
     async def mark_failed(
         self,
@@ -296,6 +323,7 @@ async def enqueue_enrichment(
     trigger_user_id: uuid.UUID,
     priority: int | None = None,
     enrichment_run_id: uuid.UUID | None = None,
+    strategies: list[str] | None = None,
 ) -> EnrichmentQueueItem:
     service = EnrichmentQueueService(db, settings)
     return await service.enqueue_enrichment(
@@ -303,4 +331,5 @@ async def enqueue_enrichment(
         trigger_user_id=trigger_user_id,
         priority=priority,
         enrichment_run_id=enrichment_run_id,
+        strategies=strategies,
     )

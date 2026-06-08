@@ -2,6 +2,7 @@
 
 from contactsafe_server.services.enrichment_strategies.base import (
     DEFAULT_ENRICHMENT_STRATEGIES,
+    STRONG_TIE_ENRICHMENT_STRATEGIES,
     EnrichmentConfidence,
     compute_enqueue_priority,
     compute_enrichment_confidence,
@@ -10,6 +11,7 @@ from contactsafe_server.services.enrichment_strategies.base import (
 
 __all__ = [
     "DEFAULT_ENRICHMENT_STRATEGIES",
+    "STRONG_TIE_ENRICHMENT_STRATEGIES",
     "EnrichmentConfidence",
     "compute_enqueue_priority",
     "compute_enrichment_confidence",
