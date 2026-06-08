@@ -16,7 +16,6 @@ import {
   CompactCell,
   CompactSortHeader,
   CompactTableShell,
-  dateSortingFn,
 } from "@/components/data-table/compact-table";
 import { EntityActionsMenu } from "@/components/entity-actions-menu";
 import { PersonDetailPanel } from "@/components/person-detail-panel";
@@ -34,7 +33,6 @@ import {
 } from "@/components/ui/sheet";
 import type { ListPeopleResult, PersonDetailResult, PersonListItem } from "@/lib/api-types";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
-import { formatDateCompact, formatSourceAbbrev } from "@/lib/formatters";
 import { proxyPost } from "@/lib/proxy-client";
 
 export default function PeoplePage() {
@@ -62,20 +60,31 @@ export default function PeoplePage() {
   const columns: ColumnDef<PersonListItem>[] = useMemo(
     () => [
       {
-        accessorKey: "first_name",
-        header: ({ column }) => <CompactSortHeader column={column} label="First" />,
-        cell: ({ row }) => (
-          <CompactCell value={row.original.first_name || "—"} />
-        ),
-        meta: { width: "w-[4.25rem]" },
+        id: "name",
+        accessorFn: (row: PersonListItem) => row.display_name,
+        header: ({ column }) => <CompactSortHeader column={column} label="Name" />,
+        cell: ({ row }) => {
+          const person: PersonListItem = row.original;
+          return (
+            <div className="flex items-center gap-1.5 truncate">
+              <span className="truncate">{person.display_name}</span>
+              {person.is_strong_tie ? (
+                <Badge variant="secondary" className="shrink-0 px-1 py-0 text-[10px]">
+                  Pro
+                </Badge>
+              ) : null}
+            </div>
+          );
+        },
+        meta: { width: "w-[10rem]" },
       },
       {
-        accessorKey: "last_name",
-        header: ({ column }) => <CompactSortHeader column={column} label="Last" />,
+        accessorKey: "phone",
+        header: "Phone",
         cell: ({ row }) => (
-          <CompactCell value={row.original.last_name || "—"} />
+          <CompactCell value={row.original.phone ?? "—"} />
         ),
-        meta: { width: "w-[4.25rem]" },
+        meta: { width: "w-[5.5rem]" },
       },
       {
         accessorKey: "primary_email",
@@ -87,105 +96,41 @@ export default function PeoplePage() {
             }
           />
         ),
-        meta: { width: "w-[7rem]" },
+        meta: { width: "w-[9rem]" },
       },
       {
-        accessorKey: "phone",
-        header: "Phone",
-        cell: ({ row }) => (
-          <CompactCell value={row.original.phone ?? "—"} />
-        ),
-        meta: { width: "w-[5.25rem]" },
+        id: "company",
+        accessorFn: (row: PersonListItem) => row.org_name ?? "",
+        header: ({ column }) => <CompactSortHeader column={column} label="Company" />,
+        cell: ({ row }) => {
+          const org: string | null = row.original.org_name;
+          const role: string | null = row.original.current_role;
+          if (!org && !role) return <CompactCell value="—" />;
+          const label: string = [role, org].filter(Boolean).join(" @ ");
+          return <CompactCell value={label} title={label} />;
+        },
+        meta: { width: "w-[10rem]" },
       },
       {
-        accessorKey: "org_name",
-        header: ({ column }) => <CompactSortHeader column={column} label="Org" />,
-        cell: ({ row }) => (
-          <CompactCell value={row.original.org_name ?? "—"} />
-        ),
-        meta: { width: "w-[5.5rem]" },
-      },
-      {
-        accessorKey: "current_role",
-        header: "Role",
-        cell: ({ row }) => (
-          <CompactCell value={row.original.current_role ?? "—"} />
-        ),
-        meta: { width: "w-[4.75rem]" },
-      },
-      {
-        id: "strong_tie",
-        accessorFn: (row: PersonListItem) => row.is_strong_tie,
-        header: "Prof.",
-        cell: ({ row }) =>
-          row.original.is_strong_tie ? (
-            <Badge variant="secondary" className="px-1 py-0 text-[10px]">
-              Prof.
-            </Badge>
-          ) : (
-            <CompactCell value="—" />
-          ),
-        meta: { width: "w-[3.5rem]" },
-      },
-      {
-        accessorKey: "linkedin_url",
-        header: "LI",
-        cell: ({ row }) => (
-          <CompactCell
-            value={row.original.linkedin_url ? "Yes" : "—"}
-            title={row.original.linkedin_url ?? undefined}
-          />
-        ),
-        meta: { width: "w-[2.5rem]" },
-      },
-      {
-        accessorKey: "tie_strength_score",
-        header: ({ column }) => (
-          <CompactSortHeader column={column} label="Tie" />
-        ),
-        cell: ({ row }) => (
-          <CompactCell
-            value={row.original.tie_strength_score.toFixed(2)}
-            title={`Tie strength: ${row.original.tie_strength_score.toFixed(2)}`}
-          />
-        ),
-        meta: { width: "w-[3rem]" },
-      },
-      {
-        id: "sources",
-        accessorFn: (row: PersonListItem) => row.sources.join(", "),
-        header: "Src",
-        cell: ({ row }) => (
-          <CompactCell
-            value={
-              row.original.sources.length > 0
-                ? row.original.sources
-                    .map((source: string) => formatSourceAbbrev(source))
-                    .join(", ")
-                : "—"
-            }
-            title={row.original.sources.join(", ")}
-          />
-        ),
-        meta: { width: "w-[3.75rem]" },
-      },
-      {
-        accessorKey: "first_contact_at",
-        header: ({ column }) => <CompactSortHeader column={column} label="First" />,
-        cell: ({ row }) => (
-          <CompactCell value={formatDateCompact(row.original.first_contact_at)} />
-        ),
-        sortingFn: dateSortingFn,
-        meta: { width: "w-[3.5rem]" },
-      },
-      {
-        accessorKey: "last_contact_at",
-        header: ({ column }) => <CompactSortHeader column={column} label="Last" />,
-        cell: ({ row }) => (
-          <CompactCell value={formatDateCompact(row.original.last_contact_at)} />
-        ),
-        sortingFn: dateSortingFn,
-        meta: { width: "w-[3.5rem]" },
+        id: "linkedin",
+        accessorFn: (row: PersonListItem) => row.linkedin_url ?? "",
+        header: "LinkedIn",
+        cell: ({ row }) => {
+          const url: string | null = row.original.linkedin_url;
+          if (!url) return <CompactCell value="—" />;
+          return (
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-primary hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Profile ↗
+            </a>
+          );
+        },
+        meta: { width: "w-[4rem]" },
       },
       {
         id: "actions",
@@ -216,18 +161,12 @@ export default function PeoplePage() {
       const person: PersonListItem = row.original;
       const haystack: string = [
         person.display_name,
-        person.first_name,
-        person.last_name,
         person.primary_email,
         person.phone,
         person.org_name,
         person.current_role,
-        person.linkedin_url,
-        person.is_strong_tie ? "strong professional tie" : "",
-        person.scrapingdog_enriched ? "enriched" : "",
+        person.is_strong_tie ? "professional tie" : "",
         person.emails.join(" "),
-        person.sources.join(" "),
-        person.tie_strength_score.toString(),
       ]
         .filter(Boolean)
         .join(" ")
@@ -250,32 +189,22 @@ export default function PeoplePage() {
       .rows.map((row) => row.original);
     const csv: string = buildCsv(
       [
-        "First",
-        "Last",
-        "Email",
+        "Name",
         "Phone",
-        "Org",
+        "Email",
+        "Company",
         "Role",
-        "Strong Professional Tie",
+        "Professional Tie",
         "LinkedIn",
-        "Tie",
-        "Sources",
-        "First Contact",
-        "Last Contact",
       ],
       rows.map((person: PersonListItem) => [
-        person.first_name,
-        person.last_name,
-        person.primary_email ?? person.emails[0] ?? "",
+        person.display_name,
         person.phone ?? "",
+        person.primary_email ?? person.emails[0] ?? "",
         person.org_name ?? "",
         person.current_role ?? "",
         person.is_strong_tie ? "yes" : "",
         person.linkedin_url ?? "",
-        person.tie_strength_score.toFixed(2),
-        person.sources.map((source: string) => formatSourceAbbrev(source)).join("; "),
-        formatDateCompact(person.first_contact_at),
-        formatDateCompact(person.last_contact_at),
       ]),
     );
     downloadCsv(csvFilename("people"), csv);
@@ -336,7 +265,7 @@ export default function PeoplePage() {
             table={table}
             columnCount={columns.length}
             emptyMessage="No phone contacts in your network yet. Import them from Sources."
-            minWidth="54rem"
+            minWidth="38rem"
             onRowClick={(person: PersonListItem) =>
               setSelectedPersonId(person.person_id)
             }

@@ -23,7 +23,6 @@ from contactsafe_server.services.linkedin_profile_parser import (
     ParsedLinkedInProfile,
     parse_linkedin_profile_pdf,
 )
-from contactsafe_server.services.org_search import is_automation_or_generic_domain
 from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
 from contactsafe_server.services.phone_contacts_parser import (
     ParsedPhoneContact,
@@ -236,21 +235,6 @@ class FileUploadImportService:
                     contributor_source_kind="phone_contacts_upload",
                 )
 
-            if contact.org_name and contact.emails:
-                domain: str = contact.emails[0].rsplit("@", 1)[-1].lower()
-                if not is_automation_or_generic_domain(domain):
-                    org = await resolver.resolve_org(domain=domain, name=contact.org_name)
-                    await record_employment(
-                        self._db,
-                        person_id=person.id,
-                        org_id=org.id,
-                        role_title=contact.org_title,
-                        contributor_user_id=user_id,
-                        contributor_source_kind="phone_contacts_upload",
-                    contributor_source_id=source_id,
-                    confidence=0.7,
-                    )
-
             source.contacts_found += 1
             source.contacts_resolved += 1
 
@@ -315,6 +299,19 @@ class FileUploadImportService:
             )
             await self._db.execute(stmt)
 
+            if connection.company:
+                org = await resolver.resolve_org(domain=None, name=connection.company)
+                await record_employment(
+                    self._db,
+                    person_id=person.id,
+                    org_id=org.id,
+                    role_title=connection.position,
+                    contributor_user_id=source.user_id,
+                    contributor_source_kind="linkedin_connections_upload",
+                    contributor_source_id=source.id,
+                    confidence=0.8,
+                )
+
             source.contacts_found += 1
             source.contacts_resolved += 1
 
@@ -326,6 +323,9 @@ class FileUploadImportService:
 
         if processed_since_commit > 0:
             await self._db.flush()
+
+        recompute = PersonProfileRecompute(self._db, self._settings)
+        await recompute.recompute_for_user(source.user_id)
 
     async def _ingest_linkedin_profile(
         self,

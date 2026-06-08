@@ -13,16 +13,17 @@ DEFAULT_EMPLOYMENT_RECENCY_DAYS: Final[int] = 365
 
 # Base tier by contributor_source_kind (lower = higher priority).
 _SOURCE_BASE_TIER: Final[dict[str, int]] = {
+    "scrapingdog_linkedin": 1,
     "gmail_signature": 1,
     "linkedin_profile_upload": 2,
     "linkedin_connections_upload": 2,
     "exa": 3,
     "tavily": 3,
     "serper": 3,
-    "google_contacts": 4,
-    "phone_contacts_upload": 4,
     "gmail_domain": 5,
     "heuristic": 5,
+    "google_contacts": 6,
+    "phone_contacts_upload": 6,
 }
 
 # Stale signature drops to roughly web tier.
