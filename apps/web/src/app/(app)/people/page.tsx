@@ -251,33 +251,14 @@ export default function PeoplePage() {
                 : "No network data available."}
           </p>
         </div>
-        <div className="flex w-full max-w-md items-center gap-2">
-          <div className="flex shrink-0 gap-1">
-            {([
-              ["all", "All"],
-              ["phone_linkedin", "Phone + LinkedIn"],
-              ["phone_only", "Phone only"],
-              ["linkedin_only", "LinkedIn only"],
-            ] as const).map(([value, label]) => (
-              <Button
-                key={value}
-                type="button"
-                variant={filter === value ? "default" : "outline"}
-                size="sm"
-                className="h-7 text-[11px] px-2"
-                onClick={() => setFilter(value)}
-              >
-                {label}
-              </Button>
-            ))}
-          </div>
-          <div className="relative flex-1">
+        <div className="flex items-center gap-2">
+          <div className="relative w-64">
             <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search people…"
-              className="h-8 pl-8 text-xs"
+              className="h-8 pl-8 text-sm focus:w-80 transition-all duration-200"
             />
           </div>
           <Button
@@ -292,6 +273,26 @@ export default function PeoplePage() {
             CSV
           </Button>
         </div>
+      </div>
+
+      <div className="flex gap-1">
+        {([
+          ["phone_linkedin", "Phone + LinkedIn"],
+          ["phone_only", "Phone only"],
+          ["linkedin_only", "LinkedIn only"],
+          ["all", "All"],
+        ] as const).map(([value, label]) => (
+          <Button
+            key={value}
+            type="button"
+            variant={filter === value ? "default" : "outline"}
+            size="sm"
+            className="h-8 text-xs px-2.5"
+            onClick={() => setFilter(value)}
+          >
+            {label}
+          </Button>
+        ))}
       </div>
 
       {peopleQuery.error ? (

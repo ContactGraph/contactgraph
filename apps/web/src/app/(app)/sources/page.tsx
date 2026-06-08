@@ -633,6 +633,16 @@ export default function SourcesPage() {
               ) : null}
             </div>
             <p className="text-sm text-muted-foreground">{step.description}</p>
+            {step.id === "phone" &&
+            phoneSource &&
+            (phoneSource.sync_state === "syncing" ||
+              phoneSource.sync_state === "pending") ? (
+              <p className="text-xs text-muted-foreground">
+                {phoneSource.contacts_pending > 0
+                  ? `Imported ${phoneSource.contacts_resolved.toLocaleString()} of ${phoneSource.contacts_pending.toLocaleString()}`
+                  : "Importing…"}
+              </p>
+            ) : null}
             {step.id === "linkedin" &&
             linkedinConnectionsSource &&
             (linkedinConnectionsSource.sync_state === "syncing" ||
