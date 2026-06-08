@@ -208,6 +208,25 @@ class Settings(BaseSettings):
         description="Only trust email domain as current employer if seen within this window",
     )
 
+    scrapingdog_api_key: str | None = Field(
+        default=None,
+        description="ScrapingDog API key for LinkedIn profile scraping",
+    )
+    scrapingdog_base_url: str = Field(default="https://api.scrapingdog.com")
+    scrapingdog_request_timeout_seconds: float = Field(default=30.0)
+    scrapingdog_retry_delay_seconds: float = Field(
+        default=180.0,
+        description="Delay before retrying a 202 (accepted, not yet scraped) response",
+    )
+    scrapingdog_concurrency: int = Field(
+        default=1,
+        description="Max concurrent ScrapingDog requests (plan-dependent)",
+    )
+    scrapingdog_request_delay_seconds: float = Field(
+        default=2.0,
+        description="Minimum delay between ScrapingDog requests for rate limiting",
+    )
+
     @field_validator("database_url", mode="before")
     @classmethod
     def ensure_asyncpg_driver(cls, value: str) -> str:

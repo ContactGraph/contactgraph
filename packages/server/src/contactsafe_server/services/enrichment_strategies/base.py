@@ -11,6 +11,7 @@ from contactsafe_server.services.org_search import is_automation_or_generic_doma
 DEFAULT_ENRICHMENT_STRATEGIES: tuple[str, ...] = (
     "heuristic",
     "signature",
+    "scrapingdog_linkedin",
     "web_employer",
     "web_relational",
     "user_companies",
@@ -19,6 +20,8 @@ DEFAULT_ENRICHMENT_STRATEGIES: tuple[str, ...] = (
     "mutual_connections",
     "llm_synthesis",
 )
+
+STRONG_TIE_ENRICHMENT_STRATEGIES: tuple[str, ...] = ("scrapingdog_linkedin",)
 
 
 @dataclass(frozen=True, slots=True)

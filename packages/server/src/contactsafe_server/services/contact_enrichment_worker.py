@@ -19,6 +19,10 @@ from contactsafe_server.services.contact_enrichment_engine import ContactEnrichm
 from contactsafe_server.services.enrichment_queue_service import EnrichmentQueueService
 from contactsafe_server.services.enrichment_strategies.base import compute_enrichment_confidence
 from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
+from contactsafe_server.services.scrapingdog_client import (
+    ScrapingDogPendingError,
+    ScrapingDogRateLimitError,
+)
 from contactsafe_server.services.user_org_observation_service import rebuild_user_org_observations
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -32,7 +36,12 @@ class ContactEnrichmentWorker:
         self._queue: EnrichmentQueueService = EnrichmentQueueService(db, settings)
         self._recompute: PersonProfileRecompute = PersonProfileRecompute(db)
 
-    async def enrich_one(self, item: EnrichmentQueueItem) -> None:
+    async def enrich_one(
+        self,
+        item: EnrichmentQueueItem,
+        *,
+        skip_org_rebuild: bool = False,
+    ) -> None:
         person: Person | None = await self._db.get(Person, item.person_id)
         if person is None:
             await self._queue.mark_failed(item, error="person_not_found")
@@ -67,15 +76,36 @@ class ContactEnrichmentWorker:
                 attempted.append(strategy)
                 strategies_run += 1
 
-                async with self._db.begin_nested():
-                    await self._engine.run_strategy(
-                        strategy,
-                        person=person,
-                        obs=obs,
-                        accumulator=accumulator,
-                        user_id=item.trigger_user_id,
-                        context=context,
+                try:
+                    async with self._db.begin_nested():
+                        await self._engine.run_strategy(
+                            strategy,
+                            person=person,
+                            obs=obs,
+                            accumulator=accumulator,
+                            user_id=item.trigger_user_id,
+                            context=context,
+                        )
+                except ScrapingDogPendingError as exc:
+                    await self._defer_item(
+                        item=item,
+                        attempted=attempted,
+                        remaining=remaining,
+                        strategy=strategy,
+                        error=str(exc),
+                        retry_after_seconds=exc.retry_after_seconds,
                     )
+                    return
+                except ScrapingDogRateLimitError as exc:
+                    await self._defer_item(
+                        item=item,
+                        attempted=attempted,
+                        remaining=remaining,
+                        strategy=strategy,
+                        error=str(exc),
+                        retry_after_seconds=self._settings.scrapingdog_retry_delay_seconds,
+                    )
+                    return
 
                 await self._recompute.recompute_persons([person.id])
                 await self._db.refresh(person)
@@ -92,7 +122,8 @@ class ContactEnrichmentWorker:
                 if confidence.score >= self._settings.enrichment_confidence_threshold:
                     break
 
-            await rebuild_user_org_observations(self._db, item.trigger_user_id)
+            if not skip_org_rebuild:
+                await rebuild_user_org_observations(self._db, item.trigger_user_id)
             linkedin_url_final: str | None = await self._load_person_linkedin_url(person.id)
             final_confidence = compute_enrichment_confidence(
                 person,
@@ -110,15 +141,57 @@ class ContactEnrichmentWorker:
             )
         except Exception as exc:
             logger.exception("Enrichment worker failed for person %s", person.id)
-            await self._db.rollback()
-            refreshed: EnrichmentQueueItem | None = await self._db.get(
-                EnrichmentQueueItem, item.id
-            )
-            if refreshed is not None:
-                refreshed.strategies_attempted = attempted
-                refreshed.strategies_remaining = remaining
-                await self._queue.mark_deferred(refreshed, error=str(exc))
-            await self._db.commit()
+            try:
+                await self._db.rollback()
+                refreshed: EnrichmentQueueItem | None = await self._db.get(
+                    EnrichmentQueueItem, item.id
+                )
+                if refreshed is not None:
+                    refreshed.strategies_attempted = attempted
+                    refreshed.strategies_remaining = remaining
+                    await self._queue.mark_deferred(refreshed, error=str(exc))
+                await self._db.commit()
+            except Exception:
+                logger.exception(
+                    "Failed to defer enrichment queue item for person %s; session may be broken",
+                    person.id,
+                )
+
+    async def _defer_item(
+        self,
+        *,
+        item: EnrichmentQueueItem,
+        attempted: list[str],
+        remaining: list[str],
+        strategy: str,
+        error: str,
+        retry_after_seconds: float,
+    ) -> None:
+        logger.info(
+            "Deferring enrichment for person %s after %s (retry in %.0fs)",
+            item.person_id,
+            strategy,
+            retry_after_seconds,
+        )
+        self._db.expire_all()
+        refreshed: EnrichmentQueueItem | None = await self._db.get(
+            EnrichmentQueueItem,
+            item.id,
+        )
+        if refreshed is None:
+            return
+
+        if attempted and attempted[-1] == strategy:
+            attempted.pop()
+        remaining.insert(0, strategy)
+        refreshed.strategies_attempted = attempted
+        refreshed.strategies_remaining = remaining
+        await self._queue.mark_deferred(
+            refreshed,
+            error=error,
+            retry_after_seconds=retry_after_seconds,
+        )
+        await self._db.commit()
 
     async def _load_observation(
         self,

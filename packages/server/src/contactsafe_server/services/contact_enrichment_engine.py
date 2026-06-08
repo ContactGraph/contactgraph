@@ -31,6 +31,9 @@ from contactsafe_server.services.email_parse import (
 )
 from contactsafe_server.services.enrichment_attempt_tracker import EnrichmentAttemptTracker
 from contactsafe_server.services.enrichment_strategies.base import email_domain_is_fresh
+from contactsafe_server.services.enrichment_strategies.scrapingdog_linkedin import (
+    run_scrapingdog_linkedin_strategy,
+)
 from contactsafe_server.services.entity_resolution import EntityResolver, MergeConflict
 from contactsafe_server.services.category_inference import infer_categories_from_contact
 from contactsafe_server.services.openai_json import content_from_chat_completion, parse_json_object
@@ -160,6 +163,15 @@ class ContactEnrichmentEngine:
         if strategy == "signature":
             await self._run_signature(person, accumulator, user_id=user_id)
             return True
+        if strategy == "scrapingdog_linkedin":
+            return await run_scrapingdog_linkedin_strategy(
+                self._db,
+                self._settings,
+                person=person,
+                user_id=user_id,
+                resolver=self._resolver,
+                tracker=self._tracker,
+            )
         if strategy == "web_employer":
             return await self._run_web_search(
                 person,
