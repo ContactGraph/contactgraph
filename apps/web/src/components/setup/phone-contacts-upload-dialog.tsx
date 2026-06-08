@@ -63,7 +63,8 @@ export function PhoneContactsUploadDialog({
         <DialogHeader>
           <DialogTitle>Upload phone contacts</DialogTitle>
           <DialogDescription>
-            Export from the Contacts app, then upload the .vcf file here.
+            Export contacts from your phone, then upload the .vcf or .csv file
+            here.
           </DialogDescription>
         </DialogHeader>
 
@@ -85,10 +86,10 @@ export function PhoneContactsUploadDialog({
             <p className="font-medium text-foreground">Export from iPhone</p>
             <p>1. Open the Contacts app (or Phone → Contacts tab).</p>
             <p>2. Tap back button (or Lists) in the top-left.</p>
+            <p>3. Press and hold All Contacts, then tap Export.</p>
             <p>
-              3. Press and hold All Contacts, then tap Export.
+              4. Save to Files, or AirDrop / Mail the .vcf file to yourself.
             </p>
-            <p>4. Save to Files, or AirDrop / Mail the .vcf file to yourself.</p>
             <p>
               On a computer? Visit{" "}
               <a
@@ -100,6 +101,39 @@ export function PhoneContactsUploadDialog({
                 icloud.com/contacts
               </a>
               , select all, and export vCard.
+            </p>
+          </div>
+
+          <div className="space-y-2 text-sm text-muted-foreground">
+            <p className="font-medium text-foreground">Export from Android</p>
+            <p>1. Open the Contacts app.</p>
+            <p>
+              2. Tap the menu (⋮) or{" "}
+              <span className="text-foreground">Fix &amp; manage</span>.
+            </p>
+            <p>
+              3. Tap{" "}
+              <span className="text-foreground">Export to file</span> (or
+              Export).
+            </p>
+            <p>
+              4. Choose all accounts and save the .vcf file.
+            </p>
+            <p>
+              5. Transfer the file to your computer (email, Google Drive, or
+              USB).
+            </p>
+            <p>
+              Alternatively, visit{" "}
+              <a
+                href="https://contacts.google.com"
+                className="underline"
+                target="_blank"
+                rel="noreferrer"
+              >
+                contacts.google.com
+              </a>
+              , select all, and export as vCard or Google CSV.
             </p>
           </div>
 

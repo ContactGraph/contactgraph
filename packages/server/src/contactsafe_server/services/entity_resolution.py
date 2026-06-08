@@ -27,6 +27,30 @@ _PERSON_ALIAS_PRIORITY: list[str] = [
 ]
 
 
+def _extract_first_name(canonical_name: str) -> str:
+    """Extract the first name (everything before the last whitespace token)."""
+    parts: list[str] = canonical_name.strip().split()
+    if len(parts) <= 1:
+        return canonical_name.strip()
+    return " ".join(parts[:-1])
+
+
+def _extract_last_name(canonical_name: str) -> str:
+    """Extract the last name (the last whitespace-separated token)."""
+    parts: list[str] = canonical_name.strip().split()
+    return parts[-1] if parts else ""
+
+
+def build_last_name_index(persons: list[Person]) -> dict[str, list[Person]]:
+    """Build an in-memory index of persons keyed by lowered last-name token."""
+    index: dict[str, list[Person]] = {}
+    for person in persons:
+        last: str = _extract_last_name(person.canonical_name).lower()
+        if last:
+            index.setdefault(last, []).append(person)
+    return index
+
+
 class MergeConflict(Exception):
     """Raised when an alias is already mapped to a different entity."""
 
@@ -108,13 +132,17 @@ class EntityResolver:
         self,
         *,
         linkedin_url: str,
-        display_name: str,
+        first_name: str,
+        last_name: str,
         email: str | None = None,
+        name_index: dict[str, list[Person]] | None = None,
     ) -> Person:
-        """Lightweight resolver for LinkedIn connections CSV bulk import.
+        """Resolver for LinkedIn connections CSV bulk import.
 
-        Priority: linkedin_url alias -> email alias -> canonical_name -> create.
+        Priority: linkedin_url alias -> email alias -> name match -> create.
+        Name matching uses exact last name + nickname-aware first name.
         """
+        display_name: str = f"{first_name} {last_name}".strip() or "Unknown"
         normalized_url: str = linkedin_url.lower().rstrip("/")
         url_alias: PersonAlias | None = await self._find_alias(
             "linkedin_url", normalized_url,
@@ -137,15 +165,10 @@ class EntityResolver:
                 person_result = await self._session.execute(person_stmt)
                 matched_person = person_result.scalar_one()
 
-        if matched_person is None and display_name.strip():
-            normalized_name: str = display_name.strip().lower()
-            name_stmt = (
-                select(Person)
-                .where(func.lower(Person.canonical_name) == normalized_name)
-                .limit(1)
+        if matched_person is None and last_name.strip():
+            matched_person = self._match_by_name_components(
+                first_name, last_name, name_index,
             )
-            name_result = await self._session.execute(name_stmt)
-            matched_person = name_result.scalar_one_or_none()
 
         if matched_person is None:
             primary_email: str | None = email.lower().strip() if email else None
@@ -158,6 +181,37 @@ class EntityResolver:
 
         await self._ensure_aliases(matched_person, candidates)
         return matched_person
+
+    @staticmethod
+    def _match_by_name_components(
+        first_name: str,
+        last_name: str,
+        name_index: dict[str, list[Person]] | None,
+    ) -> Person | None:
+        """Match using exact last name + nickname-aware first name.
+
+        Uses the pre-built name_index keyed by lowered last name token.
+        """
+        from contactsafe_server.services.nickname_table import first_names_match
+
+        if name_index is None:
+            return None
+
+        last_key: str = last_name.strip().lower()
+        candidates: list[Person] | None = name_index.get(last_key)
+        if not candidates:
+            return None
+
+        target_first: str = first_name.strip()
+        matches: list[Person] = []
+        for person in candidates:
+            person_first: str = _extract_first_name(person.canonical_name)
+            if first_names_match(target_first, person_first):
+                matches.append(person)
+
+        if len(matches) == 1:
+            return matches[0]
+        return None
 
     async def _find_alias(self, kind: str, value: str) -> PersonAlias | None:
         stmt = (

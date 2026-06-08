@@ -2,7 +2,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +14,7 @@ from contactsafe_server.services.claim_writer import (
     record_person_attribute,
     record_relationship,
 )
-from contactsafe_server.services.entity_resolution import EntityResolver
+from contactsafe_server.services.entity_resolution import EntityResolver, build_last_name_index
 from contactsafe_server.services.linkedin_connections_parser import (
     ParsedLinkedInConnection,
     parse_linkedin_connections_csv,
@@ -259,15 +259,32 @@ class FileUploadImportService:
         processed_since_commit: int = 0
         merge_relationship_types = _merged_relationship_types_on_conflict()
 
+        from contactsafe_server.services.entity_resolution import _extract_last_name
+
+        all_persons_result = await self._db.execute(
+            select(Person).where(Person.canonical_name.isnot(None))
+        )
+        all_persons: list[Person] = list(all_persons_result.scalars().all())
+        name_index: dict[str, list[Person]] = build_last_name_index(all_persons)
+        seen_person_ids: set[uuid.UUID] = {p.id for p in all_persons}
+
         for connection in connections:
             if not connection.linkedin_url:
                 continue
 
             person = await resolver.resolve_linkedin_connection(
                 linkedin_url=connection.linkedin_url,
-                display_name=connection.display_name,
+                first_name=connection.first_name,
+                last_name=connection.last_name,
                 email=connection.email,
+                name_index=name_index,
             )
+
+            if person.id not in seen_person_ids:
+                seen_person_ids.add(person.id)
+                last_key: str = _extract_last_name(person.canonical_name).lower()
+                if last_key:
+                    name_index.setdefault(last_key, []).append(person)
 
             observed_at: datetime = (
                 datetime.combine(connection.connected_on, datetime.min.time(), tzinfo=UTC)

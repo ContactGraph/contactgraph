@@ -5,10 +5,8 @@ import { CheckCircle2, Circle, Loader2, Plus, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { LinkedInConnectionsUploadDialog } from "@/components/setup/linkedin-connections-upload-dialog";
-import { LinkedInEnrichmentStep } from "@/components/setup/linkedin-enrichment-step";
 import { LinkedInProfileUploadDialog } from "@/components/setup/linkedin-profile-upload-dialog";
 import { PhoneContactsUploadDialog } from "@/components/setup/phone-contacts-upload-dialog";
-import { StrongTiesStep } from "@/components/setup/strong-ties-step";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,12 +21,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { resolveLinkedInConnectionsUpload } from "@/lib/linkedin-connections-upload";
 import type {
   ConnectSourceResult,
-  EnrichStrongTiesResult,
   ListSourcesResult,
-  ListStrongTiesResult,
   NetworkStatusResult,
   PollConnectResult,
-  ScrapingDogEnrichmentStatusResult,
   SourceSummary,
   SourceType,
   SyncSourceResult,
@@ -63,14 +58,7 @@ const setupSteps: ReadonlyArray<SetupStep> = [
     phase: "network",
     title: "Import your network",
     description:
-      "Upload phone contacts (.vcf) — this is your authoritative network. Everything else enriches these people.",
-  },
-  {
-    id: "gmail",
-    phase: "enrich",
-    title: "Connect Gmail",
-    description: "Add email addresses and communication history to your phone contacts.",
-    optional: true,
+      "Upload phone contacts (.vcf) from iPhone or Android — this is your authoritative network.",
   },
   {
     id: "linkedin",
@@ -78,7 +66,6 @@ const setupSteps: ReadonlyArray<SetupStep> = [
     title: "Upload LinkedIn connections",
     description:
       "Match LinkedIn profiles to phone contacts and identify strong professional ties.",
-    optional: true,
   },
   {
     id: "linkedin_profile",
@@ -322,38 +309,11 @@ export default function SourcesPage() {
     refetchInterval: 8000,
   });
 
-  const strongTiesQuery = useQuery({
-    queryKey: ["strong-ties"],
-    queryFn: () => proxyPost<ListStrongTiesResult>("list-strong-ties"),
-    enabled: (networkStatusQuery.data?.strong_tie_count ?? 0) > 0,
-  });
-
-  const scrapingDogStatusQuery = useQuery({
-    queryKey: ["scrapingdog-enrichment-status"],
-    queryFn: () =>
-      proxyPost<ScrapingDogEnrichmentStatusResult>(
-        "get-scrapingdog-enrichment-status",
-      ),
-    refetchInterval: (query) =>
-      query.state.data?.state === "running" ? 3000 : false,
-  });
-
   const syncMutation = useMutation({
     mutationFn: (sourceId?: string) =>
       proxyPost<SyncSourceResult>("sync-source", { source_id: sourceId ?? null }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["sources"] });
-    },
-  });
-
-  const enrichStrongTiesMutation = useMutation({
-    mutationFn: () => proxyPost<EnrichStrongTiesResult>("enrich-strong-ties"),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ["scrapingdog-enrichment-status"],
-      });
-      await queryClient.invalidateQueries({ queryKey: ["network-status"] });
-      await queryClient.invalidateQueries({ queryKey: ["people"] });
     },
   });
 
@@ -657,8 +617,10 @@ export default function SourcesPage() {
               <p className="font-medium">{step.title}</p>
               {step.id === "phone" ? (
                 <Badge variant="default">Required</Badge>
+              ) : step.id === "linkedin" ? (
+                <Badge variant="default">Recommended</Badge>
               ) : step.optional ? (
-                <Badge variant="outline">Recommended</Badge>
+                <Badge variant="outline">Optional</Badge>
               ) : null}
             </div>
             <p className="text-sm text-muted-foreground">{step.description}</p>
@@ -694,7 +656,7 @@ export default function SourcesPage() {
         <h1 className="text-2xl font-semibold tracking-tight">Your network</h1>
         <p className="text-muted-foreground">
           {networkStatus?.message ??
-            "Phone contacts are your network. LinkedIn and Gmail enrich them with professional context."}
+            "Phone contacts are your network. LinkedIn enriches them with professional context."}
         </p>
       </div>
 
@@ -727,65 +689,14 @@ export default function SourcesPage() {
         <CardHeader>
           <CardTitle>Phase 2 · Enrich your network</CardTitle>
           <CardDescription>
-            Add Gmail and LinkedIn data to your phone contacts. Raw imports stay
-            behind the scenes — only your phone network is shown in People.
+            Add LinkedIn data to your phone contacts to identify strong
+            professional ties with current employers and titles.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {setupSteps
             .filter((step) => step.phase === "enrich")
             .map((step) => renderStepRow(step))}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Phase 3 · Strong professional ties</CardTitle>
-          <CardDescription>
-            People in your phone who are also LinkedIn connections.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <StrongTiesStep
-            networkStatus={networkStatus}
-            strongTies={strongTiesQuery.data}
-            isLoading={networkStatusQuery.isLoading || strongTiesQuery.isLoading}
-          />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Phase 4 · Discover where they work</CardTitle>
-          <CardDescription>
-            Scrape LinkedIn profiles for strong professional ties to find current employers.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <LinkedInEnrichmentStep
-            networkStatus={networkStatus}
-            enrichmentStatus={scrapingDogStatusQuery.data}
-            isLoading={
-              networkStatusQuery.isLoading || scrapingDogStatusQuery.isLoading
-            }
-            isPending={enrichStrongTiesMutation.isPending}
-            onEnrich={() => enrichStrongTiesMutation.mutate()}
-          />
-        </CardContent>
-      </Card>
-
-      <Card className="opacity-70">
-        <CardHeader>
-          <CardTitle>Phase 5 · Take action</CardTitle>
-          <CardDescription>Coming soon</CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-            Find job openings at target companies
-          </div>
-          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
-            Generate a recommended outreach plan
-          </div>
         </CardContent>
       </Card>
 
@@ -803,12 +714,10 @@ export default function SourcesPage() {
             onClick={() => {
               void sourcesQuery.refetch();
               void networkStatusQuery.refetch();
-              void scrapingDogStatusQuery.refetch();
             }}
             disabled={
               sourcesQuery.isFetching ||
-              networkStatusQuery.isFetching ||
-              scrapingDogStatusQuery.isFetching
+              networkStatusQuery.isFetching
             }
           >
             <RefreshCw

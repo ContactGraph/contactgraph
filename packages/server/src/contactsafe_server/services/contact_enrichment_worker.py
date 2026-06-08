@@ -69,6 +69,8 @@ class ContactEnrichmentWorker:
         attempted: list[str] = list(item.strategies_attempted or [])
         max_strategies: int = self._settings.enrichment_max_strategies_per_contact
         strategies_run: int = 0
+        person_id_local: uuid.UUID = person.id
+        item_id_local: uuid.UUID = item.id
 
         try:
             while remaining and strategies_run < max_strategies:
@@ -140,11 +142,11 @@ class ContactEnrichmentWorker:
                 attempted,
             )
         except Exception as exc:
-            logger.exception("Enrichment worker failed for person %s", person.id)
+            logger.exception("Enrichment worker failed for person %s", person_id_local)
             try:
                 await self._db.rollback()
                 refreshed: EnrichmentQueueItem | None = await self._db.get(
-                    EnrichmentQueueItem, item.id
+                    EnrichmentQueueItem, item_id_local
                 )
                 if refreshed is not None:
                     refreshed.strategies_attempted = attempted
@@ -153,8 +155,9 @@ class ContactEnrichmentWorker:
                 await self._db.commit()
             except Exception:
                 logger.exception(
-                    "Failed to defer enrichment queue item for person %s; session may be broken",
-                    person.id,
+                    "Failed to defer enrichment queue item %s for person %s; session may be broken",
+                    item_id_local,
+                    person_id_local,
                 )
 
     async def _defer_item(
