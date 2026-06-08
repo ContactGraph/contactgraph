@@ -131,7 +131,7 @@ class FileUploadImportService:
             user_person = await ensure_user_person(self._db, user)
 
         for contact in contacts:
-            if not contact.display_name and not contact.emails and not contact.phone_numbers:
+            if not contact.display_name:
                 continue
 
             display_name: str = contact.display_name

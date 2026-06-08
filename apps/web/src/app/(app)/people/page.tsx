@@ -38,7 +38,7 @@ import { proxyPost } from "@/lib/proxy-client";
 export default function PeoplePage() {
   const [search, setSearch] = useState<string>("");
   const [sorting, setSorting] = useState<SortingState>([
-    { id: "tie_strength_score", desc: true },
+    { id: "name", desc: false },
   ]);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
 
@@ -99,17 +99,21 @@ export default function PeoplePage() {
         meta: { width: "w-[9rem]" },
       },
       {
+        accessorKey: "current_role",
+        header: ({ column }) => <CompactSortHeader column={column} label="Title" />,
+        cell: ({ row }) => (
+          <CompactCell value={row.original.current_role ?? "—"} />
+        ),
+        meta: { width: "w-[7rem]" },
+      },
+      {
         id: "company",
         accessorFn: (row: PersonListItem) => row.org_name ?? "",
         header: ({ column }) => <CompactSortHeader column={column} label="Company" />,
-        cell: ({ row }) => {
-          const org: string | null = row.original.org_name;
-          const role: string | null = row.original.current_role;
-          if (!org && !role) return <CompactCell value="—" />;
-          const label: string = [role, org].filter(Boolean).join(" @ ");
-          return <CompactCell value={label} title={label} />;
-        },
-        meta: { width: "w-[10rem]" },
+        cell: ({ row }) => (
+          <CompactCell value={row.original.org_name ?? "—"} />
+        ),
+        meta: { width: "w-[7rem]" },
       },
       {
         id: "linkedin",
@@ -192,8 +196,8 @@ export default function PeoplePage() {
         "Name",
         "Phone",
         "Email",
+        "Title",
         "Company",
-        "Role",
         "Professional Tie",
         "LinkedIn",
       ],
@@ -201,8 +205,8 @@ export default function PeoplePage() {
         person.display_name,
         person.phone ?? "",
         person.primary_email ?? person.emails[0] ?? "",
-        person.org_name ?? "",
         person.current_role ?? "",
+        person.org_name ?? "",
         person.is_strong_tie ? "yes" : "",
         person.linkedin_url ?? "",
       ]),
@@ -265,7 +269,7 @@ export default function PeoplePage() {
             table={table}
             columnCount={columns.length}
             emptyMessage="No phone contacts in your network yet. Import them from Sources."
-            minWidth="38rem"
+            minWidth="44rem"
             onRowClick={(person: PersonListItem) =>
               setSelectedPersonId(person.person_id)
             }

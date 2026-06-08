@@ -73,10 +73,8 @@ def _vcard_to_contact(component: vobject.base.Component) -> ParsedPhoneContact |
     urls: list[str] = _vcard_urls(component)
     address: str | None = _vcard_address(component)
 
-    if not display_name and not emails and not phones:
-        return None
     if not display_name:
-        display_name = emails[0] if emails else (phones[0] if phones else "Unknown")
+        return None
 
     return ParsedPhoneContact(
         display_name=display_name,
@@ -210,10 +208,8 @@ def _parse_csv(content: str) -> list[ParsedPhoneContact]:
         phone_raw: str = (row.get(phone_col or "", "") or "").strip()
         emails: tuple[str, ...] = (email_raw,) if email_raw else ()
         phones: tuple[str, ...] = (phone_raw,) if phone_raw else ()
-        if not display_name and not emails and not phones:
-            continue
         if not display_name:
-            display_name = email_raw or phone_raw or "Unknown"
+            continue
         contacts.append(
             ParsedPhoneContact(
                 display_name=display_name,
