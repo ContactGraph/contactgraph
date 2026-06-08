@@ -9,7 +9,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import DedupPersonsResult
@@ -459,16 +459,38 @@ class PersonDedupService:
         survivor_id: uuid.UUID,
         duplicate_id: uuid.UUID,
     ) -> None:
-        await self._db.execute(
-            update(UserRelationshipObservation)
-            .where(UserRelationshipObservation.person_a_id == duplicate_id)
-            .values(person_a_id=survivor_id)
+        result = await self._db.execute(
+            select(UserRelationshipObservation).where(
+                or_(
+                    UserRelationshipObservation.person_a_id == duplicate_id,
+                    UserRelationshipObservation.person_b_id == duplicate_id,
+                )
+            )
         )
-        await self._db.execute(
-            update(UserRelationshipObservation)
-            .where(UserRelationshipObservation.person_b_id == duplicate_id)
-            .values(person_b_id=survivor_id)
-        )
+        rows: list[UserRelationshipObservation] = list(result.scalars().all())
+        for row in rows:
+            new_a: uuid.UUID = survivor_id if row.person_a_id == duplicate_id else row.person_a_id
+            new_b: uuid.UUID = survivor_id if row.person_b_id == duplicate_id else row.person_b_id
+            if new_a == new_b:
+                await self._db.delete(row)
+                continue
+            ordered_a: uuid.UUID = min(new_a, new_b)
+            ordered_b: uuid.UUID = max(new_a, new_b)
+            existing = (await self._db.execute(
+                select(UserRelationshipObservation).where(
+                    UserRelationshipObservation.user_id == row.user_id,
+                    UserRelationshipObservation.person_a_id == ordered_a,
+                    UserRelationshipObservation.person_b_id == ordered_b,
+                )
+            )).scalar_one_or_none()
+            if existing is not None and existing is not row:
+                existing.co_thread_count = max(
+                    existing.co_thread_count, row.co_thread_count,
+                )
+                await self._db.delete(row)
+            else:
+                row.person_a_id = ordered_a
+                row.person_b_id = ordered_b
 
     async def _reassign_org_observations(
         self,

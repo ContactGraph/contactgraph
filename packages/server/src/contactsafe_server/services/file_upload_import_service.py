@@ -2,7 +2,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +34,20 @@ from contactsafe_server.services.upload_payload_crypto import read_upload_payloa
 from contactsafe_server.services.user_person_service import ensure_user_person
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+_LINKEDIN_UPLOAD_RELATIONSHIP_TYPES: list[str] = ["linkedin_connections_upload"]
+_PHONE_UPLOAD_RELATIONSHIP_TYPES: list[str] = ["phone_contacts_upload"]
+_LINKEDIN_IMPORT_COMMIT_BATCH: int = 500
+
+
+def _merged_relationship_types_on_conflict() -> text:
+    return text(
+        "(SELECT COALESCE(array_agg(DISTINCT rel), ARRAY[]::text[]) "
+        "FROM unnest("
+        "COALESCE(user_person_observations.relationship_types, ARRAY[]::text[]) "
+        "|| excluded.relationship_types"
+        ") AS rel)"
+    )
 
 
 class FileUploadImportService:
@@ -118,7 +132,7 @@ class FileUploadImportService:
             user_person = await ensure_user_person(self._db, user)
 
         for contact in contacts:
-            if not contact.emails and not contact.phone_numbers:
+            if not contact.display_name and not contact.emails and not contact.phone_numbers:
                 continue
 
             display_name: str = contact.display_name
@@ -179,7 +193,8 @@ class FileUploadImportService:
                     pass
 
             now = datetime.now(tz=UTC)
-            stmt = pg_insert(UserPersonObservation).values(
+            phone_tie_strength: float = 0.5
+            insert_stmt = pg_insert(UserPersonObservation).values(
                 user_id=user_id,
                 person_id=person.id,
                 first_observed_at=now,
@@ -188,22 +203,23 @@ class FileUploadImportService:
                 outbound_count=0,
                 inbound_count=0,
                 thread_count=0,
-                tie_strength_score=0.5,
+                tie_strength_score=phone_tie_strength,
                 is_human=True,
                 is_broadcast=False,
                 is_automated=False,
-                relationship_types=["phone_contacts_upload"],
+                relationship_types=_PHONE_UPLOAD_RELATIONSHIP_TYPES,
                 notes="Imported from phone contacts upload",
                 source_id=source_id,
-            ).on_conflict_do_update(
+            )
+            stmt = insert_stmt.on_conflict_do_update(
                 constraint="pk_user_person_obs",
                 set_={
                     "last_observed_at": now,
-                    "relationship_types": ["phone_contacts_upload"],
+                    "relationship_types": _merged_relationship_types_on_conflict(),
                     "tie_strength_score": func.least(
                         1.0,
                         UserPersonObservation.tie_strength_score
-                        + stmt.excluded.tie_strength_score,
+                        + insert_stmt.excluded.tie_strength_score,
                     ),
                     "updated_at": now,
                 },
@@ -255,41 +271,19 @@ class FileUploadImportService:
     ) -> None:
         connections: list[ParsedLinkedInConnection] = parse_linkedin_connections_csv(content)
         resolver = EntityResolver(self._db)
-        user: User | None = await self._db.get(User, source.user_id)
-        user_person: Person | None = None
-        if user is not None:
-            user_person = await ensure_user_person(self._db, user)
-
-        commit_interval: int = max(
-            1, self._settings.import_progress_commit_messages,
-        )
+        commit_interval: int = _LINKEDIN_IMPORT_COMMIT_BATCH
         processed_since_commit: int = 0
-        person_ids_to_enqueue: list[uuid.UUID] = []
+        merge_relationship_types = _merged_relationship_types_on_conflict()
 
         for connection in connections:
-            emails: list[str] = [connection.email] if connection.email else []
-            person = await resolver.resolve_person(
-                emails=emails,
-                display_name=connection.display_name,
+            if not connection.linkedin_url:
+                continue
+
+            person = await resolver.resolve_linkedin_connection(
                 linkedin_url=connection.linkedin_url,
+                display_name=connection.display_name,
+                email=connection.email,
             )
-            if connection.company:
-                domain: str | None = None
-                if connection.email and "@" in connection.email:
-                    email_domain: str = connection.email.rsplit("@", 1)[1].lower()
-                    if not is_automation_or_generic_domain(email_domain):
-                        domain = email_domain
-                org = await resolver.resolve_org(domain=domain, name=connection.company)
-                await record_employment(
-                    self._db,
-                    person_id=person.id,
-                    org_id=org.id,
-                    role_title=connection.position,
-                    contributor_user_id=source.user_id,
-                    contributor_source_kind="linkedin_connections_upload",
-                    contributor_source_id=source.id,
-                    confidence=0.5,
-                )
 
             observed_at: datetime = (
                 datetime.combine(connection.connected_on, datetime.min.time(), tzinfo=UTC)
@@ -309,31 +303,20 @@ class FileUploadImportService:
                 is_human=True,
                 is_broadcast=False,
                 is_automated=False,
-                relationship_types=["linkedin_connections_upload"],
+                relationship_types=_LINKEDIN_UPLOAD_RELATIONSHIP_TYPES,
                 notes="Imported from LinkedIn connections export",
                 source_id=source.id,
             ).on_conflict_do_update(
                 constraint="pk_user_person_obs",
                 set_={
                     "last_observed_at": observed_at,
-                    "relationship_types": ["linkedin_connections_upload"],
+                    "relationship_types": merge_relationship_types,
                 },
             )
             await self._db.execute(stmt)
 
-            if user_person is not None and user_person.id != person.id:
-                await record_relationship(
-                    self._db,
-                    person_a_id=user_person.id,
-                    person_b_id=person.id,
-                    kind="linkedin_connection",
-                    contributor_user_id=source.user_id,
-                    contributor_source_kind="linkedin_connections_upload",
-                )
-
             source.contacts_found += 1
             source.contacts_resolved += 1
-            person_ids_to_enqueue.append(person.id)
 
             processed_since_commit += 1
             if processed_since_commit >= commit_interval:
@@ -343,16 +326,6 @@ class FileUploadImportService:
 
         if processed_since_commit > 0:
             await self._db.flush()
-
-        from contactsafe_server.services.enrichment_queue_service import EnrichmentQueueService
-
-        eq_service = EnrichmentQueueService(self._db, self._settings)
-        for person_id in person_ids_to_enqueue:
-            await eq_service.enqueue_enrichment(
-                person_id=person_id,
-                trigger_user_id=source.user_id,
-            )
-        await self._db.flush()
 
     async def _ingest_linkedin_profile(
         self,

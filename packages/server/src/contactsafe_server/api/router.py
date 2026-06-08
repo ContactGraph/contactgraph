@@ -19,12 +19,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import (
     DedupPersonsResult,
+    EnrichStrongTiesResult,
     GetOrgRequest,
     GetPersonRequest,
     ListOrgsResult,
+    ListPeopleRequest,
     ListPeopleResult,
+    ListStrongTiesResult,
+    NetworkStatusResult,
     OrgDetailResult,
     PersonDetailResult,
+    ScrapingDogEnrichmentStatusResult,
+    StrongTieCompaniesResult,
+    StrongTieCountResult,
 )
 from contactsafe_core.schemas import (
     ConnectSourceRequest,
@@ -467,8 +474,53 @@ async def api_edit_trusted_users(
 
 
 @router.post("/list-people", response_model=ListPeopleResult)
-async def api_list_people(ctx: Ctx, user_id: EffectiveUser) -> ListPeopleResult:
-    return await actions.list_people(ctx, user_id)
+async def api_list_people(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: ListPeopleRequest | None = None,
+) -> ListPeopleResult:
+    request: ListPeopleRequest = body or ListPeopleRequest()
+    return await actions.list_people(
+        ctx,
+        user_id,
+        network_only=request.network_only,
+    )
+
+
+@router.post("/list-strong-ties", response_model=ListStrongTiesResult)
+async def api_list_strong_ties(ctx: Ctx, user_id: EffectiveUser) -> ListStrongTiesResult:
+    return await actions.list_strong_ties(ctx, user_id)
+
+
+@router.post("/count-strong-ties", response_model=StrongTieCountResult)
+async def api_count_strong_ties(ctx: Ctx, user_id: EffectiveUser) -> StrongTieCountResult:
+    return await actions.count_strong_ties(ctx, user_id)
+
+
+@router.post("/list-strong-tie-companies", response_model=StrongTieCompaniesResult)
+async def api_list_strong_tie_companies(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> StrongTieCompaniesResult:
+    return await actions.list_strong_tie_companies(ctx, user_id)
+
+
+@router.post("/enrich-strong-ties", response_model=EnrichStrongTiesResult)
+async def api_enrich_strong_ties(ctx: Ctx, user_id: EffectiveUser) -> EnrichStrongTiesResult:
+    return await actions.enrich_strong_ties(ctx, user_id)
+
+
+@router.post("/get-scrapingdog-enrichment-status", response_model=ScrapingDogEnrichmentStatusResult)
+async def api_get_scrapingdog_enrichment_status(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> ScrapingDogEnrichmentStatusResult:
+    return await actions.get_scrapingdog_enrichment_status(ctx, user_id)
+
+
+@router.post("/get-network-status", response_model=NetworkStatusResult)
+async def api_get_network_status(ctx: Ctx, user_id: EffectiveUser) -> NetworkStatusResult:
+    return await actions.get_network_status(ctx, user_id)
 
 
 @router.post("/get-person", response_model=PersonDetailResult)

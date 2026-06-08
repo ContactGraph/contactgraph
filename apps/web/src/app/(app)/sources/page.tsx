@@ -1,12 +1,14 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Circle, Loader2, Plus, RefreshCw, Sparkles } from "lucide-react";
+import { CheckCircle2, Circle, Loader2, Plus, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { LinkedInConnectionsUploadDialog } from "@/components/setup/linkedin-connections-upload-dialog";
+import { LinkedInEnrichmentStep } from "@/components/setup/linkedin-enrichment-step";
 import { LinkedInProfileUploadDialog } from "@/components/setup/linkedin-profile-upload-dialog";
 import { PhoneContactsUploadDialog } from "@/components/setup/phone-contacts-upload-dialog";
+import { StrongTiesStep } from "@/components/setup/strong-ties-step";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,12 +23,14 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { resolveLinkedInConnectionsUpload } from "@/lib/linkedin-connections-upload";
 import type {
   ConnectSourceResult,
-  EnrichmentStatusResult,
+  EnrichStrongTiesResult,
   ListSourcesResult,
+  ListStrongTiesResult,
+  NetworkStatusResult,
   PollConnectResult,
+  ScrapingDogEnrichmentStatusResult,
   SourceSummary,
   SourceType,
-  StartEnrichmentResult,
   SyncSourceResult,
   SyncState,
   UploadSourceResult,
@@ -40,50 +44,49 @@ const IMPORT_COMPLETE_STATES: ReadonlySet<SyncState> = new Set([
 ]);
 
 type SetupStepId =
-  | "linkedin_profile"
-  | "gmail"
   | "phone"
+  | "gmail"
   | "linkedin"
-  | "enrich";
+  | "linkedin_profile";
 
 interface SetupStep {
   id: SetupStepId;
   title: string;
   description: string;
   optional?: boolean;
+  phase: "network" | "enrich";
 }
 
 const setupSteps: ReadonlyArray<SetupStep> = [
   {
-    id: "linkedin_profile",
-    title: "Set up your profile",
+    id: "phone",
+    phase: "network",
+    title: "Import your network",
     description:
-      "Upload your LinkedIn PDF (Profile → Save to PDF) so we can identify you and your contacts.",
+      "Upload phone contacts (.vcf) — this is your authoritative network. Everything else enriches these people.",
   },
   {
     id: "gmail",
+    phase: "enrich",
     title: "Connect Gmail",
-    description: "Import contacts and email relationships from your inbox.",
-  },
-  {
-    id: "phone",
-    title: "Upload phone contacts",
-    description:
-      "Export from the Contacts app (Lists → long-press → Export), then upload the .vcf file.",
+    description: "Add email addresses and communication history to your phone contacts.",
     optional: true,
   },
   {
     id: "linkedin",
+    phase: "enrich",
     title: "Upload LinkedIn connections",
     description:
-      "Import Connections.csv (Settings → Get a copy of your data, takes 24h) for identity matching.",
+      "Match LinkedIn profiles to phone contacts and identify strong professional ties.",
     optional: true,
   },
   {
-    id: "enrich",
-    title: "Enrich contacts",
+    id: "linkedin_profile",
+    phase: "enrich",
+    title: "Upload your LinkedIn profile",
     description:
-      "Find where your contacts work now and what they are posting about.",
+      "Optional PDF export of your own profile for better self-identification during enrichment.",
+    optional: true,
   },
 ];
 
@@ -103,7 +106,6 @@ function sourceForType(
 function stepComplete(
   stepId: SetupStepId,
   sources: ReadonlyArray<SourceSummary>,
-  enrichment: EnrichmentStatusResult | undefined,
 ): boolean {
   switch (stepId) {
     case "gmail": {
@@ -122,8 +124,6 @@ function stepComplete(
       const source = sourceForType(sources, "linkedin_connections_upload");
       return source !== undefined && source.sync_state === "complete";
     }
-    case "enrich":
-      return enrichment?.state === "complete";
     default:
       return false;
   }
@@ -132,11 +132,7 @@ function stepComplete(
 function stepInProgress(
   stepId: SetupStepId,
   sources: ReadonlyArray<SourceSummary>,
-  enrichment: EnrichmentStatusResult | undefined,
 ): boolean {
-  if (stepId === "enrich") {
-    return enrichment?.state === "running";
-  }
   const typeMap: Partial<Record<SetupStepId, SourceType>> = {
     gmail: "google_mail",
     phone: "phone_contacts_upload",
@@ -153,11 +149,120 @@ function stepInProgress(
   );
 }
 
-function anyImportReady(sources: ReadonlyArray<SourceSummary>): boolean {
-  return sources.some(
-    (source) =>
-      source.source_type !== "google_contacts" &&
-      IMPORT_COMPLETE_STATES.has(source.sync_state),
+interface StepImportStatusDisplay {
+  count: number | null;
+  suffix: string;
+  retryLabel: string;
+}
+
+function getStepImportStatus(
+  stepId: SetupStepId,
+  sources: ReadonlyArray<SourceSummary>,
+  networkStatus: NetworkStatusResult | undefined,
+): StepImportStatusDisplay | null {
+  switch (stepId) {
+    case "phone": {
+      const source = sourceForType(sources, "phone_contacts_upload");
+      if (source?.sync_state !== "complete") {
+        return null;
+      }
+      return {
+        count: source.contacts_resolved,
+        suffix: "Uploaded",
+        retryLabel: "re-upload",
+      };
+    }
+    case "gmail": {
+      if (!networkStatus?.gmail_connected) {
+        return null;
+      }
+      const source = sourceForType(sources, "google_mail");
+      return {
+        count: networkStatus.gmail_matched_count || source?.contacts_resolved || null,
+        suffix: "Imported",
+        retryLabel: "reconnect",
+      };
+    }
+    case "linkedin": {
+      const source = sourceForType(sources, "linkedin_connections_upload");
+      if (source?.sync_state !== "complete") {
+        return null;
+      }
+      return {
+        count: source.contacts_resolved,
+        suffix: "Imported",
+        retryLabel: "re-upload",
+      };
+    }
+    case "linkedin_profile": {
+      const source = sourceForType(sources, "linkedin_profile_upload");
+      if (source?.sync_state !== "complete") {
+        return null;
+      }
+      return {
+        count: null,
+        suffix: "Uploaded",
+        retryLabel: "re-upload",
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+interface StepActionAreaProps {
+  complete: boolean;
+  inProgress: boolean;
+  pending: boolean;
+  status: StepImportStatusDisplay | null;
+  primaryLabel: string;
+  onPrimary: () => void;
+  disabled: boolean;
+}
+
+function StepActionArea({
+  complete,
+  inProgress,
+  pending,
+  status,
+  primaryLabel,
+  onPrimary,
+  disabled,
+}: StepActionAreaProps) {
+  if (inProgress || pending) {
+    return (
+      <Button variant="outline" size="sm" disabled>
+        <Loader2 className="size-4 animate-spin" />
+        {inProgress ? "Importing…" : "Working…"}
+      </Button>
+    );
+  }
+
+  if (complete && status !== null) {
+    const statusText: string =
+      status.count !== null
+        ? `${status.count.toLocaleString()} ${status.suffix}`
+        : `Profile ${status.suffix.toLowerCase()}`;
+    return (
+      <div className="flex min-w-[6.5rem] flex-col items-end gap-0.5 text-right">
+        <p className="text-sm font-medium tabular-nums">{statusText}</p>
+        <button
+          type="button"
+          className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline disabled:opacity-50"
+          onClick={onPrimary}
+          disabled={disabled}
+        >
+          {status.retryLabel}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <Button variant="outline" size="sm" onClick={onPrimary} disabled={disabled}>
+      <Plus className="size-4" />
+      {primaryLabel}
+    </Button>
   );
 }
 
@@ -211,15 +316,26 @@ export default function SourcesPage() {
     },
   });
 
-  const enrichmentQuery = useQuery({
-    queryKey: ["enrichment-status"],
+  const networkStatusQuery = useQuery({
+    queryKey: ["network-status"],
+    queryFn: () => proxyPost<NetworkStatusResult>("get-network-status"),
+    refetchInterval: 8000,
+  });
+
+  const strongTiesQuery = useQuery({
+    queryKey: ["strong-ties"],
+    queryFn: () => proxyPost<ListStrongTiesResult>("list-strong-ties"),
+    enabled: (networkStatusQuery.data?.strong_tie_count ?? 0) > 0,
+  });
+
+  const scrapingDogStatusQuery = useQuery({
+    queryKey: ["scrapingdog-enrichment-status"],
     queryFn: () =>
-      proxyPost<EnrichmentStatusResult>("get-enrichment-status"),
-    refetchInterval: (query) => {
-      const state: EnrichmentStatusResult["state"] | undefined =
-        query.state.data?.state;
-      return state === "running" || state === "pending" ? 3000 : false;
-    },
+      proxyPost<ScrapingDogEnrichmentStatusResult>(
+        "get-scrapingdog-enrichment-status",
+      ),
+    refetchInterval: (query) =>
+      query.state.data?.state === "running" ? 3000 : false,
   });
 
   const syncMutation = useMutation({
@@ -230,10 +346,14 @@ export default function SourcesPage() {
     },
   });
 
-  const enrichMutation = useMutation({
-    mutationFn: () => proxyPost<StartEnrichmentResult>("start-enrichment"),
+  const enrichStrongTiesMutation = useMutation({
+    mutationFn: () => proxyPost<EnrichStrongTiesResult>("enrich-strong-ties"),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["enrichment-status"] });
+      await queryClient.invalidateQueries({
+        queryKey: ["scrapingdog-enrichment-status"],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["network-status"] });
+      await queryClient.invalidateQueries({ queryKey: ["people"] });
     },
   });
 
@@ -254,6 +374,8 @@ export default function SourcesPage() {
         setLinkedinConnectionsProcessing(true);
       }
       await queryClient.invalidateQueries({ queryKey: ["sources"] });
+      await queryClient.invalidateQueries({ queryKey: ["network-status"] });
+      await queryClient.invalidateQueries({ queryKey: ["strong-ties"] });
     },
     onError: (error: Error, variables) => {
       if (variables.source_type === "phone_contacts_upload") {
@@ -339,6 +461,7 @@ export default function SourcesPage() {
         clearPollTimer();
         popupRef.current?.close();
         await queryClient.invalidateQueries({ queryKey: ["sources"] });
+        await queryClient.invalidateQueries({ queryKey: ["network-status"] });
         setConnectMessage("Source connected successfully.");
         return;
       }
@@ -451,16 +574,127 @@ export default function SourcesPage() {
     [handleTextFileUpload],
   );
 
-  const enrichment: EnrichmentStatusResult | undefined = enrichmentQuery.data;
-  const importReady: boolean = anyImportReady(sources);
+  const networkStatus: NetworkStatusResult | undefined = networkStatusQuery.data;
+
+  const renderStepRow = (step: SetupStep) => {
+    const complete: boolean = stepComplete(step.id, sources);
+    const inProgress: boolean =
+      step.id === "linkedin"
+        ? stepInProgress(step.id, sources) || linkedinConnectionsProcessing
+        : step.id === "linkedin_profile"
+          ? stepInProgress(step.id, sources) || linkedinProfileProcessing
+          : stepInProgress(step.id, sources);
+    const importStatus: StepImportStatusDisplay | null = getStepImportStatus(
+      step.id,
+      sources,
+      networkStatus,
+    );
+
+    const actionProps: StepActionAreaProps | null = (() => {
+      switch (step.id) {
+        case "linkedin_profile":
+          return {
+            complete,
+            inProgress,
+            pending: uploadMutation.isPending,
+            status: importStatus,
+            primaryLabel: "Upload",
+            onPrimary: () => setLinkedinProfileDialogOpen(true),
+            disabled: uploadMutation.isPending || linkedinProfileProcessing,
+          };
+        case "gmail":
+          return {
+            complete,
+            inProgress,
+            pending: connectMutation.isPending,
+            status: importStatus,
+            primaryLabel: "Connect",
+            onPrimary: () => connectMutation.mutate("google_mail"),
+            disabled: connectMutation.isPending,
+          };
+        case "phone":
+          return {
+            complete,
+            inProgress,
+            pending: uploadMutation.isPending,
+            status: importStatus,
+            primaryLabel: "Upload",
+            onPrimary: () => setPhoneDialogOpen(true),
+            disabled: uploadMutation.isPending,
+          };
+        case "linkedin":
+          return {
+            complete,
+            inProgress,
+            pending: uploadMutation.isPending,
+            status: importStatus,
+            primaryLabel: "Upload",
+            onPrimary: () => setLinkedinConnectionsDialogOpen(true),
+            disabled: uploadMutation.isPending,
+          };
+        default:
+          return null;
+      }
+    })();
+
+    return (
+      <div
+        key={step.id}
+        className="flex flex-col gap-3 border-b pb-4 last:border-b-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between"
+      >
+        <div className="flex gap-3">
+          <div className="mt-0.5 shrink-0">
+            {complete ? (
+              <CheckCircle2 className="size-5 text-green-600" />
+            ) : inProgress ? (
+              <Loader2 className="size-5 animate-spin text-muted-foreground" />
+            ) : (
+              <Circle className="size-5 text-muted-foreground" />
+            )}
+          </div>
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-medium">{step.title}</p>
+              {step.id === "phone" ? (
+                <Badge variant="default">Required</Badge>
+              ) : step.optional ? (
+                <Badge variant="outline">Recommended</Badge>
+              ) : null}
+            </div>
+            <p className="text-sm text-muted-foreground">{step.description}</p>
+            {step.id === "linkedin" &&
+            linkedinConnectionsSource &&
+            (linkedinConnectionsSource.sync_state === "syncing" ||
+              linkedinConnectionsSource.sync_state === "pending") ? (
+              <p className="text-xs text-muted-foreground">
+                {linkedinConnectionsSource.contacts_resolved > 0
+                  ? `Importing ${linkedinConnectionsSource.contacts_resolved.toLocaleString()} connections…`
+                  : "Importing… large exports can take several minutes"}
+              </p>
+            ) : null}
+            {step.id === "linkedin" &&
+            linkedinConnectionsSource?.sync_state === "failed" ? (
+              <p className="text-xs text-destructive">
+                {linkedinConnectionsSource.sync_error ??
+                  "Import failed — try uploading again"}
+              </p>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 sm:justify-end sm:pt-0.5">
+          {actionProps ? <StepActionArea {...actionProps} /> : null}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Setup</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Your network</h1>
         <p className="text-muted-foreground">
-          Import your contacts from multiple sources, then enrich to discover
-          where people work now and what they are posting about.
+          {networkStatus?.message ??
+            "Phone contacts are your network. LinkedIn and Gmail enrich them with professional context."}
         </p>
       </div>
 
@@ -477,176 +711,88 @@ export default function SourcesPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Getting started</CardTitle>
+          <CardTitle>Phase 1 · Import your network</CardTitle>
           <CardDescription>
-            Start with your LinkedIn profile, then connect your other sources.
-            Enrichment runs once across your merged graph.
+            Start with phone contacts. This defines who is in your network.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {setupSteps.map((step) => {
-            const complete: boolean = stepComplete(step.id, sources, enrichment);
-            const inProgress: boolean =
-              step.id === "linkedin"
-                ? stepInProgress(step.id, sources, enrichment) ||
-                  linkedinConnectionsProcessing
-                : stepInProgress(step.id, sources, enrichment);
-            const enrichEnabled: boolean =
-              step.id !== "enrich" || importReady;
+          {setupSteps
+            .filter((step) => step.phase === "network")
+            .map((step) => renderStepRow(step))}
+        </CardContent>
+      </Card>
 
-            return (
-              <div
-                key={step.id}
-                className="flex flex-col gap-3 border-b pb-4 last:border-b-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between"
-              >
-                <div className="flex gap-3">
-                  <div className="mt-0.5 shrink-0">
-                    {complete ? (
-                      <CheckCircle2 className="size-5 text-green-600" />
-                    ) : inProgress ? (
-                      <Loader2 className="size-5 animate-spin text-muted-foreground" />
-                    ) : (
-                      <Circle className="size-5 text-muted-foreground" />
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-medium">{step.title}</p>
-                      {step.optional ? (
-                        <Badge variant="outline">Optional</Badge>
-                      ) : null}
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      {step.description}
-                    </p>
-                    {step.id === "enrich" && enrichment ? (
-                      <div className="space-y-0.5">
-                        {enrichment.state === "running" && enrichment.progress_message ? (
-                          <p className="text-xs text-muted-foreground">
-                            {enrichment.progress_message}
-                          </p>
-                        ) : null}
-                        <p className="text-xs text-muted-foreground">
-                          {enrichment.state === "running" && enrichment.contacts_total > 0
-                            ? `Processed ${enrichment.contacts_enriched} of ${enrichment.contacts_total} contacts`
-                            : enrichment.message}
-                          {enrichment.state === "complete" && enrichment.completed_at
-                            ? ` · ${new Date(enrichment.completed_at).toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
-                            : null}
-                        </p>
-                      </div>
-                    ) : null}
-                    {step.id === "linkedin" && linkedinConnectionsSource ? (
-                      <p className="text-xs text-muted-foreground">
-                        {linkedinConnectionsSource.sync_state === "syncing" ||
-                        linkedinConnectionsSource.sync_state === "pending"
-                          ? linkedinConnectionsSource.contacts_resolved > 0
-                            ? `Importing ${linkedinConnectionsSource.contacts_resolved.toLocaleString()} connections…`
-                            : "Importing… large exports can take several minutes"
-                          : linkedinConnectionsSource.sync_state === "complete"
-                            ? `${linkedinConnectionsSource.contacts_resolved.toLocaleString()} connections imported`
-                            : linkedinConnectionsSource.sync_state === "failed"
-                              ? (linkedinConnectionsSource.sync_error ??
-                                "Import failed — try uploading again")
-                              : null}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="flex flex-wrap gap-2 sm:justify-end">
-                  {step.id === "linkedin_profile" ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setLinkedinProfileDialogOpen(true)}
-                      disabled={
-                        uploadMutation.isPending ||
-                        linkedinProfileProcessing ||
-                        inProgress
-                      }
-                    >
-                      {inProgress ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <Plus className="size-4" />
-                      )}
-                      {complete ? "Re-upload" : "Upload"}
-                    </Button>
-                  ) : null}
-                  {step.id === "gmail" ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => connectMutation.mutate("google_mail")}
-                      disabled={connectMutation.isPending || inProgress}
-                    >
-                      <Plus className="size-4" />
-                      {complete ? "Reconnect" : "Connect"}
-                    </Button>
-                  ) : null}
-                  {step.id === "phone" ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setPhoneDialogOpen(true)}
-                      disabled={uploadMutation.isPending || inProgress}
-                    >
-                      {inProgress ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <Plus className="size-4" />
-                      )}
-                      {complete ? "Re-upload" : "Upload"}
-                    </Button>
-                  ) : null}
-                  {step.id === "linkedin" ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setLinkedinConnectionsDialogOpen(true)}
-                      disabled={uploadMutation.isPending || inProgress}
-                    >
-                      {inProgress ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <Plus className="size-4" />
-                      )}
-                      {complete ? "Re-upload" : "Upload"}
-                    </Button>
-                  ) : null}
-                  {step.id === "enrich" ? (
-                    <Button
-                      size="sm"
-                      onClick={() => enrichMutation.mutate()}
-                      disabled={
-                        !enrichEnabled ||
-                        enrichMutation.isPending ||
-                        inProgress
-                      }
-                    >
-                      {enrichMutation.isPending || inProgress ? (
-                        <Loader2 className="size-4 animate-spin" />
-                      ) : (
-                        <Sparkles className="size-4" />
-                      )}
-                      {inProgress
-                        ? "Enriching…"
-                        : complete
-                          ? "Re-enrich"
-                          : "Enrich now"}
-                    </Button>
-                  ) : null}
-                </div>
-              </div>
-            );
-          })}
+      <Card>
+        <CardHeader>
+          <CardTitle>Phase 2 · Enrich your network</CardTitle>
+          <CardDescription>
+            Add Gmail and LinkedIn data to your phone contacts. Raw imports stay
+            behind the scenes — only your phone network is shown in People.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {setupSteps
+            .filter((step) => step.phase === "enrich")
+            .map((step) => renderStepRow(step))}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Phase 3 · Strong professional ties</CardTitle>
+          <CardDescription>
+            People in your phone who are also LinkedIn connections.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <StrongTiesStep
+            networkStatus={networkStatus}
+            strongTies={strongTiesQuery.data}
+            isLoading={networkStatusQuery.isLoading || strongTiesQuery.isLoading}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Phase 4 · Discover where they work</CardTitle>
+          <CardDescription>
+            Scrape LinkedIn profiles for strong professional ties to find current employers.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <LinkedInEnrichmentStep
+            networkStatus={networkStatus}
+            enrichmentStatus={scrapingDogStatusQuery.data}
+            isLoading={
+              networkStatusQuery.isLoading || scrapingDogStatusQuery.isLoading
+            }
+            isPending={enrichStrongTiesMutation.isPending}
+            onEnrich={() => enrichStrongTiesMutation.mutate()}
+          />
+        </CardContent>
+      </Card>
+
+      <Card className="opacity-70">
+        <CardHeader>
+          <CardTitle>Phase 5 · Take action</CardTitle>
+          <CardDescription>Coming soon</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 sm:grid-cols-2">
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            Find job openings at target companies
+          </div>
+          <div className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">
+            Generate a recommended outreach plan
+          </div>
         </CardContent>
       </Card>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>
-            <CardTitle>Connected sources</CardTitle>
+            <CardTitle>Raw imports</CardTitle>
             <CardDescription>
               {sourcesQuery.data?.message ?? "Loading sources…"}
             </CardDescription>
@@ -656,9 +802,14 @@ export default function SourcesPage() {
             size="sm"
             onClick={() => {
               void sourcesQuery.refetch();
-              void enrichmentQuery.refetch();
+              void networkStatusQuery.refetch();
+              void scrapingDogStatusQuery.refetch();
             }}
-            disabled={sourcesQuery.isFetching || enrichmentQuery.isFetching}
+            disabled={
+              sourcesQuery.isFetching ||
+              networkStatusQuery.isFetching ||
+              scrapingDogStatusQuery.isFetching
+            }
           >
             <RefreshCw
               className={`size-4 ${sourcesQuery.isFetching ? "animate-spin" : ""}`}
@@ -674,7 +825,7 @@ export default function SourcesPage() {
             </div>
           ) : sources.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No sources connected yet. Start with your LinkedIn profile above.
+              No sources connected yet. Start by importing phone contacts above.
             </p>
           ) : (
             <ul className="divide-y">
