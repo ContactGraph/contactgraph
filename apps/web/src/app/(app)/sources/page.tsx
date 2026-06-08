@@ -326,12 +326,14 @@ export default function SourcesPage() {
     onSuccess: async (_result, variables) => {
       if (variables.source_type === "phone_contacts_upload") {
         setPhoneUploadError(null);
+        setPhoneDialogOpen(false);
       } else if (variables.source_type === "linkedin_profile_upload") {
         setLinkedinProfileUploadError(null);
         setLinkedinProfileProcessing(true);
       } else if (variables.source_type === "linkedin_connections_upload") {
         setConnectionsUploadError(null);
         setLinkedinConnectionsProcessing(true);
+        setLinkedinConnectionsDialogOpen(false);
       }
       await queryClient.invalidateQueries({ queryKey: ["sources"] });
       await queryClient.invalidateQueries({ queryKey: ["network-status"] });
