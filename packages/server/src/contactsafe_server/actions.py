@@ -14,10 +14,16 @@ from datetime import UTC, datetime
 
 from contactsafe_core.contact_schemas import (
     DedupPersonsResult,
+    EnrichStrongTiesResult,
     ListOrgsResult,
     ListPeopleResult,
+    ListStrongTiesResult,
+    NetworkStatusResult,
     OrgDetailResult,
     PersonDetailResult,
+    ScrapingDogEnrichmentStatusResult,
+    StrongTieCompaniesResult,
+    StrongTieCountResult,
 )
 from datetime import date
 
@@ -65,6 +71,7 @@ from contactsafe_server.deps import (
     build_source_service,
 )
 from contactsafe_server.services.contacts_service import ContactsService
+from contactsafe_server.services.strong_tie_api_service import StrongTieApiService
 from contactsafe_server.services.graph_summary_service import GraphSummaryService
 from contactsafe_server.services.network_query_service import NetworkQueryService
 from contactsafe_server.services.person_dedup_service import PersonDedupService
@@ -875,16 +882,96 @@ async def poll_connect(
         )
 
 
-async def list_people(ctx: AppContext, user_id: UUID | None) -> ListPeopleResult:
+async def list_people(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    network_only: bool = True,
+) -> ListPeopleResult:
     if user_id is None:
         return ListPeopleResult(
             people=[],
             total=0,
+            strong_tie_count=0,
+            enriched_count=0,
             message="Authentication required.",
         )
     async with ctx.session_factory() as db:
         service: ContactsService = ContactsService(db)
-        return await service.list_people(user_id)
+        return await service.list_people(user_id, network_only=network_only)
+
+
+async def list_strong_ties(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    limit: int | None = None,
+) -> ListStrongTiesResult:
+    if user_id is None:
+        return ListStrongTiesResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        service = StrongTieApiService(db, ctx.settings)
+        return await service.list_strong_ties(user_id, limit=limit)
+
+
+async def count_strong_ties(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> StrongTieCountResult:
+    if user_id is None:
+        return StrongTieCountResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        service = StrongTieApiService(db, ctx.settings)
+        return await service.count_strong_ties(user_id)
+
+
+async def list_strong_tie_companies(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> StrongTieCompaniesResult:
+    if user_id is None:
+        return StrongTieCompaniesResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        service = StrongTieApiService(db, ctx.settings)
+        return await service.list_companies(user_id)
+
+
+async def enrich_strong_ties(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> EnrichStrongTiesResult:
+    if user_id is None:
+        return EnrichStrongTiesResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        service = StrongTieApiService(db, ctx.settings)
+        result = await service.enrich_strong_ties(user_id)
+        await db.commit()
+        return result
+
+
+async def get_scrapingdog_enrichment_status(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> ScrapingDogEnrichmentStatusResult:
+    if user_id is None:
+        return ScrapingDogEnrichmentStatusResult(
+            state="idle",
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        service = StrongTieApiService(db, ctx.settings)
+        return await service.scrapingdog_status(user_id)
+
+
+async def get_network_status(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> NetworkStatusResult:
+    if user_id is None:
+        return NetworkStatusResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        service = StrongTieApiService(db, ctx.settings)
+        return await service.network_status(user_id)
 
 
 async def get_person(

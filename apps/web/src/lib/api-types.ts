@@ -304,11 +304,95 @@ export interface PersonListItem {
   is_human: boolean;
   is_broadcast: boolean;
   is_automated: boolean;
+  is_strong_tie: boolean;
+  linkedin_url: string | null;
+  scrapingdog_enriched: boolean;
+}
+
+export interface ListPeopleRequest {
+  network_only?: boolean;
 }
 
 export interface ListPeopleResult {
   people: PersonListItem[];
   total: number;
+  strong_tie_count: number;
+  enriched_count: number;
+  message: string;
+}
+
+export interface StrongTieItem {
+  person_id: string;
+  name: string;
+  email: string | null;
+  phone: string | null;
+  linkedin_url: string;
+  tie_strength_score: number;
+  current_company: string | null;
+  current_role: string | null;
+  scrapingdog_enriched: boolean;
+}
+
+export interface ListStrongTiesResult {
+  strong_ties: StrongTieItem[];
+  total: number;
+  message: string;
+}
+
+export interface StrongTieCountResult {
+  total: number;
+  pending_enrichment: number;
+  enriched: number;
+  message: string;
+}
+
+export interface StrongTieCompanyInsider {
+  person_id: string;
+  person_name: string;
+  person_role: string | null;
+  tie_strength_score: number;
+}
+
+export interface StrongTieCompanySummary {
+  org_id: string | null;
+  company_name: string;
+  insider_count: number;
+  insiders: StrongTieCompanyInsider[];
+  best_tie_strength: number;
+}
+
+export interface StrongTieCompaniesResult {
+  companies: StrongTieCompanySummary[];
+  total: number;
+  message: string;
+}
+
+export interface EnrichStrongTiesResult {
+  enqueued: number;
+  message: string;
+}
+
+export interface ScrapingDogEnrichmentStatusResult {
+  state: "idle" | "running" | "partial" | "complete";
+  total: number;
+  pending: number;
+  in_progress: number;
+  complete: number;
+  failed: number;
+  enriched_count: number;
+  message: string;
+}
+
+export interface NetworkStatusResult {
+  phone_contact_count: number;
+  gmail_matched_count: number;
+  linkedin_matched_count: number;
+  strong_tie_count: number;
+  enriched_strong_tie_count: number;
+  target_company_count: number;
+  phone_imported: boolean;
+  gmail_connected: boolean;
+  linkedin_imported: boolean;
   message: string;
 }
 

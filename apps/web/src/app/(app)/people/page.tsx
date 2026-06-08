@@ -21,6 +21,7 @@ import {
 import { EntityActionsMenu } from "@/components/entity-actions-menu";
 import { PersonDetailPanel } from "@/components/person-detail-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -45,7 +46,8 @@ export default function PeoplePage() {
 
   const peopleQuery = useQuery({
     queryKey: ["people"],
-    queryFn: () => proxyPost<ListPeopleResult>("list-people"),
+    queryFn: () =>
+      proxyPost<ListPeopleResult>("list-people", { network_only: true }),
   });
 
   const detailQuery = useQuery({
@@ -110,6 +112,31 @@ export default function PeoplePage() {
           <CompactCell value={row.original.current_role ?? "—"} />
         ),
         meta: { width: "w-[4.75rem]" },
+      },
+      {
+        id: "strong_tie",
+        accessorFn: (row: PersonListItem) => row.is_strong_tie,
+        header: "Tie",
+        cell: ({ row }) =>
+          row.original.is_strong_tie ? (
+            <Badge variant="secondary" className="px-1 py-0 text-[10px]">
+              Strong
+            </Badge>
+          ) : (
+            <CompactCell value="—" />
+          ),
+        meta: { width: "w-[3.5rem]" },
+      },
+      {
+        accessorKey: "linkedin_url",
+        header: "LI",
+        cell: ({ row }) => (
+          <CompactCell
+            value={row.original.linkedin_url ? "Yes" : "—"}
+            title={row.original.linkedin_url ?? undefined}
+          />
+        ),
+        meta: { width: "w-[2.5rem]" },
       },
       {
         accessorKey: "tie_strength_score",
@@ -195,6 +222,9 @@ export default function PeoplePage() {
         person.phone,
         person.org_name,
         person.current_role,
+        person.linkedin_url,
+        person.is_strong_tie ? "strong tie" : "",
+        person.scrapingdog_enriched ? "enriched" : "",
         person.emails.join(" "),
         person.sources.join(" "),
         person.tie_strength_score.toString(),
@@ -226,6 +256,8 @@ export default function PeoplePage() {
         "Phone",
         "Org",
         "Role",
+        "Strong Tie",
+        "LinkedIn",
         "Tie",
         "Sources",
         "First Contact",
@@ -238,6 +270,8 @@ export default function PeoplePage() {
         person.phone ?? "",
         person.org_name ?? "",
         person.current_role ?? "",
+        person.is_strong_tie ? "yes" : "",
+        person.linkedin_url ?? "",
         person.tie_strength_score.toFixed(2),
         person.sources.map((source: string) => formatSourceAbbrev(source)).join("; "),
         formatDateCompact(person.first_contact_at),
@@ -253,7 +287,11 @@ export default function PeoplePage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">People</h1>
           <p className="text-xs text-muted-foreground">
-            {peopleQuery.data?.message ?? "Loading contacts…"}
+            {peopleQuery.isLoading
+              ? "Loading your network…"
+              : peopleQuery.data
+                ? `${peopleQuery.data.total.toLocaleString()} contacts · ${peopleQuery.data.strong_tie_count.toLocaleString()} strong ties · ${peopleQuery.data.enriched_count.toLocaleString()} enriched`
+                : "No network data available."}
           </p>
         </div>
         <div className="flex w-full max-w-md items-center gap-2">
@@ -297,8 +335,8 @@ export default function PeoplePage() {
           <CompactTableShell
             table={table}
             columnCount={columns.length}
-            emptyMessage="No contacts match your search."
-            minWidth="49rem"
+            emptyMessage="No phone contacts in your network yet. Import them from Sources."
+            minWidth="54rem"
             onRowClick={(person: PersonListItem) =>
               setSelectedPersonId(person.person_id)
             }

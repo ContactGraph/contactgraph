@@ -32,11 +32,95 @@ class PersonListItem(BaseModel):
     is_human: bool = False
     is_broadcast: bool = False
     is_automated: bool = False
+    is_strong_tie: bool = False
+    linkedin_url: str | None = None
+    scrapingdog_enriched: bool = False
+
+
+class ListPeopleRequest(BaseModel):
+    network_only: bool = True
 
 
 class ListPeopleResult(BaseModel):
     people: list[PersonListItem] = Field(default_factory=list)
     total: int = 0
+    strong_tie_count: int = 0
+    enriched_count: int = 0
+    message: str
+
+
+class StrongTieItem(BaseModel):
+    person_id: UUID
+    name: str
+    email: str | None = None
+    phone: str | None = None
+    linkedin_url: str
+    tie_strength_score: float
+    current_company: str | None = None
+    current_role: str | None = None
+    scrapingdog_enriched: bool = False
+
+
+class ListStrongTiesResult(BaseModel):
+    strong_ties: list[StrongTieItem] = Field(default_factory=list)
+    total: int = 0
+    message: str
+
+
+class StrongTieCountResult(BaseModel):
+    total: int = 0
+    pending_enrichment: int = 0
+    enriched: int = 0
+    message: str
+
+
+class StrongTieCompanyInsider(BaseModel):
+    person_id: UUID
+    person_name: str
+    person_role: str | None = None
+    tie_strength_score: float = 0.0
+
+
+class StrongTieCompanySummary(BaseModel):
+    org_id: UUID | None = None
+    company_name: str
+    insider_count: int = 0
+    insiders: list[StrongTieCompanyInsider] = Field(default_factory=list)
+    best_tie_strength: float = 0.0
+
+
+class StrongTieCompaniesResult(BaseModel):
+    companies: list[StrongTieCompanySummary] = Field(default_factory=list)
+    total: int = 0
+    message: str
+
+
+class EnrichStrongTiesResult(BaseModel):
+    enqueued: int = 0
+    message: str
+
+
+class ScrapingDogEnrichmentStatusResult(BaseModel):
+    state: str
+    total: int = 0
+    pending: int = 0
+    in_progress: int = 0
+    complete: int = 0
+    failed: int = 0
+    enriched_count: int = 0
+    message: str
+
+
+class NetworkStatusResult(BaseModel):
+    phone_contact_count: int = 0
+    gmail_matched_count: int = 0
+    linkedin_matched_count: int = 0
+    strong_tie_count: int = 0
+    enriched_strong_tie_count: int = 0
+    target_company_count: int = 0
+    phone_imported: bool = False
+    gmail_connected: bool = False
+    linkedin_imported: bool = False
     message: str
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from collections import defaultdict
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -27,13 +27,25 @@ from contactsafe_server.db.models import (
     UserPersonObservation,
 )
 
+from contactsafe_server.services.strong_tie_matcher import (
+    LINKEDIN_CONNECTIONS_RELATIONSHIP,
+    SCRAPINGDOG_SOURCE_KIND,
+)
+
+PHONE_RELATIONSHIP: str = "phone_contacts_upload"
+
 
 class ContactsService:
     def __init__(self, db: AsyncSession) -> None:
         self._db: AsyncSession = db
 
-    async def list_people(self, user_id: uuid.UUID) -> ListPeopleResult:
-        result = await self._db.execute(
+    async def list_people(
+        self,
+        user_id: uuid.UUID,
+        *,
+        network_only: bool = True,
+    ) -> ListPeopleResult:
+        stmt = (
             select(Person, UserPersonObservation, Source)
             .join(
                 UserPersonObservation,
@@ -41,11 +53,16 @@ class ContactsService:
                 & (UserPersonObservation.user_id == user_id),
             )
             .outerjoin(Source, Source.id == UserPersonObservation.source_id)
-            .order_by(
-                UserPersonObservation.last_observed_at.desc().nullslast(),
-                Person.canonical_name.asc(),
-            )
         )
+        if network_only:
+            stmt = stmt.where(
+                UserPersonObservation.relationship_types.any(PHONE_RELATIONSHIP),
+            )
+        stmt = stmt.order_by(
+            UserPersonObservation.tie_strength_score.desc(),
+            Person.canonical_name.asc(),
+        )
+        result = await self._db.execute(stmt)
         rows: list[tuple[Person, UserPersonObservation, Source | None]] = list(
             result.all()
         )
@@ -53,7 +70,9 @@ class ContactsService:
             return ListPeopleResult(
                 people=[],
                 total=0,
-                message="No contacts in your graph yet. Connect a source and run sync.",
+                strong_tie_count=0,
+                enriched_count=0,
+                message="No contacts in your network yet. Import phone contacts to get started.",
             )
 
         person_ids: list[uuid.UUID] = [person.id for person, _, _ in rows]
@@ -64,6 +83,9 @@ class ContactsService:
             user_id,
             person_ids,
         )
+        linkedin_by_person: dict[uuid.UUID, str] = await self._load_linkedin_urls(person_ids)
+        strong_tie_ids: set[uuid.UUID] = await self._load_strong_tie_ids(user_id, person_ids)
+        enriched_ids: set[uuid.UUID] = await self._load_scrapingdog_enriched_ids(person_ids)
 
         people: list[PersonListItem] = []
         for person, obs, source in rows:
@@ -100,13 +122,24 @@ class ContactsService:
                     is_human=obs.is_human,
                     is_broadcast=obs.is_broadcast,
                     is_automated=obs.is_automated,
+                    is_strong_tie=person.id in strong_tie_ids,
+                    linkedin_url=linkedin_by_person.get(person.id),
+                    scrapingdog_enriched=person.id in enriched_ids,
                 )
             )
+
+        strong_tie_count: int = sum(1 for person in people if person.is_strong_tie)
+        enriched_count: int = sum(1 for person in people if person.scrapingdog_enriched)
 
         return ListPeopleResult(
             people=people,
             total=len(people),
-            message=f"Found {len(people)} contact(s) in your graph.",
+            strong_tie_count=strong_tie_count,
+            enriched_count=enriched_count,
+            message=(
+                f"{len(people)} contact(s) in your network · "
+                f"{strong_tie_count} strong tie(s) · {enriched_count} enriched."
+            ),
         )
 
     async def get_person(
@@ -270,6 +303,77 @@ class ContactsService:
             contact_count=len(people_rows),
             message=f"Organization details for {org.canonical_name}.",
         )
+
+    async def _load_linkedin_urls(
+        self,
+        person_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, str]:
+        if not person_ids:
+            return {}
+        result = await self._db.execute(
+            select(PersonAlias.person_id, PersonAlias.value).where(
+                PersonAlias.person_id.in_(person_ids),
+                PersonAlias.kind == "linkedin_url",
+            )
+        )
+        linkedin_by_person: dict[uuid.UUID, str] = {}
+        for person_id, value in result.all():
+            if person_id not in linkedin_by_person:
+                linkedin_by_person[person_id] = value.rstrip("/")
+        return linkedin_by_person
+
+    async def _load_strong_tie_ids(
+        self,
+        user_id: uuid.UUID,
+        person_ids: list[uuid.UUID],
+    ) -> set[uuid.UUID]:
+        if not person_ids:
+            return set()
+        result = await self._db.execute(
+            select(Person.id)
+            .where(
+                Person.id.in_(person_ids),
+                exists(
+                    select(UserPersonObservation.person_id).where(
+                        UserPersonObservation.user_id == user_id,
+                        UserPersonObservation.person_id == Person.id,
+                        UserPersonObservation.relationship_types.any(PHONE_RELATIONSHIP),
+                    )
+                ),
+                exists(
+                    select(UserPersonObservation.person_id).where(
+                        UserPersonObservation.user_id == user_id,
+                        UserPersonObservation.person_id == Person.id,
+                        UserPersonObservation.relationship_types.any(
+                            LINKEDIN_CONNECTIONS_RELATIONSHIP,
+                        ),
+                    )
+                ),
+                exists(
+                    select(PersonAlias.person_id).where(
+                        PersonAlias.person_id == Person.id,
+                        PersonAlias.kind == "linkedin_url",
+                    )
+                ),
+            )
+        )
+        return {row[0] for row in result.all()}
+
+    async def _load_scrapingdog_enriched_ids(
+        self,
+        person_ids: list[uuid.UUID],
+    ) -> set[uuid.UUID]:
+        if not person_ids:
+            return set()
+        result = await self._db.execute(
+            select(EmploymentClaim.person_id)
+            .where(
+                EmploymentClaim.person_id.in_(person_ids),
+                EmploymentClaim.contributor_source_kind == SCRAPINGDOG_SOURCE_KIND,
+            )
+            .distinct()
+        )
+        return {row[0] for row in result.all()}
 
     async def _load_emails_by_person(
         self,
