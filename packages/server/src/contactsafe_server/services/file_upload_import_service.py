@@ -15,6 +15,7 @@ from contactsafe_server.services.claim_writer import (
     record_relationship,
 )
 from contactsafe_server.services.entity_resolution import EntityResolver, build_last_name_index
+from contactsafe_server.services.phone_normalization import normalize_phone
 from contactsafe_server.services.linkedin_connections_parser import (
     ParsedLinkedInConnection,
     parse_linkedin_connections_csv,
@@ -139,9 +140,10 @@ class FileUploadImportService:
                 continue
 
             display_name: str = contact.display_name
-            primary_phone: str | None = (
-                contact.phone_numbers[0] if contact.phone_numbers else None
-            )
+            normalized_phones: list[str] = [
+                normalize_phone(p) for p in contact.phone_numbers
+            ]
+            primary_phone: str | None = normalized_phones[0] if normalized_phones else None
             person: Person = await resolver.resolve_person(
                 emails=list(contact.emails),
                 display_name=display_name,
@@ -155,12 +157,13 @@ class FileUploadImportService:
             ):
                 person.canonical_name = contact.display_name
 
-            if contact.phone_numbers:
+            if normalized_phones:
                 existing_phones: set[str] = set(person.phone_numbers or [])
                 new_phones: list[str] = list(existing_phones)
-                for phone_num in contact.phone_numbers:
+                for phone_num in normalized_phones:
                     if phone_num not in existing_phones:
                         new_phones.append(phone_num)
+                        existing_phones.add(phone_num)
                         try:
                             await resolver.add_person_alias(
                                 person_id=person.id,
@@ -250,23 +253,27 @@ class FileUploadImportService:
         content: str,
     ) -> None:
         connections: list[ParsedLinkedInConnection] = parse_linkedin_connections_csv(content)
+        logger.info("Parsed %d LinkedIn connections for source %s", len(connections), source.id)
         source.contacts_pending = len(connections)
         await self._db.flush()
         await self._commit_progress(source)
 
         resolver = EntityResolver(self._db)
+        logger.info("Preloading entity resolution caches...")
+        await resolver.preload_caches()
+        logger.info("Caches loaded: %d persons, %d person aliases, %d orgs, %d org aliases",
+                     len(resolver._person_cache), len(resolver._person_alias_cache or {}),
+                     len(resolver._org_cache), len(resolver._org_alias_cache or {}))
         commit_interval: int = _LINKEDIN_IMPORT_COMMIT_BATCH
         processed_since_commit: int = 0
         merge_relationship_types = _merged_relationship_types_on_conflict()
 
         from contactsafe_server.services.entity_resolution import _extract_last_name
 
-        all_persons_result = await self._db.execute(
-            select(Person).where(Person.canonical_name.isnot(None))
-        )
-        all_persons: list[Person] = list(all_persons_result.scalars().all())
+        all_persons: list[Person] = list(resolver._person_cache.values())
         name_index: dict[str, list[Person]] = build_last_name_index(all_persons)
         seen_person_ids: set[uuid.UUID] = {p.id for p in all_persons}
+        touched_person_ids: list[uuid.UUID] = []
 
         for connection in connections:
             if not connection.linkedin_url:
@@ -280,6 +287,7 @@ class FileUploadImportService:
                 name_index=name_index,
             )
 
+            touched_person_ids.append(person.id)
             if person.id not in seen_person_ids:
                 seen_person_ids.add(person.id)
                 last_key: str = _extract_last_name(person.canonical_name).lower()
@@ -336,13 +344,18 @@ class FileUploadImportService:
             if processed_since_commit >= commit_interval:
                 await self._db.flush()
                 await self._commit_progress(source)
+                logger.info("LinkedIn import progress: %d/%d", source.contacts_resolved, len(connections))
                 processed_since_commit = 0
 
         if processed_since_commit > 0:
             await self._db.flush()
 
+        unique_touched: list[uuid.UUID] = list(dict.fromkeys(touched_person_ids))
+        logger.info("LinkedIn import loop done (%d contacts, %d unique persons). Starting recompute...",
+                     source.contacts_resolved, len(unique_touched))
         recompute = PersonProfileRecompute(self._db, self._settings)
-        await recompute.recompute_for_user(source.user_id)
+        await recompute.recompute_persons(unique_touched)
+        logger.info("Recompute finished for source %s", source.id)
 
     async def _ingest_linkedin_profile(
         self,

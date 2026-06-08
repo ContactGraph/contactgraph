@@ -30,9 +30,14 @@ def schedule_source_sync(source_id: uuid.UUID, user_id: uuid.UUID) -> bool:
             source_id in _active_sync_source_ids
             or user_id in _active_sync_user_ids
         ):
+            logger.info(
+                "Sync blocked: source %s or user %s already active (sources=%s, users=%s)",
+                source_id, user_id, _active_sync_source_ids, _active_sync_user_ids,
+            )
             return False
         _active_sync_source_ids.add(source_id)
         _active_sync_user_ids.add(user_id)
+    logger.info("Scheduled sync task for source %s, user %s", source_id, user_id)
     asyncio.create_task(
         _run_sync_task(source_id, user_id),
         name=f"source-sync-{source_id}",
@@ -83,6 +88,7 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
                 return
 
             source_type: str = source.source_type
+            logger.info("Starting sync for source %s (type=%s)", source_id, source_type)
             try:
                 if source_type == SourceType.GOOGLE_MAIL.value:
                     gmail = GmailClient(ctx.settings, google_client)

@@ -81,13 +81,20 @@ function sourceForType(
   sources: ReadonlyArray<SourceSummary>,
   type: SourceType,
 ): SourceSummary | undefined {
-  let latest: SourceSummary | undefined;
+  let best: SourceSummary | undefined;
   for (const source of sources) {
-    if (source.source_type === type) {
-      latest = source;
+    if (source.source_type !== type) continue;
+    if (source.sync_state === "syncing" || source.sync_state === "pending") {
+      return source;
+    }
+    if (
+      best === undefined ||
+      source.contacts_resolved > best.contacts_resolved
+    ) {
+      best = source;
     }
   }
-  return latest;
+  return best;
 }
 
 function stepComplete(

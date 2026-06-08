@@ -42,10 +42,12 @@ export default function PeoplePage() {
   ]);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
 
+  const [filter, setFilter] = useState<"all" | "phone_linkedin" | "phone_only" | "linkedin_only">("phone_linkedin");
+
   const peopleQuery = useQuery({
     queryKey: ["people"],
     queryFn: () =>
-      proxyPost<ListPeopleResult>("list-people", { network_only: true }),
+      proxyPost<ListPeopleResult>("list-people", { network_only: false }),
   });
 
   const detailQuery = useQuery({
@@ -154,8 +156,27 @@ export default function PeoplePage() {
     [],
   );
 
+  const filteredPeople: PersonListItem[] = useMemo(() => {
+    const all: PersonListItem[] = peopleQuery.data?.people ?? [];
+    if (filter === "all") return all;
+    return all.filter((p: PersonListItem) => {
+      const hasPhone: boolean = !!p.phone;
+      const hasLinkedin: boolean = !!p.linkedin_url;
+      switch (filter) {
+        case "phone_linkedin":
+          return hasPhone && hasLinkedin;
+        case "phone_only":
+          return hasPhone && !hasLinkedin;
+        case "linkedin_only":
+          return !hasPhone && hasLinkedin;
+        default:
+          return true;
+      }
+    });
+  }, [peopleQuery.data?.people, filter]);
+
   const table = useReactTable({
-    data: peopleQuery.data?.people ?? [],
+    data: filteredPeople,
     columns,
     state: { sorting, globalFilter: search },
     onSortingChange: setSorting,
@@ -226,11 +247,30 @@ export default function PeoplePage() {
             {peopleQuery.isLoading
               ? "Loading your network…"
               : peopleQuery.data
-                ? `${peopleQuery.data.total.toLocaleString()} contacts · ${peopleQuery.data.strong_tie_count.toLocaleString()} strong professional ties · ${peopleQuery.data.enriched_count.toLocaleString()} enriched`
+                ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
                 : "No network data available."}
           </p>
         </div>
         <div className="flex w-full max-w-md items-center gap-2">
+          <div className="flex shrink-0 gap-1">
+            {([
+              ["all", "All"],
+              ["phone_linkedin", "Phone + LinkedIn"],
+              ["phone_only", "Phone only"],
+              ["linkedin_only", "LinkedIn only"],
+            ] as const).map(([value, label]) => (
+              <Button
+                key={value}
+                type="button"
+                variant={filter === value ? "default" : "outline"}
+                size="sm"
+                className="h-7 text-[11px] px-2"
+                onClick={() => setFilter(value)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
           <div className="relative flex-1">
             <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input

@@ -64,6 +64,56 @@ class MergeConflict(Exception):
 class EntityResolver:
     def __init__(self, session: AsyncSession) -> None:
         self._session: AsyncSession = session
+        self._person_alias_cache: dict[tuple[str, str], uuid.UUID] | None = None
+        self._org_alias_cache: dict[tuple[str, str], uuid.UUID] | None = None
+        self._person_cache: dict[uuid.UUID, Person] = {}
+        self._org_cache: dict[uuid.UUID, Org] = {}
+
+    async def preload_caches(self) -> None:
+        """Load all person/org aliases into memory for fast bulk resolution."""
+        pa_result = await self._session.execute(select(PersonAlias))
+        self._person_alias_cache = {}
+        for alias in pa_result.scalars().all():
+            key: tuple[str, str] = (alias.kind, alias.value)
+            self._person_alias_cache[key] = alias.person_id
+
+        oa_result = await self._session.execute(select(OrgAlias))
+        self._org_alias_cache = {}
+        for alias in oa_result.scalars().all():
+            key = (alias.kind, alias.value)
+            self._org_alias_cache[key] = alias.org_id
+
+        p_result = await self._session.execute(select(Person))
+        for person in p_result.scalars().all():
+            self._person_cache[person.id] = person
+
+        o_result = await self._session.execute(select(Org))
+        for org in o_result.scalars().all():
+            self._org_cache[org.id] = org
+
+    async def _get_person(self, person_id: uuid.UUID) -> Person | None:
+        cached: Person | None = self._person_cache.get(person_id)
+        if cached is not None:
+            return cached
+        result = await self._session.execute(
+            select(Person).where(Person.id == person_id),
+        )
+        person: Person | None = result.scalar_one_or_none()
+        if person is not None:
+            self._person_cache[person.id] = person
+        return person
+
+    async def _get_org(self, org_id: uuid.UUID) -> Org | None:
+        cached: Org | None = self._org_cache.get(org_id)
+        if cached is not None:
+            return cached
+        result = await self._session.execute(
+            select(Org).where(Org.id == org_id),
+        )
+        org: Org | None = result.scalar_one_or_none()
+        if org is not None:
+            self._org_cache[org.id] = org
+        return org
 
     async def resolve_person(
         self,
@@ -101,10 +151,9 @@ class EntityResolver:
             else:
                 alias = await self._find_alias(kind, value)
             if alias is not None:
-                person_stmt = select(Person).where(Person.id == alias.person_id)
-                person_result = await self._session.execute(person_stmt)
-                matched_person = person_result.scalar_one()
-                break
+                matched_person = await self._get_person(alias.person_id)
+                if matched_person is not None:
+                    break
 
         if matched_person is None and display_name.strip():
             normalized_name: str = display_name.strip().lower()
@@ -148,9 +197,9 @@ class EntityResolver:
             "linkedin_url", normalized_url,
         )
         if url_alias is not None:
-            person_stmt = select(Person).where(Person.id == url_alias.person_id)
-            person_result = await self._session.execute(person_stmt)
-            return person_result.scalar_one()
+            matched: Person | None = await self._get_person(url_alias.person_id)
+            if matched is not None:
+                return matched
 
         candidates: list[tuple[str, str]] = [("linkedin_url", normalized_url)]
         matched_person: Person | None = None
@@ -161,9 +210,7 @@ class EntityResolver:
                 "email", normalized_email,
             )
             if email_alias is not None:
-                person_stmt = select(Person).where(Person.id == email_alias.person_id)
-                person_result = await self._session.execute(person_stmt)
-                matched_person = person_result.scalar_one()
+                matched_person = await self._get_person(email_alias.person_id)
 
         if matched_person is None and last_name.strip():
             matched_person = self._match_by_name_components(
@@ -178,6 +225,7 @@ class EntityResolver:
             )
             self._session.add(matched_person)
             await self._session.flush()
+            self._person_cache[matched_person.id] = matched_person
 
         await self._ensure_aliases(matched_person, candidates)
         return matched_person
@@ -214,6 +262,11 @@ class EntityResolver:
         return None
 
     async def _find_alias(self, kind: str, value: str) -> PersonAlias | None:
+        if self._person_alias_cache is not None:
+            person_id: uuid.UUID | None = self._person_alias_cache.get((kind, value))
+            if person_id is None:
+                return None
+            return PersonAlias(person_id=person_id, kind=kind, value=value)
         stmt = (
             select(PersonAlias)
             .where(PersonAlias.kind == kind, PersonAlias.value == value)
@@ -226,6 +279,11 @@ class EntityResolver:
         direct: PersonAlias | None = await self._find_alias("phone", normalized_phone)
         if direct is not None:
             return direct
+        if self._person_alias_cache is not None:
+            for (kind, value), person_id in self._person_alias_cache.items():
+                if kind == "phone" and normalize_phone(value) == normalized_phone:
+                    return PersonAlias(person_id=person_id, kind="phone", value=value)
+            return None
         stmt = select(PersonAlias).where(PersonAlias.kind == "phone")
         result = await self._session.execute(stmt)
         for alias in result.scalars():
@@ -246,6 +304,23 @@ class EntityResolver:
         normalised: str = (
             normalize_phone(value) if kind == "phone" else value.lower().strip().rstrip("/")
         )
+        cache_key: tuple[str, str] = (kind, normalised)
+
+        if self._person_alias_cache is not None:
+            existing_id: uuid.UUID | None = self._person_alias_cache.get(cache_key)
+            if existing_id is not None:
+                if existing_id == person_id:
+                    return False
+                raise MergeConflict(kind, normalised, existing_id)
+            self._person_alias_cache[cache_key] = person_id
+            self._session.add(PersonAlias(
+                person_id=person_id,
+                kind=kind,
+                value=normalised,
+                confidence=confidence,
+            ))
+            return True
+
         stmt = (
             select(PersonAlias)
             .where(PersonAlias.kind == kind, PersonAlias.value == normalised)
@@ -284,17 +359,24 @@ class EntityResolver:
             candidates.append(("name", name.lower().strip()))
 
         for kind, value in candidates:
-            stmt = (
-                select(OrgAlias)
-                .where(OrgAlias.kind == kind, OrgAlias.value == value)
-                .limit(1)
-            )
-            result = await self._session.execute(stmt)
-            alias: OrgAlias | None = result.scalar_one_or_none()
-            if alias is not None:
-                org_stmt = select(Org).where(Org.id == alias.org_id)
-                org_result = await self._session.execute(org_stmt)
-                return org_result.scalar_one()
+            if self._org_alias_cache is not None:
+                org_id: uuid.UUID | None = self._org_alias_cache.get((kind, value))
+                if org_id is not None:
+                    org_hit: Org | None = await self._get_org(org_id)
+                    if org_hit is not None:
+                        return org_hit
+            else:
+                stmt = (
+                    select(OrgAlias)
+                    .where(OrgAlias.kind == kind, OrgAlias.value == value)
+                    .limit(1)
+                )
+                result = await self._session.execute(stmt)
+                alias: OrgAlias | None = result.scalar_one_or_none()
+                if alias is not None:
+                    org_hit = await self._get_org(alias.org_id)
+                    if org_hit is not None:
+                        return org_hit
 
         canonical: str = name or (domain or "Unknown")
         org = Org(
@@ -303,9 +385,12 @@ class EntityResolver:
         )
         self._session.add(org)
         await self._session.flush()
+        self._org_cache[org.id] = org
 
         for kind, value in candidates:
             self._session.add(OrgAlias(org_id=org.id, kind=kind, value=value))
+            if self._org_alias_cache is not None:
+                self._org_alias_cache[(kind, value)] = org.id
         await self._session.flush()
         return org
 

@@ -185,7 +185,9 @@ async def list_sources(
         )
     async with ctx.session_factory() as db:
         sources: SourceService = build_source_service(db)
-        return await sources.list_sources_for_user(user_id)
+        result: ListSourcesResult = await sources.list_sources_for_user(user_id)
+        await db.commit()
+        return result
 
 
 async def get_source_status(
