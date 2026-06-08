@@ -36,7 +36,7 @@ logger: logging.Logger = logging.getLogger(__name__)
 
 _LINKEDIN_UPLOAD_RELATIONSHIP_TYPES: list[str] = ["linkedin_connections_upload"]
 _PHONE_UPLOAD_RELATIONSHIP_TYPES: list[str] = ["phone_contacts_upload"]
-_LINKEDIN_IMPORT_COMMIT_BATCH: int = 500
+_LINKEDIN_IMPORT_COMMIT_BATCH: int = 100
 
 
 def _merged_relationship_types_on_conflict() -> text:
@@ -122,6 +122,10 @@ class FileUploadImportService:
         filename: str,
     ) -> None:
         contacts: list[ParsedPhoneContact] = parse_phone_contacts_upload(content, filename)
+        source.contacts_pending = len(contacts)
+        await self._db.flush()
+        await self._commit_progress(source)
+
         resolver = EntityResolver(self._db)
         user_id: uuid.UUID = source.user_id
         source_id: uuid.UUID = source.id
@@ -238,14 +242,6 @@ class FileUploadImportService:
             source.contacts_found += 1
             source.contacts_resolved += 1
 
-            from contactsafe_server.services.enrichment_queue_service import enqueue_enrichment
-
-            await enqueue_enrichment(
-                self._db,
-                self._settings,
-                person_id=person.id,
-                trigger_user_id=user_id,
-            )
         await self._db.flush()
 
     async def _ingest_linkedin_connections(
@@ -254,6 +250,10 @@ class FileUploadImportService:
         content: str,
     ) -> None:
         connections: list[ParsedLinkedInConnection] = parse_linkedin_connections_csv(content)
+        source.contacts_pending = len(connections)
+        await self._db.flush()
+        await self._commit_progress(source)
+
         resolver = EntityResolver(self._db)
         commit_interval: int = _LINKEDIN_IMPORT_COMMIT_BATCH
         processed_since_commit: int = 0

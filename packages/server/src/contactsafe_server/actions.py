@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 from contactsafe_core.contact_schemas import (
     DedupPersonsResult,
+    EnrichPersonResult,
     EnrichStrongTiesResult,
     ListOrgsResult,
     ListPeopleResult,
@@ -989,6 +990,51 @@ async def get_person(
         if detail is None:
             raise ValueError(f"Person not found: {person_id}")
         return detail
+
+
+async def enrich_person(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    person_id: str,
+) -> EnrichPersonResult:
+    if user_id is None:
+        raise ValueError("Authentication required")
+    parsed_id: UUID = UUID(person_id)
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.enrichment_queue_service import enqueue_enrichment
+
+        await enqueue_enrichment(
+            db,
+            ctx.settings,
+            person_id=parsed_id,
+            trigger_user_id=user_id,
+        )
+        await db.commit()
+
+        from contactsafe_server.services.contact_enrichment_worker import ContactEnrichmentWorker
+        from contactsafe_server.db.models import EnrichmentQueueItem
+
+        item: EnrichmentQueueItem | None = (
+            await db.execute(
+                select(EnrichmentQueueItem).where(
+                    EnrichmentQueueItem.person_id == parsed_id,
+                    EnrichmentQueueItem.status == "pending",
+                ).order_by(EnrichmentQueueItem.created_at.desc()).limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if item is None:
+            return EnrichPersonResult(message="No enrichment needed.", queued=False)
+
+        await db.commit()
+
+        worker = ContactEnrichmentWorker(db, ctx.settings)
+        refreshed: EnrichmentQueueItem | None = await db.get(EnrichmentQueueItem, item.id)
+        if refreshed is not None:
+            await worker.enrich_one(refreshed, skip_org_rebuild=True)
+
+        return EnrichPersonResult(message="Enrichment complete.", queued=True)
 
 
 async def list_orgs(ctx: AppContext, user_id: UUID | None) -> ListOrgsResult:

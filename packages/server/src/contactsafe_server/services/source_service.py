@@ -205,6 +205,9 @@ class SourceService:
             existing.connection_status = SourceConnectionStatus.CONNECTED.value
             existing.sync_state = SyncState.PENDING.value
             existing.sync_error = None
+            existing.contacts_found = 0
+            existing.contacts_resolved = 0
+            existing.contacts_pending = 0
             await self._db.flush()
             return existing
 

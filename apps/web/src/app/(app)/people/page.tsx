@@ -142,7 +142,10 @@ export default function PeoplePage() {
         enableSorting: false,
         cell: ({ row }) => (
           <div className="flex justify-end">
-            <EntityActionsMenu entityLabel={row.original.display_name} />
+            <EntityActionsMenu
+              entityLabel={row.original.display_name}
+              personId={row.original.person_id}
+            />
           </div>
         ),
         meta: { width: "w-[2rem]", stickyRight: true },

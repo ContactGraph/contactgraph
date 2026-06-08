@@ -629,9 +629,9 @@ export default function SourcesPage() {
             (linkedinConnectionsSource.sync_state === "syncing" ||
               linkedinConnectionsSource.sync_state === "pending") ? (
               <p className="text-xs text-muted-foreground">
-                {linkedinConnectionsSource.contacts_resolved > 0
-                  ? `Importing ${linkedinConnectionsSource.contacts_resolved.toLocaleString()} connections…`
-                  : "Importing… large exports can take several minutes"}
+                {linkedinConnectionsSource.contacts_pending > 0
+                  ? `Imported ${linkedinConnectionsSource.contacts_resolved.toLocaleString()} of ${linkedinConnectionsSource.contacts_pending.toLocaleString()}`
+                  : "Importing…"}
               </p>
             ) : null}
             {step.id === "linkedin" &&

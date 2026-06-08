@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import (
     DedupPersonsResult,
+    EnrichPersonRequest,
+    EnrichPersonResult,
     EnrichStrongTiesResult,
     GetOrgRequest,
     GetPersonRequest,
@@ -533,6 +535,18 @@ async def api_get_person(
         return await actions.get_person(ctx, user_id, person_id=body.person_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/enrich-person", response_model=EnrichPersonResult)
+async def api_enrich_person(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: EnrichPersonRequest,
+) -> EnrichPersonResult:
+    try:
+        return await actions.enrich_person(ctx, user_id, person_id=body.person_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/list-orgs", response_model=ListOrgsResult)
