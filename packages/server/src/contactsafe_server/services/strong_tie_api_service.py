@@ -125,7 +125,7 @@ class StrongTieApiService:
         return ListStrongTiesResult(
             strong_ties=items,
             total=len(items),
-            message=f"Found {len(items)} strong tie(s) in your network.",
+            message=f"Found {len(items)} strong professional tie(s) in your network.",
         )
 
     async def count_strong_ties(self, user_id: uuid.UUID) -> StrongTieCountResult:
@@ -144,7 +144,7 @@ class StrongTieApiService:
             total=total,
             pending_enrichment=pending,
             enriched=enriched,
-            message=f"{total} strong tie(s); {enriched} enriched.",
+            message=f"{total} strong professional tie(s); {enriched} enriched.",
         )
 
     async def list_companies(self, user_id: uuid.UUID) -> StrongTieCompaniesResult:
@@ -204,7 +204,7 @@ class StrongTieApiService:
         return StrongTieCompaniesResult(
             companies=companies,
             total=len(companies),
-            message=f"Your strong ties work at {len(companies)} companies.",
+            message=f"Your strong professional ties work at {len(companies)} companies.",
         )
 
     async def enrich_strong_ties(self, user_id: uuid.UUID) -> EnrichStrongTiesResult:
@@ -222,7 +222,7 @@ class StrongTieApiService:
         if not matches:
             return EnrichStrongTiesResult(
                 enqueued=0,
-                message="No strong ties need LinkedIn enrichment.",
+                message="No strong professional ties need LinkedIn enrichment.",
             )
 
         queue = EnrichmentQueueService(self._db, self._settings)
@@ -232,7 +232,7 @@ class StrongTieApiService:
         )
         return EnrichStrongTiesResult(
             enqueued=enqueued,
-            message=f"Queued LinkedIn enrichment for {enqueued} strong tie(s).",
+            message=f"Queued LinkedIn enrichment for {enqueued} strong professional tie(s).",
         )
 
     async def scrapingdog_status(self, user_id: uuid.UUID) -> ScrapingDogEnrichmentStatusResult:
@@ -277,13 +277,13 @@ class StrongTieApiService:
 
         if pending > 0 or in_progress > 0:
             state = "running"
-            message = f"Enriching {complete + in_progress} of {total} strong ties."
+            message = f"Enriching {complete + in_progress} of {total} strong professional ties."
         elif enriched_count > 0 and enriched_count >= total:
             state = "complete"
-            message = f"Enriched {enriched_count} of {total} strong ties."
+            message = f"Enriched {enriched_count} of {total} strong professional ties."
         elif enriched_count > 0:
             state = "partial"
-            message = f"Enriched {enriched_count} of {total} strong ties."
+            message = f"Enriched {enriched_count} of {total} strong professional ties."
         else:
             state = "idle"
             message = "LinkedIn enrichment has not started."
@@ -321,10 +321,10 @@ class StrongTieApiService:
         if phone_contact_count == 0:
             message = "Import phone contacts to build your network."
         elif strong_tie_count == 0:
-            message = "Connect Gmail or upload LinkedIn connections to find strong ties."
+            message = "Connect Gmail or upload LinkedIn connections to find strong professional ties."
         else:
             message = (
-                f"{phone_contact_count} contacts · {strong_tie_count} strong ties · "
+                f"{phone_contact_count} contacts · {strong_tie_count} strong professional ties · "
                 f"{enriched_strong_tie_count} enriched"
             )
 

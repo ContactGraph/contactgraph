@@ -264,6 +264,55 @@ async def test_resolve_person_linkedin_takes_priority_over_email(
     assert resolved.id != person_b.id
 
 
+async def test_resolve_linkedin_connection_matches_by_url(
+    db_session: AsyncSession,
+) -> None:
+    resolver = EntityResolver(db_session)
+    existing = await resolver.resolve_person(
+        emails=["phone@example.com"],
+        display_name="Phone Contact",
+        linkedin_url="https://linkedin.com/in/phone-contact",
+    )
+    matched = await resolver.resolve_linkedin_connection(
+        linkedin_url="https://linkedin.com/in/phone-contact/",
+        display_name="Different Name",
+        email="other@example.com",
+    )
+    assert matched.id == existing.id
+
+
+async def test_resolve_linkedin_connection_matches_by_email_without_url_hit(
+    db_session: AsyncSession,
+) -> None:
+    resolver = EntityResolver(db_session)
+    existing = await resolver.resolve_person(
+        emails=["shared@example.com"],
+        display_name="Existing Person",
+    )
+    matched = await resolver.resolve_linkedin_connection(
+        linkedin_url="https://linkedin.com/in/new-linkedin",
+        display_name="LinkedIn Name",
+        email="shared@example.com",
+    )
+    assert matched.id == existing.id
+
+
+async def test_resolve_linkedin_connection_matches_by_canonical_name(
+    db_session: AsyncSession,
+) -> None:
+    resolver = EntityResolver(db_session)
+    phone_person = await resolver.resolve_person(
+        emails=["unique@example.com"],
+        display_name="Jane Doe",
+        phone="+15551234567",
+    )
+    matched = await resolver.resolve_linkedin_connection(
+        linkedin_url="https://linkedin.com/in/jane-doe",
+        display_name="Jane Doe",
+    )
+    assert matched.id == phone_person.id
+
+
 async def test_resolve_person_github_takes_priority_over_email(
     db_session: AsyncSession,
 ) -> None:

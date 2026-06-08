@@ -138,7 +138,7 @@ class ContactsService:
             enriched_count=enriched_count,
             message=(
                 f"{len(people)} contact(s) in your network · "
-                f"{strong_tie_count} strong tie(s) · {enriched_count} enriched."
+                f"{strong_tie_count} strong professional tie(s) · {enriched_count} enriched."
             ),
         )
 

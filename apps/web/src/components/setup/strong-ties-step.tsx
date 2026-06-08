@@ -35,12 +35,12 @@ export function StrongTiesStep({
         <div className="space-y-2">
           <div className="flex items-center gap-2">
             <Users className="size-5 text-primary" />
-            <p className="font-medium">Your strong ties</p>
+            <p className="font-medium">Your strong professional ties</p>
             <Badge variant="secondary">{count}</Badge>
           </div>
           <p className="text-sm text-muted-foreground">
             {count > 0
-              ? `${count} people in your phone are also LinkedIn connections — your strongest professional ties.`
+              ? `${count} people in your phone are also LinkedIn connections — your strong professional ties.`
               : "No overlaps yet between phone contacts and LinkedIn connections."}
           </p>
           {preview.length > 0 ? (
@@ -58,7 +58,7 @@ export function StrongTiesStep({
           ) : null}
         </div>
         <Button asChild variant="outline" size="sm" disabled={isLoading || count === 0}>
-          <Link href="/people">View all strong ties</Link>
+          <Link href="/people">View in People</Link>
         </Button>
       </div>
     </div>

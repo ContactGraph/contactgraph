@@ -58,22 +58,22 @@ export function LinkedInEnrichmentStep({
             {complete ? <Badge variant="secondary">Enriched</Badge> : null}
           </div>
           <p className="text-sm text-muted-foreground">
-            Scrape LinkedIn profiles for your strong ties to find current employers.
+            Scrape LinkedIn profiles for your strong professional ties to find current employers.
           </p>
           {running ? (
             <p className="text-xs text-muted-foreground">
-              Enriching {progressDone} of {progressTotal} strong ties…
+              Enriching {progressDone} of {progressTotal} strong professional ties…
             </p>
           ) : complete ? (
             <p className="text-xs text-muted-foreground">
-              {enrichedCount} strong ties enriched
+              {enrichedCount} strong professional ties enriched
               {companyCount > 0
                 ? ` · they work at ${companyCount} companies`
                 : ""}
             </p>
           ) : (
             <p className="text-xs text-muted-foreground">
-              {strongTieCount} strong ties ready for LinkedIn enrichment.
+              {strongTieCount} strong professional ties ready for LinkedIn enrichment.
             </p>
           )}
         </div>

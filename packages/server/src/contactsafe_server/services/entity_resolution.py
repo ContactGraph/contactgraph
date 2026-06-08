@@ -104,6 +104,61 @@ class EntityResolver:
         await self._ensure_aliases(matched_person, candidates)
         return matched_person
 
+    async def resolve_linkedin_connection(
+        self,
+        *,
+        linkedin_url: str,
+        display_name: str,
+        email: str | None = None,
+    ) -> Person:
+        """Lightweight resolver for LinkedIn connections CSV bulk import.
+
+        Priority: linkedin_url alias -> email alias -> canonical_name -> create.
+        """
+        normalized_url: str = linkedin_url.lower().rstrip("/")
+        url_alias: PersonAlias | None = await self._find_alias(
+            "linkedin_url", normalized_url,
+        )
+        if url_alias is not None:
+            person_stmt = select(Person).where(Person.id == url_alias.person_id)
+            person_result = await self._session.execute(person_stmt)
+            return person_result.scalar_one()
+
+        candidates: list[tuple[str, str]] = [("linkedin_url", normalized_url)]
+        matched_person: Person | None = None
+        if email:
+            normalized_email: str = email.lower().strip()
+            candidates.append(("email", normalized_email))
+            email_alias: PersonAlias | None = await self._find_alias(
+                "email", normalized_email,
+            )
+            if email_alias is not None:
+                person_stmt = select(Person).where(Person.id == email_alias.person_id)
+                person_result = await self._session.execute(person_stmt)
+                matched_person = person_result.scalar_one()
+
+        if matched_person is None and display_name.strip():
+            normalized_name: str = display_name.strip().lower()
+            name_stmt = (
+                select(Person)
+                .where(func.lower(Person.canonical_name) == normalized_name)
+                .limit(1)
+            )
+            name_result = await self._session.execute(name_stmt)
+            matched_person = name_result.scalar_one_or_none()
+
+        if matched_person is None:
+            primary_email: str | None = email.lower().strip() if email else None
+            matched_person = Person(
+                canonical_name=display_name,
+                primary_email=primary_email,
+            )
+            self._session.add(matched_person)
+            await self._session.flush()
+
+        await self._ensure_aliases(matched_person, candidates)
+        return matched_person
+
     async def _find_alias(self, kind: str, value: str) -> PersonAlias | None:
         stmt = (
             select(PersonAlias)

@@ -116,11 +116,11 @@ export default function PeoplePage() {
       {
         id: "strong_tie",
         accessorFn: (row: PersonListItem) => row.is_strong_tie,
-        header: "Tie",
+        header: "Prof.",
         cell: ({ row }) =>
           row.original.is_strong_tie ? (
             <Badge variant="secondary" className="px-1 py-0 text-[10px]">
-              Strong
+              Prof.
             </Badge>
           ) : (
             <CompactCell value="—" />
@@ -223,7 +223,7 @@ export default function PeoplePage() {
         person.org_name,
         person.current_role,
         person.linkedin_url,
-        person.is_strong_tie ? "strong tie" : "",
+        person.is_strong_tie ? "strong professional tie" : "",
         person.scrapingdog_enriched ? "enriched" : "",
         person.emails.join(" "),
         person.sources.join(" "),
@@ -256,7 +256,7 @@ export default function PeoplePage() {
         "Phone",
         "Org",
         "Role",
-        "Strong Tie",
+        "Strong Professional Tie",
         "LinkedIn",
         "Tie",
         "Sources",
@@ -290,7 +290,7 @@ export default function PeoplePage() {
             {peopleQuery.isLoading
               ? "Loading your network…"
               : peopleQuery.data
-                ? `${peopleQuery.data.total.toLocaleString()} contacts · ${peopleQuery.data.strong_tie_count.toLocaleString()} strong ties · ${peopleQuery.data.enriched_count.toLocaleString()} enriched`
+                ? `${peopleQuery.data.total.toLocaleString()} contacts · ${peopleQuery.data.strong_tie_count.toLocaleString()} strong professional ties · ${peopleQuery.data.enriched_count.toLocaleString()} enriched`
                 : "No network data available."}
           </p>
         </div>

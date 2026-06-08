@@ -95,9 +95,15 @@ def _vcard_display_name(component: vobject.base.Component) -> str:
         if value:
             return value
     if hasattr(component, "n"):
-        parts: list[str] = [str(part).strip() for part in component.n.value]
-        family: str = parts[0] if parts else ""
-        given: str = parts[1] if len(parts) > 1 else ""
+        n_value = component.n.value
+        if hasattr(n_value, "given") and hasattr(n_value, "family"):
+            given: str = str(n_value.given).strip()
+            family: str = str(n_value.family).strip()
+        elif isinstance(n_value, (list, tuple)):
+            family = str(n_value[0]).strip() if n_value else ""
+            given = str(n_value[1]).strip() if len(n_value) > 1 else ""
+        else:
+            return str(n_value).strip()
         combined: str = f"{given} {family}".strip()
         if combined:
             return combined

@@ -57,7 +57,7 @@ export default function TargetCompaniesPage() {
           Target companies
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Companies where your strong ties currently work — enriched from LinkedIn
+          Companies where your strong professional ties currently work — enriched from LinkedIn
           profiles of people in your phone network.
         </p>
       </div>
@@ -85,7 +85,7 @@ export default function TargetCompaniesPage() {
           <section className="space-y-4">
             <h2 className="flex items-center gap-2 text-lg font-medium">
               <Building2 className="h-5 w-5" />
-              Strong tie companies
+              Strong professional tie companies
             </h2>
             {(strongTieCompaniesQuery.data?.companies.length ?? 0) === 0 ? (
               <p className="text-sm text-muted-foreground">
@@ -102,7 +102,7 @@ export default function TargetCompaniesPage() {
                           {company.company_name}
                         </CardTitle>
                         <CardDescription>
-                          {company.insider_count} strong tie
+                          {company.insider_count} strong professional tie
                           {company.insider_count === 1 ? "" : "s"}
                         </CardDescription>
                       </div>
