@@ -132,7 +132,7 @@ export function LinkedInConnectionsUploadDialog({
               <span className="text-foreground">Request archive</span>.
             </p>
             <p>
-              6. Wait for the email from LinkedIn (usually a few minutes).
+              6. Wait for the email from LinkedIn (can take up to 24 hours).
             </p>
             <p>
               7. Click the link in the email to download the{" "}
