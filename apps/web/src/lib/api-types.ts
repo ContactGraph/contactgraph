@@ -637,7 +637,7 @@ export interface SetJobMonitorConfigRequest {
   enabled?: boolean;
 }
 
-export type JobDiscoveryState = "pending" | "running" | "complete" | "failed";
+export type JobDiscoveryState = "pending" | "running" | "complete" | "failed" | "cancelled";
 
 export interface StartJobDiscoveryResult {
   scheduled: boolean;

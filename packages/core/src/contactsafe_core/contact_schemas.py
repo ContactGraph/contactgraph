@@ -333,12 +333,12 @@ class SetJobMonitorConfigRequest(BaseModel):
 
 class StartJobDiscoveryResult(BaseModel):
     scheduled: bool
-    state: Literal["pending", "running", "complete", "failed"]
+    state: Literal["pending", "running", "complete", "failed", "cancelled"]
     message: str
 
 
 class JobDiscoveryStatusResult(BaseModel):
-    state: Literal["pending", "running", "complete", "failed"]
+    state: Literal["pending", "running", "complete", "failed", "cancelled"]
     orgs_total: int = 0
     orgs_processed: int = 0
     jobs_found: int = 0

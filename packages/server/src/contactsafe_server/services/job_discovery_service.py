@@ -32,7 +32,10 @@ from contactsafe_server.db.models import (
 )
 from contactsafe_server.services.ats_detection import apply_ats_detection_to_org
 from contactsafe_server.services.ats_job_clients import AtsJobClient
-from contactsafe_server.services.job_discovery_scheduler import schedule_job_discovery
+from contactsafe_server.services.job_discovery_scheduler import (
+    release_job_discovery_lock,
+    schedule_job_discovery,
+)
 from contactsafe_server.services.job_discovery_types import DiscoveredJob
 from contactsafe_server.services.theirstack_client import TheirStackClient
 
@@ -254,6 +257,10 @@ class JobDiscoveryService:
         processed: int = 0
 
         for org_id in org_ids:
+            await self._db.refresh(run)
+            if run.state == "cancelled":
+                return
+
             org: Org | None = await self._db.get(Org, org_id)
             if org is None:
                 processed += 1
@@ -436,6 +443,23 @@ class JobDiscoveryService:
         )
         return result.scalar_one_or_none() is not None
 
+    async def cancel_discovery(self, user_id: uuid.UUID) -> None:
+        """Mark the current running discovery as cancelled."""
+        result = await self._db.execute(
+            select(JobDiscoveryRun).where(
+                JobDiscoveryRun.user_id == user_id,
+                JobDiscoveryRun.state == "running",
+            ),
+        )
+        run: JobDiscoveryRun | None = result.scalar_one_or_none()
+        if run is not None:
+            run.state = "cancelled"
+            run.completed_at = datetime.now(tz=UTC)
+            run.progress_message = None
+            run.error = "Cancelled by user."
+            await self._db.commit()
+        release_job_discovery_lock(user_id)
+
     async def _latest_run(self, user_id: uuid.UUID) -> JobDiscoveryRun | None:
         result = await self._db.execute(
             select(JobDiscoveryRun)
@@ -459,6 +483,8 @@ class JobDiscoveryService:
             )
         if state == "failed":
             return run.error or "Job discovery failed."
+        if state == "cancelled":
+            return "Job discovery was cancelled."
         return "Job discovery pending."
 
     async def maybe_start_scheduled_discovery(self, user_id: uuid.UUID) -> bool:

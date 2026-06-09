@@ -1556,6 +1556,19 @@ async def get_job_discovery_status(
         return await service.get_status(user_id)
 
 
+async def cancel_job_discovery(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> None:
+    if user_id is None:
+        return
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        await service.cancel_discovery(user_id)
+
+
 async def list_org_jobs(
     ctx: AppContext,
     user_id: UUID | None,

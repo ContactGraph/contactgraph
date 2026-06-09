@@ -730,6 +730,15 @@ async def api_start_job_discovery(
     return await actions.start_job_discovery(ctx, user_id)
 
 
+@router.post("/cancel-job-discovery")
+async def api_cancel_job_discovery(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> dict[str, bool]:
+    await actions.cancel_job_discovery(ctx, user_id)
+    return {"ok": True}
+
+
 @router.post("/get-job-discovery-status", response_model=JobDiscoveryStatusResult)
 async def api_get_job_discovery_status(
     ctx: Ctx,

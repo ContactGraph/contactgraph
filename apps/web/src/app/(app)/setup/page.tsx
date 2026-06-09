@@ -1017,6 +1017,18 @@ export default function SetupPage() {
             jobDiscoveryStatus?.state === "running" ? (
               <p className="text-xs text-muted-foreground">
                 {jobDiscoveryStatus.progress_message ?? jobDiscoveryStatus.message}
+                {" · "}
+                <button
+                  type="button"
+                  className="text-destructive hover:underline"
+                  onClick={() => {
+                    void proxyPost("cancel-job-discovery").then(() => {
+                      void jobDiscoveryStatusQuery.refetch();
+                    });
+                  }}
+                >
+                  Cancel
+                </button>
               </p>
             ) : null}
             {step.id === "job_scrapers" &&
