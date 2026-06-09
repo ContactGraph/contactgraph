@@ -792,13 +792,6 @@ export default function SetupPage() {
     (list) => list.list_id === selectedTargetListId,
   );
 
-  const selectedMonitorListId: string | null =
-    jobMonitorConfig?.list_id ?? null;
-
-  const selectedMonitorList: OrgListSummary | undefined = orgLists.find(
-    (list) => list.list_id === selectedMonitorListId,
-  );
-
   const handleCreateTargetList = useCallback((): void => {
     const name: string | null = window.prompt("New list name");
     if (name === null) {
@@ -817,12 +810,6 @@ export default function SetupPage() {
     }
     void queryClient.invalidateQueries({ queryKey: ["organizations"] });
   }, [orgEnrichmentStatus?.state, queryClient]);
-
-  useEffect(() => {
-    if (jobMonitorConfig?.list_id && selectedTargetListId === null) {
-      setSelectedTargetListId(jobMonitorConfig.list_id);
-    }
-  }, [jobMonitorConfig?.list_id, selectedTargetListId]);
 
   useEffect(() => {
     if (jobDiscoveryStatus?.state !== "complete") {
@@ -1092,54 +1079,16 @@ export default function SetupPage() {
             </>
           ) : step.id === "job_scrapers" ? (
             <>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={orgListsQuery.isLoading}
-                  >
-                    {selectedMonitorList !== undefined
-                      ? `${selectedMonitorList.name} (${selectedMonitorList.org_count})`
-                      : "Choose list…"}
-                    <ChevronDown className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {orgLists.length === 0 ? (
-                    <DropdownMenuItem disabled>No lists yet</DropdownMenuItem>
-                  ) : (
-                    orgLists.map((list) => (
-                      <DropdownMenuCheckboxItem
-                        key={list.list_id}
-                        checked={selectedMonitorListId === list.list_id}
-                        onCheckedChange={() => {
-                          const nextId: string | null =
-                            selectedMonitorListId === list.list_id
-                              ? null
-                              : list.list_id;
-                          setSelectedTargetListId(nextId);
-                          setJobMonitorConfigMutation.mutate({
-                            list_id: nextId,
-                          });
-                        }}
-                      >
-                        {list.name} ({list.org_count})
-                      </DropdownMenuCheckboxItem>
-                    ))
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
               <Button
                 variant={jobMonitorConfig?.enabled ? "default" : "outline"}
                 size="sm"
                 disabled={
-                  selectedMonitorList === undefined ||
+                  selectedTargetList === undefined ||
                   setJobMonitorConfigMutation.isPending
                 }
                 onClick={() =>
                   setJobMonitorConfigMutation.mutate({
-                    list_id: selectedMonitorListId,
+                    list_id: selectedTargetListId,
                     enabled: !jobMonitorConfig?.enabled,
                   })
                 }
@@ -1150,11 +1099,19 @@ export default function SetupPage() {
                 variant="outline"
                 size="sm"
                 disabled={
-                  selectedMonitorList === undefined ||
+                  selectedTargetList === undefined ||
                   startJobDiscoveryMutation.isPending ||
+                  setJobMonitorConfigMutation.isPending ||
                   jobDiscoveryStatus?.state === "running"
                 }
-                onClick={() => startJobDiscoveryMutation.mutate()}
+                onClick={async () => {
+                  if (selectedTargetListId !== null) {
+                    await setJobMonitorConfigMutation.mutateAsync({
+                      list_id: selectedTargetListId,
+                    });
+                  }
+                  startJobDiscoveryMutation.mutate();
+                }}
               >
                 {jobDiscoveryStatus?.state === "running" ? (
                   <Loader2 className="size-4 animate-spin" />
