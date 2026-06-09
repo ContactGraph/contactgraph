@@ -158,25 +158,26 @@ class FileUploadImportService:
                 person.canonical_name = contact.display_name
 
             if normalized_phones:
-                existing_phones: set[str] = set(person.phone_numbers or [])
-                new_phones: list[str] = list(existing_phones)
+                seen: set[str] = set()
+                merged: list[str] = []
+                for raw in [*(person.phone_numbers or []), *normalized_phones]:
+                    normed: str = normalize_phone(raw)
+                    if normed not in seen:
+                        seen.add(normed)
+                        merged.append(normed)
+                person.phone_numbers = merged
                 for phone_num in normalized_phones:
-                    if phone_num not in existing_phones:
-                        new_phones.append(phone_num)
-                        existing_phones.add(phone_num)
-                        try:
-                            await resolver.add_person_alias(
-                                person_id=person.id,
-                                kind="phone",
-                                value=phone_num,
-                            )
-                        except Exception:
-                            logger.debug(
-                                "Phone alias %s already mapped, skipping",
-                                phone_num,
-                            )
-                if len(new_phones) > len(person.phone_numbers or []):
-                    person.phone_numbers = new_phones
+                    try:
+                        await resolver.add_person_alias(
+                            person_id=person.id,
+                            kind="phone",
+                            value=phone_num,
+                        )
+                    except Exception:
+                        logger.debug(
+                            "Phone alias %s already mapped, skipping",
+                            phone_num,
+                        )
 
             for extra_email in contact.emails[1:]:
                 try:

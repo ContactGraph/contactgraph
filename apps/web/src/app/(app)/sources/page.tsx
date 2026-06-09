@@ -522,6 +522,15 @@ export default function SourcesPage() {
     [uploadMutation],
   );
 
+  const handleCancelSync = useCallback(
+    (sourceId: string): void => {
+      void proxyPost("cancel-sync", { source_id: sourceId }).then(() => {
+        void sourcesQuery.refetch();
+      });
+    },
+    [sourcesQuery],
+  );
+
   const handlePhoneFileUpload = useCallback(
     (file: File): void => {
       void handleTextFileUpload("phone_contacts_upload", file);
@@ -641,6 +650,14 @@ export default function SourcesPage() {
                 {phoneSource.contacts_pending > 0
                   ? `Imported ${phoneSource.contacts_resolved.toLocaleString()} of ${phoneSource.contacts_pending.toLocaleString()}`
                   : "Importing…"}
+                {" · "}
+                <button
+                  type="button"
+                  className="text-destructive hover:underline"
+                  onClick={() => handleCancelSync(phoneSource.source_id)}
+                >
+                  Cancel
+                </button>
               </p>
             ) : null}
             {step.id === "linkedin" &&
@@ -651,6 +668,14 @@ export default function SourcesPage() {
                 {linkedinConnectionsSource.contacts_pending > 0
                   ? `Imported ${linkedinConnectionsSource.contacts_resolved.toLocaleString()} of ${linkedinConnectionsSource.contacts_pending.toLocaleString()}`
                   : "Importing…"}
+                {" · "}
+                <button
+                  type="button"
+                  className="text-destructive hover:underline"
+                  onClick={() => handleCancelSync(linkedinConnectionsSource.source_id)}
+                >
+                  Cancel
+                </button>
               </p>
             ) : null}
             {step.id === "linkedin" &&

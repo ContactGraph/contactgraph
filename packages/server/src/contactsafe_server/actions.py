@@ -171,6 +171,37 @@ async def connect_source(
         return result
 
 
+async def cancel_sync(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    source_id: str,
+) -> "CancelSyncResult":
+    from contactsafe_core.schemas import CancelSyncResult
+    from contactsafe_core.enums import SyncState
+    from contactsafe_server.services.import_scheduler import release_sync_lock
+
+    if user_id is None:
+        return CancelSyncResult(cancelled=False, message="Not authenticated.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.db.models import Source
+        from sqlalchemy import select
+
+        result = await db.execute(
+            select(Source).where(Source.id == UUID(source_id), Source.user_id == user_id),
+        )
+        source: Source | None = result.scalar_one_or_none()
+        if source is None:
+            return CancelSyncResult(cancelled=False, message="Source not found.")
+        if source.sync_state not in (SyncState.SYNCING.value, SyncState.PENDING.value):
+            return CancelSyncResult(cancelled=False, message="No import in progress.")
+        source.sync_state = SyncState.FAILED.value
+        source.sync_error = "Import cancelled by user."
+        await db.commit()
+        release_sync_lock(source.id, source.user_id)
+        return CancelSyncResult(cancelled=True, message="Import cancelled.")
+
+
 async def list_sources(
     ctx: AppContext,
     user_id: UUID | None,

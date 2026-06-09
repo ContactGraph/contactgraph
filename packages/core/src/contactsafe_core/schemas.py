@@ -298,6 +298,15 @@ class SyncSourceRequest(BaseModel):
     source_id: str | None = None
 
 
+class CancelSyncRequest(BaseModel):
+    source_id: str
+
+
+class CancelSyncResult(BaseModel):
+    cancelled: bool = False
+    message: str = ""
+
+
 class StartEnrichmentResult(BaseModel):
     run_id: UUID | None = None
     scheduled: bool
