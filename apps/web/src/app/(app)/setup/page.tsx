@@ -793,7 +793,7 @@ export default function SetupPage() {
   );
 
   const selectedMonitorListId: string | null =
-    jobMonitorConfig?.list_id ?? selectedTargetListId;
+    jobMonitorConfig?.list_id ?? null;
 
   const selectedMonitorList: OrgListSummary | undefined = orgLists.find(
     (list) => list.list_id === selectedMonitorListId,
@@ -1152,20 +1152,9 @@ export default function SetupPage() {
                 disabled={
                   selectedMonitorList === undefined ||
                   startJobDiscoveryMutation.isPending ||
-                  setJobMonitorConfigMutation.isPending ||
                   jobDiscoveryStatus?.state === "running"
                 }
-                onClick={async () => {
-                  if (
-                    selectedMonitorListId !== null &&
-                    jobMonitorConfig?.list_id !== selectedMonitorListId
-                  ) {
-                    await setJobMonitorConfigMutation.mutateAsync({
-                      list_id: selectedMonitorListId,
-                    });
-                  }
-                  startJobDiscoveryMutation.mutate();
-                }}
+                onClick={() => startJobDiscoveryMutation.mutate()}
               >
                 {jobDiscoveryStatus?.state === "running" ? (
                   <Loader2 className="size-4 animate-spin" />
