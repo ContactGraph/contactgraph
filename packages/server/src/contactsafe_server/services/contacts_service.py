@@ -320,6 +320,8 @@ class ContactsService:
                 careers_url=org.careers_url,
                 linkedin_url=org.linkedin_url,
                 categories=list(org.categories or []),
+                employee_count=org.employee_count,
+                company_size_band=org.company_size_band,
                 contact_count=count,
             )
             for org, count in rows
@@ -367,6 +369,8 @@ class ContactsService:
             careers_url=org.careers_url,
             linkedin_url=org.linkedin_url,
             categories=list(org.categories or []),
+            employee_count=org.employee_count,
+            company_size_band=org.company_size_band,
             attributes=dict(org.attributes or {}),
             aliases=alias_values,
             people=[

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 WebSearchProvider = Literal["exa", "tavily", "serper"]
-ExaSearchCategory = Literal["people", "personal_site"]
+ExaSearchCategory = Literal["people", "personal_site", "company"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -14,6 +14,7 @@ class WebSearchHit:
     text: str
     highlights: list[str]
     summary: str = ""
+    employee_count: int | None = None
     provider: WebSearchProvider = "exa"
 
 

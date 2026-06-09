@@ -85,18 +85,22 @@ class ExaClient:
         *,
         query: str,
         summary_query: str,
+        summary_schema: dict[str, object] | None = None,
         num_results: int = 5,
     ) -> list[WebSearchHit]:
         if not self._api_key:
             return []
+        summary_config: dict[str, object] = {"query": summary_query}
+        if summary_schema is not None:
+            summary_config["schema"] = summary_schema
         return await self._search(
             query=query,
-            category=None,
+            category="company",
             num_results=num_results,
             contents={
                 "text": {"maxCharacters": 2000},
                 "highlights": True,
-                "summary": {"query": summary_query},
+                "summary": summary_config,
             },
         )
 
@@ -160,6 +164,7 @@ def _parse_results(data: dict[str, object]) -> list[WebSearchHit]:
         text: str = text_raw[:2000] if isinstance(text_raw, str) else ""
         summary_raw: object = item.get("summary")
         summary: str = summary_raw.strip() if isinstance(summary_raw, str) else ""
+        employee_count: int | None = _parse_employee_count(item)
         highlights: list[str] = []
         highlights_raw: object = item.get("highlights")
         if isinstance(highlights_raw, list):
@@ -174,7 +179,35 @@ def _parse_results(data: dict[str, object]) -> list[WebSearchHit]:
                     text=text,
                     highlights=highlights,
                     summary=summary,
+                    employee_count=employee_count,
                     provider="exa",
                 )
             )
     return hits
+
+
+def _parse_employee_count(item: dict[str, object]) -> int | None:
+    entities_raw: object = item.get("entities")
+    if not isinstance(entities_raw, list):
+        return None
+    for entity_raw in cast(list[object], entities_raw):
+        if not isinstance(entity_raw, dict):
+            continue
+        entity: dict[str, object] = cast(dict[str, object], entity_raw)
+        entity_type_raw: object = entity.get("type")
+        if entity_type_raw != "company":
+            continue
+        properties_raw: object = entity.get("properties")
+        if not isinstance(properties_raw, dict):
+            continue
+        properties: dict[str, object] = cast(dict[str, object], properties_raw)
+        workforce_raw: object = properties.get("workforce")
+        if not isinstance(workforce_raw, dict):
+            continue
+        workforce: dict[str, object] = cast(dict[str, object], workforce_raw)
+        total_raw: object = workforce.get("total")
+        if isinstance(total_raw, int) and total_raw > 0:
+            return total_raw
+        if isinstance(total_raw, float) and total_raw > 0:
+            return int(total_raw)
+    return None

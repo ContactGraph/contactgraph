@@ -40,7 +40,9 @@ import {
 } from "@/components/ui/sheet";
 import type { ListOrgsResult, OrgDetailResult, OrgListItem } from "@/lib/api-types";
 import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
+import { formatCompanySize } from "@/lib/company-size";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
+import { formatIndustryTags } from "@/lib/industry-tags";
 import { proxyPost } from "@/lib/proxy-client";
 
 function websiteUrl(domain: string | null): string | null {
@@ -184,13 +186,32 @@ export default function OrganizationsPage() {
         meta: { width: "w-[4.5rem]" },
       },
       {
+        id: "size",
+        accessorFn: (row: OrgListItem) =>
+          formatCompanySize(row.company_size_band, row.employee_count),
+        header: "Size",
+        cell: ({ row }) => (
+          <CompactCell
+            value={formatCompanySize(
+              row.original.company_size_band,
+              row.original.employee_count,
+            )}
+            title={formatCompanySize(
+              row.original.company_size_band,
+              row.original.employee_count,
+            )}
+          />
+        ),
+        meta: { width: "w-[7rem]" },
+      },
+      {
         id: "categories",
-        accessorFn: (row: OrgListItem) => row.categories.join(", "),
+        accessorFn: (row: OrgListItem) => formatIndustryTags(row.categories),
         header: "Categories",
         cell: ({ row }) => (
           <CompactCell
-            value={row.original.categories.join(", ") || "—"}
-            title={row.original.categories.join(", ")}
+            value={formatIndustryTags(row.original.categories)}
+            title={formatIndustryTags(row.original.categories)}
           />
         ),
         meta: { width: "w-[6.5rem]" },
@@ -271,7 +292,7 @@ export default function OrganizationsPage() {
         org.name,
         org.primary_domain,
         org.description,
-        org.categories.join(" "),
+        org.categories.map((tag) => formatIndustryTags([tag])).join(" "),
       ]
         .filter(Boolean)
         .join(" ")
@@ -292,13 +313,14 @@ export default function OrganizationsPage() {
       .getSortedRowModel()
       .rows.map((row) => row.original);
     const csv: string = buildCsv(
-      ["Organization", "Description", "Website", "Jobs", "Categories", "Contacts"],
+      ["Organization", "Description", "Website", "Jobs", "Size", "Categories", "Contacts"],
       rows.map((org: OrgListItem) => [
         org.name,
         org.description ?? "",
         org.primary_domain ?? "",
         org.careers_url ?? "",
-        org.categories.join("; "),
+        formatCompanySize(org.company_size_band, org.employee_count),
+        formatIndustryTags(org.categories),
         org.contact_count.toString(),
       ]),
     );

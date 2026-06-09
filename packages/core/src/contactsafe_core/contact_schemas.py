@@ -170,6 +170,8 @@ class OrgListItem(BaseModel):
     careers_url: str | None = None
     linkedin_url: str | None = None
     categories: list[str] = Field(default_factory=list)
+    employee_count: int | None = None
+    company_size_band: str | None = None
     contact_count: int = 0
 
 
@@ -194,6 +196,8 @@ class OrgDetailResult(BaseModel):
     careers_url: str | None = None
     linkedin_url: str | None = None
     categories: list[str] = Field(default_factory=list)
+    employee_count: int | None = None
+    company_size_band: str | None = None
     attributes: dict[str, object] = Field(default_factory=dict)
     aliases: list[str] = Field(default_factory=list)
     people: list[OrgPersonSummary] = Field(default_factory=list)

@@ -113,3 +113,4 @@ def test_parse_org_enrichment_hits_extracts_company_fields() -> None:
     assert parsed.primary_domain == "acme.com"
     assert parsed.description is not None
     assert "Acme Corp" in parsed.description
+    assert parsed.categories == []
