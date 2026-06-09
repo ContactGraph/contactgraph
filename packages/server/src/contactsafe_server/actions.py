@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 from contactsafe_core.contact_schemas import (
     DedupPersonsResult,
+    EnrichOrgsResult,
     EnrichPersonResult,
     EnrichStrongTiesResult,
     ListOrgsResult,
@@ -21,6 +22,7 @@ from contactsafe_core.contact_schemas import (
     ListStrongTiesResult,
     NetworkStatusResult,
     OrgDetailResult,
+    OrgEnrichmentStatusResult,
     PersonDetailResult,
     ScrapingDogEnrichmentStatusResult,
     StrongTieCompaniesResult,
@@ -1097,6 +1099,41 @@ async def get_org(
         if detail is None:
             raise ValueError(f"Organization not found: {org_id}")
         return detail
+
+
+async def enrich_orgs(ctx: AppContext, user_id: UUID | None) -> EnrichOrgsResult:
+    if user_id is None:
+        return EnrichOrgsResult(
+            scheduled=False,
+            state="failed",
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.org_enrichment_service import OrgEnrichmentService
+
+        service = OrgEnrichmentService(db, ctx.settings)
+        result = await service.start_enrichment(user_id)
+        await db.commit()
+        return result
+
+
+async def get_org_enrichment_status(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> OrgEnrichmentStatusResult:
+    if user_id is None:
+        return OrgEnrichmentStatusResult(
+            state="failed",
+            orgs_total=0,
+            orgs_enriched=0,
+            error="Authentication required.",
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.org_enrichment_service import OrgEnrichmentService
+
+        service = OrgEnrichmentService(db, ctx.settings)
+        return await service.get_status(user_id)
 
 
 async def dedup_persons(

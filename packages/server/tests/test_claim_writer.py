@@ -1,6 +1,7 @@
 """Tests for claim_writer — idempotent upserts on re-sync."""
 
 import uuid
+from datetime import date
 
 import pytest
 from sqlalchemy import func, select
@@ -67,7 +68,7 @@ async def test_employment_idempotent(
         db_session,
         person_id=person.id,
         org_id=org.id,
-        role_title="Senior Engineer",
+        role_title="Engineer",
         contributor_user_id=user_id,
         contributor_source_kind="gmail_domain",
         confidence=0.7,
@@ -80,8 +81,34 @@ async def test_employment_idempotent(
         select(EmploymentClaim).where(EmploymentClaim.person_id == person.id)
     )
     claim: EmploymentClaim = result.scalar_one()
-    assert claim.role_title == "Senior Engineer"
+    assert claim.role_title == "Engineer"
     assert claim.confidence == 0.7
+
+
+async def test_employment_allows_multiple_roles_at_same_org(
+    db_session: AsyncSession, person: Person, org: Org, user_id: uuid.UUID
+) -> None:
+    await record_employment(
+        db_session,
+        person_id=person.id,
+        org_id=org.id,
+        role_title="Engineer",
+        started_at=date(2018, 1, 1),
+        contributor_user_id=user_id,
+        contributor_source_kind="linkedin_profile_upload",
+    )
+    await record_employment(
+        db_session,
+        person_id=person.id,
+        org_id=org.id,
+        role_title="Senior Engineer",
+        started_at=date(2021, 6, 1),
+        contributor_user_id=user_id,
+        contributor_source_kind="linkedin_profile_upload",
+    )
+
+    result = await db_session.execute(select(func.count()).select_from(EmploymentClaim))
+    assert result.scalar() == 2
 
 
 async def test_relationship_idempotent(

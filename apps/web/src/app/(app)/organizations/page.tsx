@@ -10,17 +10,24 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { Download, Search } from "lucide-react";
+import { Download, MoreHorizontal, Search, Users } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import {
   CompactCell,
   CompactSortHeader,
   CompactTableShell,
 } from "@/components/data-table/compact-table";
-import { EntityActionsMenu } from "@/components/entity-actions-menu";
 import { OrgDetailPanel } from "@/components/org-detail-panel";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -34,7 +41,42 @@ import type { ListOrgsResult, OrgDetailResult, OrgListItem } from "@/lib/api-typ
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { proxyPost } from "@/lib/proxy-client";
 
+function websiteUrl(domain: string | null): string | null {
+  if (!domain) {
+    return null;
+  }
+  if (domain.startsWith("http://") || domain.startsWith("https://")) {
+    return domain;
+  }
+  return `https://${domain}`;
+}
+
+function CompactLinkCell({
+  href,
+  label,
+}: {
+  href: string | null;
+  label: string;
+}) {
+  if (!href) {
+    return <CompactCell value="—" />;
+  }
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="block truncate text-primary underline-offset-2 hover:underline"
+      title={href}
+      onClick={(event) => event.stopPropagation()}
+    >
+      {label}
+    </a>
+  );
+}
+
 export default function OrganizationsPage() {
+  const router = useRouter();
   const [search, setSearch] = useState<string>("");
   const [sorting, setSorting] = useState<SortingState>([
     { id: "name", desc: false },
@@ -44,6 +86,7 @@ export default function OrganizationsPage() {
   const orgsQuery = useQuery({
     queryKey: ["organizations"],
     queryFn: () => proxyPost<ListOrgsResult>("list-orgs"),
+    staleTime: 0,
   });
 
   const detailQuery = useQuery({
@@ -66,14 +109,40 @@ export default function OrganizationsPage() {
         meta: { width: "w-[8rem]" },
       },
       {
-        accessorKey: "primary_domain",
-        header: ({ column }) => (
-          <CompactSortHeader column={column} label="Domain" />
-        ),
+        id: "description",
+        accessorFn: (row: OrgListItem) => row.description ?? "",
+        header: "Description",
         cell: ({ row }) => (
-          <CompactCell value={row.original.primary_domain ?? "—"} />
+          <CompactCell
+            value={row.original.description ?? "—"}
+            title={row.original.description ?? undefined}
+          />
         ),
-        meta: { width: "w-[6rem]" },
+        meta: { width: "w-[12rem]" },
+      },
+      {
+        id: "website",
+        accessorFn: (row: OrgListItem) => row.primary_domain ?? "",
+        header: "Website",
+        cell: ({ row }) => (
+          <CompactLinkCell
+            href={websiteUrl(row.original.primary_domain)}
+            label={row.original.primary_domain ?? "—"}
+          />
+        ),
+        meta: { width: "w-[7rem]" },
+      },
+      {
+        id: "jobs",
+        accessorFn: (row: OrgListItem) => row.careers_url ?? "",
+        header: "Jobs",
+        cell: ({ row }) => (
+          <CompactLinkCell
+            href={row.original.careers_url}
+            label="Careers"
+          />
+        ),
+        meta: { width: "w-[4.5rem]" },
       },
       {
         id: "categories",
@@ -103,7 +172,33 @@ export default function OrganizationsPage() {
         enableSorting: false,
         cell: ({ row }) => (
           <div className="flex justify-end">
-            <EntityActionsMenu entityLabel={row.original.name} />
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-6 shrink-0"
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <MoreHorizontal className="size-3.5" />
+                  <span className="sr-only">Open menu</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    router.push(
+                      `/people?search=${encodeURIComponent(row.original.name)}`,
+                    );
+                  }}
+                >
+                  <Users className="mr-2 size-4" />
+                  View contacts
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         ),
         meta: { width: "w-[2rem]", stickyRight: true },
@@ -127,6 +222,7 @@ export default function OrganizationsPage() {
       const haystack: string = [
         org.name,
         org.primary_domain,
+        org.description,
         org.categories.join(" "),
       ]
         .filter(Boolean)
@@ -148,10 +244,12 @@ export default function OrganizationsPage() {
       .getSortedRowModel()
       .rows.map((row) => row.original);
     const csv: string = buildCsv(
-      ["Organization", "Domain", "Categories", "Contacts"],
+      ["Organization", "Description", "Website", "Jobs", "Categories", "Contacts"],
       rows.map((org: OrgListItem) => [
         org.name,
+        org.description ?? "",
         org.primary_domain ?? "",
+        org.careers_url ?? "",
         org.categories.join("; "),
         org.contact_count.toString(),
       ]),
@@ -165,7 +263,9 @@ export default function OrganizationsPage() {
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Organizations</h1>
           <p className="text-xs text-muted-foreground">
-            {orgsQuery.data?.message ?? "Loading organizations…"}
+            {orgsQuery.isLoading
+              ? "Loading organizations…"
+              : `${table.getFilteredRowModel().rows.length} organization(s) in your graph.`}
           </p>
         </div>
         <div className="flex w-full max-w-md items-center gap-2">
@@ -209,7 +309,7 @@ export default function OrganizationsPage() {
             table={table}
             columnCount={columns.length}
             emptyMessage="No organizations match your search."
-            minWidth="24rem"
+            minWidth="48rem"
             onRowClick={(org: OrgListItem) => setSelectedOrgId(org.org_id)}
           />
         )}
@@ -227,7 +327,9 @@ export default function OrganizationsPage() {
           <SheetHeader>
             <SheetTitle>{selectedOrg?.name ?? "Organization"}</SheetTitle>
             <SheetDescription>
-              {selectedOrg?.primary_domain ?? "Organization details"}
+              {selectedOrg?.description ??
+                selectedOrg?.primary_domain ??
+                "Organization details"}
             </SheetDescription>
           </SheetHeader>
           {detailQuery.isLoading ? (

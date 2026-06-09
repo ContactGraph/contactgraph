@@ -57,6 +57,21 @@ class ContactsService:
         if network_only:
             stmt = stmt.where(
                 UserPersonObservation.relationship_types.any(PHONE_RELATIONSHIP),
+                exists(
+                    select(UserPersonObservation.person_id).where(
+                        UserPersonObservation.user_id == user_id,
+                        UserPersonObservation.person_id == Person.id,
+                        UserPersonObservation.relationship_types.any(
+                            LINKEDIN_CONNECTIONS_RELATIONSHIP,
+                        ),
+                    ).correlate(Person)
+                ),
+                exists(
+                    select(PersonAlias.person_id).where(
+                        PersonAlias.person_id == Person.id,
+                        PersonAlias.kind == "linkedin_url",
+                    ).correlate(Person)
+                ),
             )
         stmt = stmt.order_by(
             UserPersonObservation.tie_strength_score.desc(),
@@ -223,10 +238,29 @@ class ContactsService:
                 func.count(Person.id.distinct()).label("contact_count"),
             )
             .join(Person, Person.current_org_id == Org.id)
-            .join(
-                UserPersonObservation,
-                (UserPersonObservation.person_id == Person.id)
-                & (UserPersonObservation.user_id == user_id),
+            .where(
+                exists(
+                    select(UserPersonObservation.person_id).where(
+                        UserPersonObservation.user_id == user_id,
+                        UserPersonObservation.person_id == Person.id,
+                        UserPersonObservation.relationship_types.any(PHONE_RELATIONSHIP),
+                    ).correlate(Person)
+                ),
+                exists(
+                    select(UserPersonObservation.person_id).where(
+                        UserPersonObservation.user_id == user_id,
+                        UserPersonObservation.person_id == Person.id,
+                        UserPersonObservation.relationship_types.any(
+                            LINKEDIN_CONNECTIONS_RELATIONSHIP,
+                        ),
+                    ).correlate(Person)
+                ),
+                exists(
+                    select(PersonAlias.person_id).where(
+                        PersonAlias.person_id == Person.id,
+                        PersonAlias.kind == "linkedin_url",
+                    ).correlate(Person)
+                ),
             )
             .group_by(Org.id)
             .order_by(Org.canonical_name.asc())
@@ -244,6 +278,9 @@ class ContactsService:
                 org_id=org.id,
                 name=org.canonical_name,
                 primary_domain=org.primary_domain,
+                description=org.description,
+                careers_url=org.careers_url,
+                linkedin_url=org.linkedin_url,
                 categories=list(org.categories or []),
                 contact_count=count,
             )
@@ -288,6 +325,9 @@ class ContactsService:
             org_id=org.id,
             name=org.canonical_name,
             primary_domain=org.primary_domain,
+            description=org.description,
+            careers_url=org.careers_url,
+            linkedin_url=org.linkedin_url,
             categories=list(org.categories or []),
             attributes=dict(org.attributes or {}),
             aliases=alias_values,

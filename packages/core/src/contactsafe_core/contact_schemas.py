@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -164,6 +165,9 @@ class OrgListItem(BaseModel):
     org_id: UUID
     name: str
     primary_domain: str | None = None
+    description: str | None = None
+    careers_url: str | None = None
+    linkedin_url: str | None = None
     categories: list[str] = Field(default_factory=list)
     contact_count: int = 0
 
@@ -185,11 +189,29 @@ class OrgDetailResult(BaseModel):
     org_id: UUID
     name: str
     primary_domain: str | None = None
+    description: str | None = None
+    careers_url: str | None = None
+    linkedin_url: str | None = None
     categories: list[str] = Field(default_factory=list)
     attributes: dict[str, object] = Field(default_factory=dict)
     aliases: list[str] = Field(default_factory=list)
     people: list[OrgPersonSummary] = Field(default_factory=list)
     contact_count: int = 0
+    message: str
+
+
+class EnrichOrgsResult(BaseModel):
+    scheduled: bool
+    state: Literal["pending", "running", "complete", "failed"]
+    message: str
+
+
+class OrgEnrichmentStatusResult(BaseModel):
+    state: Literal["pending", "running", "complete", "failed"]
+    orgs_total: int = 0
+    orgs_enriched: int = 0
+    progress_message: str | None = None
+    error: str | None = None
     message: str
 
 

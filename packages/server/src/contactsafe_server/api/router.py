@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import (
     DedupPersonsResult,
+    EnrichOrgsResult,
     EnrichPersonRequest,
     EnrichPersonResult,
     EnrichStrongTiesResult,
@@ -30,6 +31,7 @@ from contactsafe_core.contact_schemas import (
     ListStrongTiesResult,
     NetworkStatusResult,
     OrgDetailResult,
+    OrgEnrichmentStatusResult,
     PersonDetailResult,
     ScrapingDogEnrichmentStatusResult,
     StrongTieCompaniesResult,
@@ -575,6 +577,19 @@ async def api_get_org(
         return await actions.get_org(ctx, user_id, org_id=body.org_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/enrich-orgs", response_model=EnrichOrgsResult)
+async def api_enrich_orgs(ctx: Ctx, user_id: EffectiveUser) -> EnrichOrgsResult:
+    return await actions.enrich_orgs(ctx, user_id)
+
+
+@router.post("/get-org-enrichment-status", response_model=OrgEnrichmentStatusResult)
+async def api_get_org_enrichment_status(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> OrgEnrichmentStatusResult:
+    return await actions.get_org_enrichment_status(ctx, user_id)
 
 
 @router.post("/dedup-persons", response_model=DedupPersonsResult)

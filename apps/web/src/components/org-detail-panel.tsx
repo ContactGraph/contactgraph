@@ -22,6 +22,35 @@ function DetailField({
   );
 }
 
+function DetailLinkField({
+  label,
+  href,
+}: {
+  label: string;
+  href: string | null | undefined;
+}) {
+  if (!href) {
+    return null;
+  }
+  return (
+    <div>
+      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="mt-1 text-sm">
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="text-primary underline-offset-2 hover:underline"
+        >
+          {href}
+        </a>
+      </dd>
+    </div>
+  );
+}
+
 export function OrgDetailPanel({ org }: { org: OrgDetailResult }) {
   return (
     <div className="flex-1 space-y-6 overflow-y-auto px-6 py-4">
@@ -30,6 +59,13 @@ export function OrgDetailPanel({ org }: { org: OrgDetailResult }) {
       <dl className="grid gap-4">
         <DetailField label="Name" value={org.name} />
         <DetailField label="Domain" value={org.primary_domain} />
+        <DetailField label="Description" value={org.description} />
+        <DetailLinkField
+          label="Website"
+          href={org.primary_domain ? `https://${org.primary_domain}` : null}
+        />
+        <DetailLinkField label="LinkedIn" href={org.linkedin_url} />
+        <DetailLinkField label="Careers" href={org.careers_url} />
         <DetailField
           label="Contacts"
           value={org.contact_count.toString()}

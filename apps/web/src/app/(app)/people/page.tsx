@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
   getCoreRowModel,
@@ -36,7 +37,8 @@ import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { proxyPost } from "@/lib/proxy-client";
 
 export default function PeoplePage() {
-  const [search, setSearch] = useState<string>("");
+  const searchParams = useSearchParams();
+  const [search, setSearch] = useState<string>(searchParams.get("search") ?? "");
   const [sorting, setSorting] = useState<SortingState>([
     { id: "name", desc: false },
   ]);

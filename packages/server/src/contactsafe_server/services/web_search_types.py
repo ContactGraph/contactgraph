@@ -13,6 +13,7 @@ class WebSearchHit:
     url: str
     text: str
     highlights: list[str]
+    summary: str = ""
     provider: WebSearchProvider = "exa"
 
 

@@ -21,8 +21,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { resolveLinkedInConnectionsUpload } from "@/lib/linkedin-connections-upload";
 import type {
   ConnectSourceResult,
+  EnrichOrgsResult,
   ListSourcesResult,
   NetworkStatusResult,
+  OrgEnrichmentStatusResult,
   PollConnectResult,
   SourceSummary,
   SourceType,
@@ -42,7 +44,8 @@ type SetupStepId =
   | "phone"
   | "gmail"
   | "linkedin"
-  | "linkedin_profile";
+  | "linkedin_profile"
+  | "org_enrichment";
 
 interface SetupStep {
   id: SetupStepId;
@@ -75,6 +78,13 @@ const setupSteps: ReadonlyArray<SetupStep> = [
       "Optional PDF export of your own profile for better self-identification during enrichment.",
     optional: true,
   },
+  {
+    id: "org_enrichment",
+    phase: "enrich",
+    title: "Enrich companies",
+    description:
+      "Look up company websites, descriptions, careers pages, and LinkedIn profiles.",
+  },
 ];
 
 function sourceForType(
@@ -100,6 +110,7 @@ function sourceForType(
 function stepComplete(
   stepId: SetupStepId,
   sources: ReadonlyArray<SourceSummary>,
+  orgEnrichmentStatus: OrgEnrichmentStatusResult | undefined,
 ): boolean {
   switch (stepId) {
     case "gmail": {
@@ -118,6 +129,12 @@ function stepComplete(
       const source = sourceForType(sources, "linkedin_connections_upload");
       return source !== undefined && source.sync_state === "complete";
     }
+    case "org_enrichment":
+      return (
+        orgEnrichmentStatus !== undefined &&
+        orgEnrichmentStatus.orgs_total > 0 &&
+        orgEnrichmentStatus.orgs_enriched >= orgEnrichmentStatus.orgs_total
+      );
     default:
       return false;
   }
@@ -147,6 +164,93 @@ interface StepImportStatusDisplay {
   count: number | null;
   suffix: string;
   retryLabel: string;
+}
+
+function buildConnectedSourcesSummary(
+  sources: ReadonlyArray<SourceSummary>,
+  networkStatus: NetworkStatusResult | undefined,
+  orgEnrichmentStatus: OrgEnrichmentStatusResult | undefined,
+  isLoading: boolean,
+): string {
+  if (isLoading) {
+    return "Loading connected sources…";
+  }
+
+  const parts: string[] = [];
+
+  const phoneSource: SourceSummary | undefined = sourceForType(
+    sources,
+    "phone_contacts_upload",
+  );
+  if (phoneSource?.sync_state === "complete") {
+    parts.push(
+      `Phone contacts (${phoneSource.contacts_resolved.toLocaleString()} uploaded)`,
+    );
+  } else if (
+    phoneSource?.sync_state === "syncing" ||
+    phoneSource?.sync_state === "pending"
+  ) {
+    parts.push("Phone contacts (importing…)");
+  }
+
+  const linkedinSource: SourceSummary | undefined = sourceForType(
+    sources,
+    "linkedin_connections_upload",
+  );
+  if (linkedinSource?.sync_state === "complete") {
+    parts.push(
+      `LinkedIn connections (${linkedinSource.contacts_resolved.toLocaleString()} imported)`,
+    );
+  } else if (
+    linkedinSource?.sync_state === "syncing" ||
+    linkedinSource?.sync_state === "pending"
+  ) {
+    parts.push("LinkedIn connections (importing…)");
+  }
+
+  const linkedinProfileSource: SourceSummary | undefined = sourceForType(
+    sources,
+    "linkedin_profile_upload",
+  );
+  if (linkedinProfileSource?.sync_state === "complete") {
+    parts.push("LinkedIn profile uploaded");
+  }
+
+  const gmailSource: SourceSummary | undefined = sourceForType(sources, "google_mail");
+  if (networkStatus?.gmail_connected) {
+    const gmailCount: number =
+      networkStatus.gmail_matched_count || gmailSource?.contacts_resolved || 0;
+    parts.push(
+      gmailCount > 0
+        ? `Gmail (${gmailCount.toLocaleString()} matched)`
+        : "Gmail connected",
+    );
+  }
+
+  if (orgEnrichmentStatus !== undefined) {
+    if (orgEnrichmentStatus.state === "running" && orgEnrichmentStatus.orgs_total > 0) {
+      parts.push(
+        `Company enrichment (${orgEnrichmentStatus.orgs_enriched.toLocaleString()} of ${orgEnrichmentStatus.orgs_total.toLocaleString()})`,
+      );
+    } else if (
+      orgEnrichmentStatus.orgs_total > 0 &&
+      orgEnrichmentStatus.orgs_enriched >= orgEnrichmentStatus.orgs_total
+    ) {
+      parts.push(
+        `Companies enriched (${orgEnrichmentStatus.orgs_enriched.toLocaleString()})`,
+      );
+    } else if (orgEnrichmentStatus.orgs_enriched > 0) {
+      parts.push(
+        `Companies partially enriched (${orgEnrichmentStatus.orgs_enriched.toLocaleString()} of ${orgEnrichmentStatus.orgs_total.toLocaleString()})`,
+      );
+    }
+  }
+
+  if (parts.length === 0) {
+    return "No data sources connected yet.";
+  }
+
+  return parts.join(" · ");
 }
 
 function getStepImportStatus(
@@ -199,6 +303,8 @@ function getStepImportStatus(
         retryLabel: "re-upload",
       };
     }
+    case "org_enrichment":
+      return null;
     default:
       return null;
   }
@@ -210,6 +316,8 @@ interface StepActionAreaProps {
   pending: boolean;
   status: StepImportStatusDisplay | null;
   primaryLabel: string;
+  inProgressLabel?: string;
+  pendingLabel?: string;
   onPrimary: () => void;
   disabled: boolean;
 }
@@ -220,6 +328,8 @@ function StepActionArea({
   pending,
   status,
   primaryLabel,
+  inProgressLabel = "Importing…",
+  pendingLabel = "Working…",
   onPrimary,
   disabled,
 }: StepActionAreaProps) {
@@ -227,7 +337,7 @@ function StepActionArea({
     return (
       <Button variant="outline" size="sm" disabled>
         <Loader2 className="size-4 animate-spin" />
-        {inProgress ? "Importing…" : "Working…"}
+        {inProgress ? inProgressLabel : pendingLabel}
       </Button>
     );
   }
@@ -280,6 +390,10 @@ export default function SourcesPage() {
     useState<boolean>(false);
   const [linkedinConnectionsProcessing, setLinkedinConnectionsProcessing] =
     useState<boolean>(false);
+  const [orgEnrichmentMessage, setOrgEnrichmentMessage] = useState<string | null>(
+    null,
+  );
+  const [orgEnrichmentError, setOrgEnrichmentError] = useState<string | null>(null);
 
   const clearPollTimer = useCallback((): void => {
     if (pollTimerRef.current) {
@@ -314,6 +428,28 @@ export default function SourcesPage() {
     queryKey: ["network-status"],
     queryFn: () => proxyPost<NetworkStatusResult>("get-network-status"),
     refetchInterval: 8000,
+  });
+
+  const orgEnrichmentStatusQuery = useQuery({
+    queryKey: ["org-enrichment-status"],
+    queryFn: () =>
+      proxyPost<OrgEnrichmentStatusResult>("get-org-enrichment-status"),
+    refetchInterval: (query) =>
+      query.state.data?.state === "running" ? 2000 : false,
+  });
+
+  const enrichOrgsMutation = useMutation({
+    mutationFn: () => proxyPost<EnrichOrgsResult>("enrich-orgs"),
+    onSuccess: async (result: EnrichOrgsResult) => {
+      setOrgEnrichmentError(null);
+      setOrgEnrichmentMessage(result.message);
+      await queryClient.invalidateQueries({ queryKey: ["org-enrichment-status"] });
+      await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+    },
+    onError: (error: Error) => {
+      setOrgEnrichmentMessage(null);
+      setOrgEnrichmentError(error.message);
+    },
   });
 
   const syncMutation = useMutation({
@@ -553,20 +689,43 @@ export default function SourcesPage() {
   );
 
   const networkStatus: NetworkStatusResult | undefined = networkStatusQuery.data;
+  const orgEnrichmentStatus: OrgEnrichmentStatusResult | undefined =
+    orgEnrichmentStatusQuery.data;
+
+  const connectedSourcesSummary: string = buildConnectedSourcesSummary(
+    sources,
+    networkStatus,
+    orgEnrichmentStatus,
+    sourcesQuery.isLoading || networkStatusQuery.isLoading,
+  );
+
+  useEffect(() => {
+    if (orgEnrichmentStatus?.state !== "complete") {
+      return;
+    }
+    void queryClient.invalidateQueries({ queryKey: ["organizations"] });
+  }, [orgEnrichmentStatus?.state, queryClient]);
 
   const renderStepRow = (step: SetupStep) => {
-    const complete: boolean = stepComplete(step.id, sources);
+    const complete: boolean = stepComplete(step.id, sources, orgEnrichmentStatus);
     const inProgress: boolean =
-      step.id === "linkedin"
-        ? stepInProgress(step.id, sources) || linkedinConnectionsProcessing
-        : step.id === "linkedin_profile"
-          ? stepInProgress(step.id, sources) || linkedinProfileProcessing
-          : stepInProgress(step.id, sources);
-    const importStatus: StepImportStatusDisplay | null = getStepImportStatus(
-      step.id,
-      sources,
-      networkStatus,
-    );
+      step.id === "org_enrichment"
+        ? orgEnrichmentStatus?.state === "running" || enrichOrgsMutation.isPending
+        : step.id === "linkedin"
+          ? stepInProgress(step.id, sources) || linkedinConnectionsProcessing
+          : step.id === "linkedin_profile"
+            ? stepInProgress(step.id, sources) || linkedinProfileProcessing
+            : stepInProgress(step.id, sources);
+    const importStatus: StepImportStatusDisplay | null =
+      step.id === "org_enrichment" &&
+      orgEnrichmentStatus !== undefined &&
+      orgEnrichmentStatus.orgs_total > 0
+        ? {
+            count: orgEnrichmentStatus.orgs_enriched,
+            suffix: `of ${orgEnrichmentStatus.orgs_total.toLocaleString()} enriched`,
+            retryLabel: "re-enrich",
+          }
+        : getStepImportStatus(step.id, sources, networkStatus);
 
     const actionProps: StepActionAreaProps | null = (() => {
       switch (step.id) {
@@ -610,6 +769,20 @@ export default function SourcesPage() {
             onPrimary: () => setLinkedinConnectionsDialogOpen(true),
             disabled: uploadMutation.isPending,
           };
+        case "org_enrichment":
+          return {
+            complete,
+            inProgress,
+            pending: enrichOrgsMutation.isPending,
+            status: importStatus,
+            primaryLabel: "Enrich",
+            inProgressLabel: "Enriching…",
+            pendingLabel: "Starting…",
+            onPrimary: () => enrichOrgsMutation.mutate(),
+            disabled:
+              enrichOrgsMutation.isPending ||
+              orgEnrichmentStatus?.state === "running",
+          };
         default:
           return null;
       }
@@ -634,11 +807,13 @@ export default function SourcesPage() {
             <div className="flex flex-wrap items-center gap-2">
               <p className="font-medium">{step.title}</p>
               {step.id === "phone" ? (
-                <Badge variant="default">Required</Badge>
+                <span className="text-xs text-muted-foreground">Required</span>
               ) : step.id === "linkedin" ? (
-                <Badge variant="default">Recommended</Badge>
+                <span className="text-xs text-muted-foreground">Recommended</span>
+              ) : step.id === "org_enrichment" ? (
+                <span className="text-xs text-muted-foreground">Recommended</span>
               ) : step.optional ? (
-                <Badge variant="outline">Optional</Badge>
+                <span className="text-xs text-muted-foreground">Optional</span>
               ) : null}
             </div>
             <p className="text-sm text-muted-foreground">{step.description}</p>
@@ -685,6 +860,19 @@ export default function SourcesPage() {
                   "Import failed — try uploading again"}
               </p>
             ) : null}
+            {step.id === "org_enrichment" &&
+            orgEnrichmentStatus?.state === "running" &&
+            orgEnrichmentStatus.orgs_total > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {orgEnrichmentStatus.progress_message ??
+                  `Enriched ${orgEnrichmentStatus.orgs_enriched.toLocaleString()} of ${orgEnrichmentStatus.orgs_total.toLocaleString()}`}
+              </p>
+            ) : null}
+            {step.id === "org_enrichment" &&
+            orgEnrichmentStatus?.state === "failed" &&
+            orgEnrichmentStatus.error ? (
+              <p className="text-xs text-destructive">{orgEnrichmentStatus.error}</p>
+            ) : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2 sm:justify-end sm:pt-0.5">
@@ -697,11 +885,10 @@ export default function SourcesPage() {
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Your network</h1>
-        <p className="text-muted-foreground">
-          {networkStatus?.message ??
-            "Phone contacts are your network. LinkedIn enriches them with professional context."}
-        </p>
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Manage your data sources
+        </h1>
+        <p className="text-muted-foreground">{connectedSourcesSummary}</p>
       </div>
 
       {connectError ? (
@@ -712,6 +899,16 @@ export default function SourcesPage() {
       {connectMessage ? (
         <Alert>
           <AlertDescription>{connectMessage}</AlertDescription>
+        </Alert>
+      ) : null}
+      {orgEnrichmentError ? (
+        <Alert variant="destructive">
+          <AlertDescription>{orgEnrichmentError}</AlertDescription>
+        </Alert>
+      ) : null}
+      {orgEnrichmentMessage ? (
+        <Alert>
+          <AlertDescription>{orgEnrichmentMessage}</AlertDescription>
         </Alert>
       ) : null}
 

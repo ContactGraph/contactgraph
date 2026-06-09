@@ -435,6 +435,9 @@ export interface OrgListItem {
   org_id: string;
   name: string;
   primary_domain: string | null;
+  description: string | null;
+  careers_url: string | null;
+  linkedin_url: string | null;
   categories: string[];
   contact_count: number;
 }
@@ -456,11 +459,31 @@ export interface OrgDetailResult {
   org_id: string;
   name: string;
   primary_domain: string | null;
+  description: string | null;
+  careers_url: string | null;
+  linkedin_url: string | null;
   categories: string[];
   attributes: Record<string, unknown>;
   aliases: string[];
   people: OrgPersonSummary[];
   contact_count: number;
+  message: string;
+}
+
+export type OrgEnrichmentState = "pending" | "running" | "complete" | "failed";
+
+export interface EnrichOrgsResult {
+  scheduled: boolean;
+  state: OrgEnrichmentState;
+  message: string;
+}
+
+export interface OrgEnrichmentStatusResult {
+  state: OrgEnrichmentState;
+  orgs_total: number;
+  orgs_enriched: number;
+  progress_message: string | null;
+  error: string | null;
   message: string;
 }
 

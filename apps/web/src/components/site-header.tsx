@@ -1,9 +1,12 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useRef } from "react";
 
+import type { UserProfileResult } from "@/lib/api-types";
+import { proxyPost } from "@/lib/proxy-client";
 import { cn } from "@/lib/utils";
 
 const API_BASE = "https://api.contactgraph.ai";
@@ -17,7 +20,6 @@ const appLinks: readonly NavLink[] = [
   { kind: "internal", href: "/people", label: "People" },
   { kind: "internal", href: "/organizations", label: "Organizations" },
   { kind: "internal", href: "/sources", label: "Sources" },
-  { kind: "internal", href: "/profile", label: "Profile" },
   { kind: "internal", href: "/target-companies", label: "Targets" },
   { kind: "internal", href: "/trust", label: "Trust List" },
 ];
@@ -34,6 +36,26 @@ export function SiteHeader({ email }: { email: string | null }) {
   const router = useRouter();
   const headerRef = useRef<HTMLElement>(null);
   const links: readonly NavLink[] = email ? appLinks : marketingLinks;
+
+  const profileQuery = useQuery({
+    queryKey: ["user-profile"],
+    queryFn: () => proxyPost<UserProfileResult>("get-user-profile"),
+    enabled: email !== null,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const displayName: string =
+    profileQuery.data?.display_name ??
+    profileQuery.data?.google_profile_name ??
+    email ??
+    "";
+
+  const initials: string = displayName
+    .split(/[\s@.]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s) => s[0]!.toUpperCase())
+    .join("");
 
   useEffect(() => {
     const header: HTMLElement | null = headerRef.current;
@@ -111,9 +133,17 @@ export function SiteHeader({ email }: { email: string | null }) {
         <div className="flex shrink-0 items-center gap-3 text-sm">
           {email ? (
             <>
-              <span className="max-w-[200px] truncate text-muted-foreground">
-                {email}
-              </span>
+              <Link
+                href="/profile"
+                className="flex items-center gap-2 rounded-full no-underline hover:opacity-80"
+              >
+                <span className="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+                  {initials}
+                </span>
+                <span className="hidden max-w-[160px] truncate text-sm font-medium text-foreground sm:inline">
+                  {displayName}
+                </span>
+              </Link>
               <button
                 type="button"
                 onClick={() => void handleSignOut()}
