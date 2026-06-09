@@ -22,6 +22,7 @@ from contactsafe_core.contact_schemas import (
     split_display_name,
 )
 from contactsafe_core.enums import IdentityKind
+from contactsafe_server.services.ats_detection import apply_ats_detection_to_org
 from contactsafe_server.db.models import (
     EmploymentClaim,
     Org,
@@ -579,6 +580,9 @@ class ContactsService:
                     contributor_source_kind=_MANUAL_SOURCE_KIND,
                     confidence=_MANUAL_CONFIDENCE,
                 )
+
+        if body.careers_url is not None:
+            apply_ats_detection_to_org(org)
 
         if body.categories is not None:
             categories: list[str] = [

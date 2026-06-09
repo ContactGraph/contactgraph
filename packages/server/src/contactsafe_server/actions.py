@@ -37,6 +37,11 @@ from contactsafe_core.contact_schemas import (
     ScrapingDogEnrichmentStatusResult,
     StrongTieCompaniesResult,
     StrongTieCountResult,
+    JobDiscoveryStatusResult,
+    JobMonitorConfigResult,
+    ListOrgJobsResult,
+    SetJobMonitorConfigRequest,
+    StartJobDiscoveryResult,
     UpdateOrgRequest,
     UpdatePersonRequest,
 )
@@ -1475,3 +1480,107 @@ async def remove_orgs_from_list(
         )
         await db.commit()
         return result
+
+
+async def get_job_monitor_config(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> JobMonitorConfigResult:
+    if user_id is None:
+        return JobMonitorConfigResult(
+            enabled=False,
+            list_id=None,
+            list_name=None,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        return await service.get_monitor_config(user_id)
+
+
+async def set_job_monitor_config(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: SetJobMonitorConfigRequest,
+) -> JobMonitorConfigResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        result: JobMonitorConfigResult = await service.set_monitor_config(user_id, body)
+        await db.commit()
+        return result
+
+
+async def start_job_discovery(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> StartJobDiscoveryResult:
+    if user_id is None:
+        return StartJobDiscoveryResult(
+            scheduled=False,
+            state="failed",
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        return await service.start_discovery(user_id)
+
+
+async def get_job_discovery_status(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> JobDiscoveryStatusResult:
+    if user_id is None:
+        return JobDiscoveryStatusResult(
+            state="pending",
+            orgs_total=0,
+            orgs_processed=0,
+            jobs_found=0,
+            new_jobs=0,
+            progress_message=None,
+            error=None,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        return await service.get_status(user_id)
+
+
+async def cancel_job_discovery(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> None:
+    if user_id is None:
+        return
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        await service.cancel_discovery(user_id)
+
+
+async def list_org_jobs(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> ListOrgJobsResult:
+    if user_id is None:
+        return ListOrgJobsResult(
+            companies=[],
+            total_jobs=0,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        return await service.list_jobs_for_user(user_id)

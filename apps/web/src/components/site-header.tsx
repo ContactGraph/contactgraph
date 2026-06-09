@@ -19,6 +19,7 @@ type NavLink =
 const appLinks: readonly NavLink[] = [
   { kind: "internal", href: "/people", label: "People" },
   { kind: "internal", href: "/organizations", label: "Organizations" },
+  { kind: "internal", href: "/jobs", label: "Jobs" },
   { kind: "internal", href: "/setup", label: "Setup" },
   { kind: "internal", href: "/target-companies", label: "Targets" },
   { kind: "internal", href: "/trust", label: "Trust List" },

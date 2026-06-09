@@ -624,3 +624,65 @@ export interface SecondDegreeTargetCompaniesResult {
   message: string;
   system_messages: string[];
 }
+
+export interface JobMonitorConfigResult {
+  enabled: boolean;
+  list_id: string | null;
+  list_name: string | null;
+  message: string;
+}
+
+export interface SetJobMonitorConfigRequest {
+  list_id?: string | null;
+  enabled?: boolean;
+}
+
+export type JobDiscoveryState = "pending" | "running" | "complete" | "failed" | "cancelled";
+
+export interface StartJobDiscoveryResult {
+  scheduled: boolean;
+  state: JobDiscoveryState;
+  message: string;
+}
+
+export interface JobDiscoveryStatusResult {
+  state: JobDiscoveryState;
+  orgs_total: number;
+  orgs_processed: number;
+  jobs_found: number;
+  new_jobs: number;
+  progress_message: string | null;
+  error: string | null;
+  message: string;
+}
+
+export interface OrgJobItem {
+  job_id: string;
+  external_job_id: string;
+  source: string;
+  title: string;
+  location: string | null;
+  department: string | null;
+  url: string;
+  description_snippet: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  remote_status: string | null;
+  posted_at: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  is_active: boolean;
+}
+
+export interface OrgJobsByCompany {
+  org_id: string;
+  org_name: string;
+  primary_domain: string | null;
+  jobs: OrgJobItem[];
+}
+
+export interface ListOrgJobsResult {
+  companies: OrgJobsByCompany[];
+  total_jobs: number;
+  message: string;
+}

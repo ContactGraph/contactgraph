@@ -43,7 +43,11 @@ import type {
   ConnectSourceResult,
   CreateOrgListResult,
   EnrichOrgsResult,
+  JobDiscoveryStatusResult,
+  JobMonitorConfigResult,
   ListOrgListsResult,
+  SetJobMonitorConfigRequest,
+  StartJobDiscoveryResult,
   ListSourcesResult,
   NetworkStatusResult,
   OrgEnrichmentStatusResult,
@@ -129,10 +133,9 @@ const setupSteps: ReadonlyArray<SetupStep> = [
   {
     id: "job_scrapers",
     section: "job_search",
-    title: "Set up daily job scrapers",
+    title: "Search for jobs",
     description:
       "Monitor career pages at your target companies and get daily alerts.",
-    comingSoon: true,
   },
 ];
 
@@ -198,6 +201,7 @@ function stepComplete(
   sources: ReadonlyArray<SourceSummary>,
   orgEnrichmentStatus: OrgEnrichmentStatusResult | undefined,
   orgLists: ReadonlyArray<OrgListSummary>,
+  jobMonitorConfig: JobMonitorConfigResult | undefined,
 ): boolean {
   switch (stepId) {
     case "gmail": {
@@ -225,7 +229,7 @@ function stepComplete(
     case "target_companies":
       return orgLists.some((list) => list.org_count > 0);
     case "job_scrapers":
-      return false;
+      return jobMonitorConfig?.enabled === true;
     default:
       return false;
   }
@@ -468,6 +472,19 @@ export default function SetupPage() {
     queryFn: () => proxyPost<ListOrgListsResult>("list-org-lists"),
   });
 
+  const jobMonitorConfigQuery = useQuery({
+    queryKey: ["job-monitor-config"],
+    queryFn: () => proxyPost<JobMonitorConfigResult>("get-job-monitor-config"),
+  });
+
+  const jobDiscoveryStatusQuery = useQuery({
+    queryKey: ["job-discovery-status"],
+    queryFn: () =>
+      proxyPost<JobDiscoveryStatusResult>("get-job-discovery-status"),
+    refetchInterval: (query) =>
+      query.state.data?.state === "running" ? 2000 : false,
+  });
+
   const createOrgListMutation = useMutation({
     mutationFn: (name: string) =>
       proxyPost<CreateOrgListResult>("create-org-list", { name }),
@@ -475,6 +492,30 @@ export default function SetupPage() {
       toast.success(result.message);
       setSelectedTargetListId(result.list_id);
       await queryClient.invalidateQueries({ queryKey: ["org-lists"] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const setJobMonitorConfigMutation = useMutation({
+    mutationFn: (body: SetJobMonitorConfigRequest) =>
+      proxyPost<JobMonitorConfigResult>("set-job-monitor-config", body),
+    onSuccess: async (result: JobMonitorConfigResult) => {
+      toast.success(result.message);
+      await queryClient.invalidateQueries({ queryKey: ["job-monitor-config"] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const startJobDiscoveryMutation = useMutation({
+    mutationFn: () => proxyPost<StartJobDiscoveryResult>("start-job-discovery"),
+    onSuccess: async (result: StartJobDiscoveryResult) => {
+      toast.success(result.message);
+      await queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
+      await queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
     },
     onError: (error: Error) => {
       toast.error(error.message);
@@ -742,6 +783,10 @@ export default function SetupPage() {
   const orgEnrichmentStatus: OrgEnrichmentStatusResult | undefined =
     orgEnrichmentStatusQuery.data;
   const orgLists: OrgListSummary[] = orgListsQuery.data?.lists ?? [];
+  const jobMonitorConfig: JobMonitorConfigResult | undefined =
+    jobMonitorConfigQuery.data;
+  const jobDiscoveryStatus: JobDiscoveryStatusResult | undefined =
+    jobDiscoveryStatusQuery.data;
 
   const selectedTargetList: OrgListSummary | undefined = orgLists.find(
     (list) => list.list_id === selectedTargetListId,
@@ -766,16 +811,33 @@ export default function SetupPage() {
     void queryClient.invalidateQueries({ queryKey: ["organizations"] });
   }, [orgEnrichmentStatus?.state, queryClient]);
 
+  useEffect(() => {
+    if (jobMonitorConfig?.list_id && selectedTargetListId === null) {
+      setSelectedTargetListId(jobMonitorConfig.list_id);
+    }
+  }, [jobMonitorConfig?.list_id, selectedTargetListId]);
+
+  useEffect(() => {
+    if (jobDiscoveryStatus?.state !== "complete") {
+      return;
+    }
+    void queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
+  }, [jobDiscoveryStatus?.state, queryClient]);
+
   const renderStepRow = (step: SetupStep) => {
     const complete: boolean = stepComplete(
       step.id,
       sources,
       orgEnrichmentStatus,
       orgLists,
+      jobMonitorConfig,
     );
     const inProgress: boolean =
       step.id === "org_enrichment"
         ? orgEnrichmentStatus?.state === "running" || enrichOrgsMutation.isPending
+        : step.id === "job_scrapers"
+          ? jobDiscoveryStatus?.state === "running" ||
+            startJobDiscoveryMutation.isPending
         : step.id === "linkedin"
           ? stepInProgress(step.id, sources) || linkedinConnectionsProcessing
           : step.id === "linkedin_profile"
@@ -951,6 +1013,29 @@ export default function SetupPage() {
             orgEnrichmentStatus.error ? (
               <p className="text-xs text-destructive">{orgEnrichmentStatus.error}</p>
             ) : null}
+            {step.id === "job_scrapers" &&
+            jobDiscoveryStatus?.state === "running" ? (
+              <p className="text-xs text-muted-foreground">
+                {jobDiscoveryStatus.progress_message ?? jobDiscoveryStatus.message}
+                {" · "}
+                <button
+                  type="button"
+                  className="text-destructive hover:underline"
+                  onClick={() => {
+                    void proxyPost("cancel-job-discovery").then(() => {
+                      void jobDiscoveryStatusQuery.refetch();
+                    });
+                  }}
+                >
+                  Cancel
+                </button>
+              </p>
+            ) : null}
+            {step.id === "job_scrapers" &&
+            jobDiscoveryStatus?.state === "failed" &&
+            jobDiscoveryStatus.error ? (
+              <p className="text-xs text-destructive">{jobDiscoveryStatus.error}</p>
+            ) : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2 sm:justify-end sm:pt-0.5">
@@ -1010,6 +1095,56 @@ export default function SetupPage() {
                 </Button>
               ) : null}
             </>
+          ) : step.id === "job_scrapers" ? (
+            <>
+              <Button
+                variant={jobMonitorConfig?.enabled ? "default" : "outline"}
+                size="sm"
+                disabled={
+                  selectedTargetList === undefined ||
+                  setJobMonitorConfigMutation.isPending
+                }
+                onClick={() =>
+                  setJobMonitorConfigMutation.mutate({
+                    list_id: selectedTargetListId,
+                    enabled: !jobMonitorConfig?.enabled,
+                  })
+                }
+              >
+                {jobMonitorConfig?.enabled ? "Monitoring on" : "Enable monitoring"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={
+                  selectedTargetList === undefined ||
+                  startJobDiscoveryMutation.isPending ||
+                  setJobMonitorConfigMutation.isPending ||
+                  jobDiscoveryStatus?.state === "running"
+                }
+                onClick={async () => {
+                  if (selectedTargetListId !== null) {
+                    await setJobMonitorConfigMutation.mutateAsync({
+                      list_id: selectedTargetListId,
+                    });
+                  }
+                  startJobDiscoveryMutation.mutate();
+                }}
+              >
+                {jobDiscoveryStatus?.state === "running" ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="size-4" />
+                )}
+                Scan now
+              </Button>
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/jobs">
+                  View jobs
+                  <ArrowRight className="size-4" />
+                </Link>
+              </Button>
+            </>
           ) : step.comingSoon ? (
             <Button variant="outline" size="sm" disabled>
               Coming soon
@@ -1060,7 +1195,7 @@ export default function SetupPage() {
         return (
           <Card key={sectionId}>
             <CardHeader>
-              <CardTitle>{meta.title}</CardTitle>
+              <CardTitle className="text-base">{meta.title}</CardTitle>
               <CardDescription>{meta.description}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

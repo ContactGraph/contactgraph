@@ -42,10 +42,17 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     location: Mapped[str | None] = mapped_column(Text, nullable=True)
     person_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("persons.id", ondelete="SET NULL"), nullable=True)
+    job_monitor_list_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("org_lists.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    job_monitor_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     person: Mapped["Person | None"] = relationship(foreign_keys=[person_id])
+    job_monitor_list: Mapped["OrgList | None"] = relationship(foreign_keys=[job_monitor_list_id])
     identities: Mapped[list["UserIdentity"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     oauth_credentials: Mapped[list["OAuthCredential"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     sessions: Mapped[list["ConnectSession"]] = relationship(back_populates="user")
@@ -288,6 +295,8 @@ class Org(Base):
     primary_domain: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     careers_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ats_provider: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ats_board_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     linkedin_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     categories: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
     employee_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -299,6 +308,69 @@ class Org(Base):
     persons: Mapped[list["Person"]] = relationship(back_populates="current_org", foreign_keys=[Person.current_org_id])
     aliases: Mapped[list["OrgAlias"]] = relationship(back_populates="org", cascade="all, delete-orphan")
     employment_claims: Mapped[list["EmploymentClaim"]] = relationship(back_populates="org", cascade="all, delete-orphan")
+    jobs: Mapped[list["OrgJob"]] = relationship(back_populates="org", cascade="all, delete-orphan")
+    job_scrape_runs: Mapped[list["JobScrapeRun"]] = relationship(back_populates="org", cascade="all, delete-orphan")
+
+
+class OrgJob(Base):
+    __tablename__ = "org_jobs"
+    __table_args__ = (
+        UniqueConstraint("org_id", "external_job_id", "source", name="uq_org_job_external"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="CASCADE"), nullable=False)
+    external_job_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    location: Mapped[str | None] = mapped_column(Text, nullable=True)
+    department: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    description_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    salary_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    salary_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    remote_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    org: Mapped["Org"] = relationship(back_populates="jobs")
+
+
+class JobScrapeRun(Base):
+    __tablename__ = "job_scrape_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="CASCADE"), nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    jobs_found: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    new_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    org: Mapped["Org"] = relationship(back_populates="job_scrape_runs")
+
+
+class JobDiscoveryRun(Base):
+    __tablename__ = "job_discovery_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    orgs_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    orgs_processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    jobs_found: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    new_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class PersonAlias(Base):
