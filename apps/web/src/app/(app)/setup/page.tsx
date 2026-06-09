@@ -1152,9 +1152,20 @@ export default function SetupPage() {
                 disabled={
                   selectedMonitorList === undefined ||
                   startJobDiscoveryMutation.isPending ||
+                  setJobMonitorConfigMutation.isPending ||
                   jobDiscoveryStatus?.state === "running"
                 }
-                onClick={() => startJobDiscoveryMutation.mutate()}
+                onClick={async () => {
+                  if (
+                    selectedMonitorListId !== null &&
+                    jobMonitorConfig?.list_id !== selectedMonitorListId
+                  ) {
+                    await setJobMonitorConfigMutation.mutateAsync({
+                      list_id: selectedMonitorListId,
+                    });
+                  }
+                  startJobDiscoveryMutation.mutate();
+                }}
               >
                 {jobDiscoveryStatus?.state === "running" ? (
                   <Loader2 className="size-4 animate-spin" />
