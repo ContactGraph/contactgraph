@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   getCoreRowModel,
@@ -10,7 +10,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { Download, MoreHorizontal, Search, Users } from "lucide-react";
+import { Download, MoreHorizontal, Pencil, Search, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import {
@@ -19,6 +19,7 @@ import {
   CompactTableShell,
 } from "@/components/data-table/compact-table";
 import { OrgDetailPanel } from "@/components/org-detail-panel";
+import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +39,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type { ListOrgsResult, OrgDetailResult, OrgListItem } from "@/lib/api-types";
+import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { proxyPost } from "@/lib/proxy-client";
 
@@ -82,6 +84,43 @@ export default function OrganizationsPage() {
     { id: "name", desc: false },
   ]);
   const [selectedOrgId, setSelectedOrgId] = useState<string | null>(null);
+  const [isDetailDirty, setIsDetailDirty] = useState<boolean>(false);
+  const [discardDialogOpen, setDiscardDialogOpen] = useState<boolean>(false);
+  const [isClosingSave, setIsClosingSave] = useState<boolean>(false);
+  const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
+
+  useEffect(() => {
+    setIsDetailDirty(false);
+  }, [selectedOrgId]);
+
+  const closeDetailPanel = (): void => {
+    setSelectedOrgId(null);
+    setIsDetailDirty(false);
+    setDiscardDialogOpen(false);
+  };
+
+  const handleDetailSheetOpenChange = (open: boolean): void => {
+    if (open) {
+      return;
+    }
+    if (isDetailDirty) {
+      setDiscardDialogOpen(true);
+      return;
+    }
+    closeDetailPanel();
+  };
+
+  const handleSaveAndClose = async (): Promise<void> => {
+    setIsClosingSave(true);
+    try {
+      const saved: boolean = (await detailPanelRef.current?.save()) ?? false;
+      if (saved) {
+        closeDetailPanel();
+      }
+    } finally {
+      setIsClosingSave(false);
+    }
+  };
 
   const orgsQuery = useQuery({
     queryKey: ["organizations"],
@@ -186,6 +225,15 @@ export default function OrganizationsPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                <DropdownMenuItem
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSelectedOrgId(row.original.org_id);
+                  }}
+                >
+                  <Pencil className="mr-2 size-4" />
+                  Edit
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
@@ -317,11 +365,7 @@ export default function OrganizationsPage() {
 
       <Sheet
         open={selectedOrgId !== null}
-        onOpenChange={(open: boolean) => {
-          if (!open) {
-            setSelectedOrgId(null);
-          }
-        }}
+        onOpenChange={handleDetailSheetOpenChange}
       >
         <SheetContent className="flex w-full flex-col p-0 sm:max-w-xl">
           <SheetHeader>
@@ -339,8 +383,10 @@ export default function OrganizationsPage() {
             </div>
           ) : detailQuery.data ? (
             <OrgDetailPanel
+              ref={detailPanelRef}
               key={`${selectedOrgId}-${detailQuery.dataUpdatedAt}`}
               org={detailQuery.data}
+              onDirtyChange={setIsDetailDirty}
             />
           ) : detailQuery.error ? (
             <div className="px-6 py-4">
@@ -351,6 +397,14 @@ export default function OrganizationsPage() {
           ) : null}
         </SheetContent>
       </Sheet>
+
+      <UnsavedChangesDialog
+        open={discardDialogOpen}
+        onOpenChange={setDiscardDialogOpen}
+        onSave={handleSaveAndClose}
+        onDiscard={closeDetailPanel}
+        isSaving={isClosingSave}
+      />
     </div>
   );
 }

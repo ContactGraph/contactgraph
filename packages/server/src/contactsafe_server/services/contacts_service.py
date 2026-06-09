@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import re
 import uuid
 from collections import defaultdict
 from typing import Callable
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -26,6 +27,7 @@ from contactsafe_server.db.models import (
     Org,
     Person,
     PersonAlias,
+    PersonAttributeClaim,
     Source,
     UserPersonObservation,
 )
@@ -48,6 +50,17 @@ from contactsafe_server.services.strong_tie_matcher import (
 
 _MANUAL_SOURCE_KIND: str = "user_manual"
 _MANUAL_CONFIDENCE: float = 1.0
+_PLATFORM_CLEAN_RE: re.Pattern[str] = re.compile(r"[^a-z0-9_]+")
+
+
+def normalize_social_platform(raw: str) -> str | None:
+    cleaned: str = _PLATFORM_CLEAN_RE.sub(
+        "",
+        raw.strip().lower().replace(" ", "_").replace("-", "_"),
+    )
+    if not cleaned or cleaned == "linkedin":
+        return None
+    return cleaned
 
 PHONE_RELATIONSHIP: str = "phone_contacts_upload"
 
@@ -216,7 +229,14 @@ class ContactsService:
             )
         )
         phones: list[str] = list(dict.fromkeys(person.phone_numbers or []))
-        web_links: list[str] = list(dict.fromkeys(person.social_profiles.values()))
+        social_profiles: dict[str, str] = dict(person.social_profiles or {})
+        linkedin_by_person: dict[uuid.UUID, str] = await self._load_linkedin_urls(
+            [person_id],
+        )
+        linkedin_url: str | None = (
+            linkedin_by_person.get(person_id) or social_profiles.get("linkedin")
+        )
+        web_links: list[str] = list(dict.fromkeys(social_profiles.values()))
 
         return PersonDetailResult(
             person_id=person.id,
@@ -234,7 +254,8 @@ class ContactsService:
             bio_summary=person.bio_summary,
             inferred_categories=list(person.inferred_categories or []),
             descriptive_tags=list(person.descriptive_tags or []),
-            social_profiles=dict(person.social_profiles or {}),
+            social_profiles=social_profiles,
+            linkedin_url=linkedin_url,
             web_links=web_links,
             sources=source_labels,
             first_contact_at=obs.first_observed_at,
@@ -450,6 +471,13 @@ class ContactsService:
                     if key != "linkedin"
                 }
 
+        if body.social_profiles is not None:
+            await self._sync_social_profiles(
+                person_id=person.id,
+                user_id=user_id,
+                profiles=body.social_profiles,
+            )
+
         if body.org_name is not None:
             org_name: str = body.org_name.strip()
             if org_name:
@@ -591,6 +619,40 @@ class ContactsService:
             .where(Person.id == person_id)
         )
         return result.scalar_one_or_none()
+
+    async def _sync_social_profiles(
+        self,
+        *,
+        person_id: uuid.UUID,
+        user_id: uuid.UUID,
+        profiles: dict[str, str],
+    ) -> None:
+        await self._db.execute(
+            delete(PersonAttributeClaim).where(
+                PersonAttributeClaim.person_id == person_id,
+                PersonAttributeClaim.kind.like("social_profile.%"),
+                PersonAttributeClaim.kind != "social_profile.linkedin",
+            )
+        )
+
+        seen_platforms: set[str] = set()
+        for raw_platform, raw_url in profiles.items():
+            platform: str | None = normalize_social_platform(raw_platform)
+            if platform is None or platform in seen_platforms:
+                continue
+            url: str = raw_url.strip().rstrip("/")
+            if not url:
+                continue
+            seen_platforms.add(platform)
+            await record_person_attribute(
+                self._db,
+                person_id=person_id,
+                kind=f"social_profile.{platform}",
+                value=url,
+                contributor_user_id=user_id,
+                contributor_source_kind=_MANUAL_SOURCE_KIND,
+                confidence=_MANUAL_CONFIDENCE,
+            )
 
     async def _apply_manual_person_attribute(
         self,

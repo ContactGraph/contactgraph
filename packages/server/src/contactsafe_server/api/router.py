@@ -345,12 +345,7 @@ async def api_update_user_profile(
     user_id: EffectiveUser,
     body: UpdateUserProfileRequest,
 ) -> UserProfileResult:
-    return await actions.update_user_profile(
-        ctx,
-        user_id,
-        display_name=body.display_name,
-        location=body.location,
-    )
+    return await actions.update_user_profile(ctx, user_id, body)
 
 
 @router.post("/save-user-experience", response_model=UserProfileResult)

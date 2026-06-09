@@ -1,8 +1,8 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -12,8 +12,17 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import type { PersonDetailResult, UpdatePersonRequest } from "@/lib/api-types";
+import { isRecordFormDirty } from "@/lib/detail-form-dirty";
+import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { formatDate, formatSourceType } from "@/lib/formatters";
 import { proxyPost } from "@/lib/proxy-client";
+import {
+  createEmptySocialProfileEntry,
+  socialProfilesFromRecord,
+  socialProfilesSignature,
+  socialProfilesToRecord,
+  type SocialProfileEntry,
+} from "@/lib/social-profiles";
 
 interface PersonFormState {
   first_name: string;
@@ -25,6 +34,7 @@ interface PersonFormState {
   location: string;
   linkedin_url: string;
   bio_summary: string;
+  other_profiles: SocialProfileEntry[];
 }
 
 function personToForm(person: PersonDetailResult): PersonFormState {
@@ -36,8 +46,35 @@ function personToForm(person: PersonDetailResult): PersonFormState {
     org_name: person.org_name ?? "",
     current_role: person.current_role ?? "",
     location: person.location ?? "",
-    linkedin_url: person.social_profiles.linkedin ?? "",
+    linkedin_url: person.linkedin_url ?? person.social_profiles.linkedin ?? "",
     bio_summary: person.bio_summary ?? "",
+    other_profiles: socialProfilesFromRecord(person.social_profiles),
+  };
+}
+
+function scalarFormState(
+  form: PersonFormState,
+): Omit<PersonFormState, "other_profiles"> {
+  const { other_profiles: _otherProfiles, ...scalar } = form;
+  return scalar;
+}
+
+function buildUpdatePayload(
+  personId: string,
+  form: PersonFormState,
+): UpdatePersonRequest {
+  return {
+    person_id: personId,
+    first_name: form.first_name,
+    last_name: form.last_name,
+    primary_email: form.primary_email,
+    phone: form.phone,
+    org_name: form.org_name,
+    current_role: form.current_role,
+    location: form.location,
+    linkedin_url: form.linkedin_url,
+    bio_summary: form.bio_summary,
+    social_profiles: socialProfilesToRecord(form.other_profiles),
   };
 }
 
@@ -61,10 +98,28 @@ function ReadOnlyField({
   );
 }
 
-export function PersonDetailPanel({ person }: { person: PersonDetailResult }) {
+export const PersonDetailPanel = forwardRef<
+  EditableDetailPanelHandle,
+  {
+    person: PersonDetailResult;
+    onDirtyChange?: (isDirty: boolean) => void;
+  }
+>(function PersonDetailPanel({ person, onDirtyChange }, ref) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<PersonFormState>(() => personToForm(person));
   const [saved, setSaved] = useState<boolean>(false);
+  const baseline: PersonFormState = useMemo(() => personToForm(person), [person]);
+  const isDirty: boolean = useMemo(
+    () =>
+      isRecordFormDirty(scalarFormState(form), scalarFormState(baseline))
+      || socialProfilesSignature(form.other_profiles)
+        !== socialProfilesSignature(baseline.other_profiles),
+    [form, baseline],
+  );
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   const saveMutation = useMutation({
     mutationFn: (payload: UpdatePersonRequest) =>
@@ -80,21 +135,56 @@ export function PersonDetailPanel({ person }: { person: PersonDetailResult }) {
     },
   });
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      save: async (): Promise<boolean> => {
+        if (!isDirty) {
+          return true;
+        }
+        try {
+          await saveMutation.mutateAsync(
+            buildUpdatePayload(person.person_id, form),
+          );
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    }),
+    [form, isDirty, person.person_id, saveMutation],
+  );
+
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
-    const payload: UpdatePersonRequest = {
-      person_id: person.person_id,
-      first_name: form.first_name,
-      last_name: form.last_name,
-      primary_email: form.primary_email,
-      phone: form.phone,
-      org_name: form.org_name,
-      current_role: form.current_role,
-      location: form.location,
-      linkedin_url: form.linkedin_url,
-      bio_summary: form.bio_summary,
-    };
-    saveMutation.mutate(payload);
+    saveMutation.mutate(buildUpdatePayload(person.person_id, form));
+  };
+
+  const addProfile = (): void => {
+    setForm((current) => ({
+      ...current,
+      other_profiles: [...current.other_profiles, createEmptySocialProfileEntry()],
+    }));
+  };
+
+  const updateProfile = (
+    id: string,
+    field: "platform" | "url",
+    value: string,
+  ): void => {
+    setForm((current) => ({
+      ...current,
+      other_profiles: current.other_profiles.map((entry) =>
+        entry.id === id ? { ...entry, [field]: value } : entry,
+      ),
+    }));
+  };
+
+  const removeProfile = (id: string): void => {
+    setForm((current) => ({
+      ...current,
+      other_profiles: current.other_profiles.filter((entry) => entry.id !== id),
+    }));
   };
 
   return (
@@ -193,6 +283,63 @@ export function PersonDetailPanel({ person }: { person: PersonDetailResult }) {
             }
           />
         </div>
+
+        <section className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <h4 className="text-sm font-medium">Other profiles</h4>
+              <p className="text-xs text-muted-foreground">
+                Twitter/X, Instagram, GitHub, Bluesky, and other URLs to track later.
+              </p>
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={addProfile}>
+              <Plus className="size-3.5" />
+              Add
+            </Button>
+          </div>
+          {form.other_profiles.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No other profile URLs yet.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {form.other_profiles.map((entry) => (
+                <li
+                  key={entry.id}
+                  className="grid gap-2 rounded-md border p-2 sm:grid-cols-[7rem_1fr_auto]"
+                >
+                  <Input
+                    value={entry.platform}
+                    placeholder="twitter"
+                    aria-label="Profile platform"
+                    onChange={(event) =>
+                      updateProfile(entry.id, "platform", event.target.value)
+                    }
+                  />
+                  <Input
+                    value={entry.url}
+                    placeholder="https://x.com/username"
+                    aria-label="Profile URL"
+                    onChange={(event) =>
+                      updateProfile(entry.id, "url", event.target.value)
+                    }
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="size-8 shrink-0"
+                    onClick={() => removeProfile(entry.id)}
+                  >
+                    <Trash2 className="size-3.5" />
+                    <span className="sr-only">Remove profile</span>
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
         <div className="space-y-1.5">
           <Label htmlFor="person-bio">Bio</Label>
           <Textarea
@@ -210,7 +357,11 @@ export function PersonDetailPanel({ person }: { person: PersonDetailResult }) {
           </Alert>
         ) : null}
         <div className="flex items-center gap-2">
-          <Button type="submit" size="sm" disabled={saveMutation.isPending}>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!isDirty || saveMutation.isPending}
+          >
             {saveMutation.isPending ? <Loader2 className="animate-spin" /> : null}
             Save changes
           </Button>
@@ -269,27 +420,6 @@ export function PersonDetailPanel({ person }: { person: PersonDetailResult }) {
         </section>
       ) : null}
 
-      {Object.keys(person.social_profiles).length > 0 ? (
-        <section className="space-y-2">
-          <h3 className="text-sm font-medium">Web links</h3>
-          <ul className="space-y-2 text-sm">
-            {Object.entries(person.social_profiles).map(([platform, url]) => (
-              <li key={platform}>
-                <span className="font-medium capitalize">{platform}: </span>
-                <a
-                  href={url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-primary underline-offset-4 hover:underline"
-                >
-                  {url}
-                </a>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
       {person.inferred_categories.length > 0 ? (
         <section className="space-y-2">
           <h3 className="text-sm font-medium">Categories</h3>
@@ -304,4 +434,4 @@ export function PersonDetailPanel({ person }: { person: PersonDetailResult }) {
       ) : null}
     </div>
   );
-}
+});

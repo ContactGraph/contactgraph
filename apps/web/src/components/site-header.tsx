@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 import type { UserProfileResult } from "@/lib/api-types";
@@ -33,7 +33,6 @@ const marketingLinks: readonly NavLink[] = [
 
 export function SiteHeader({ email }: { email: string | null }) {
   const pathname: string = usePathname();
-  const router = useRouter();
   const headerRef = useRef<HTMLElement>(null);
   const links: readonly NavLink[] = email ? appLinks : marketingLinks;
 
@@ -77,12 +76,6 @@ export function SiteHeader({ email }: { email: string | null }) {
       observer.disconnect();
     };
   }, []);
-
-  const handleSignOut = async (): Promise<void> => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/");
-    router.refresh();
-  };
 
   const navLinkClass = (href: string): string =>
     cn(
@@ -144,13 +137,6 @@ export function SiteHeader({ email }: { email: string | null }) {
                   {displayName}
                 </span>
               </Link>
-              <button
-                type="button"
-                onClick={() => void handleSignOut()}
-                className="text-muted-foreground no-underline hover:underline"
-              >
-                Sign out
-              </button>
             </>
           ) : (
             <Link href="/login" className="no-underline hover:underline">
