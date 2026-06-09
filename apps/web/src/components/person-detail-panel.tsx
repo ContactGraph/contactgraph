@@ -1,9 +1,47 @@
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
-import type { PersonDetailResult } from "@/lib/api-types";
-import { formatDate, formatSourceType } from "@/lib/formatters";
+"use client";
 
-function DetailField({
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Loader2 } from "lucide-react";
+import { useState } from "react";
+
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Textarea } from "@/components/ui/textarea";
+import type { PersonDetailResult, UpdatePersonRequest } from "@/lib/api-types";
+import { formatDate, formatSourceType } from "@/lib/formatters";
+import { proxyPost } from "@/lib/proxy-client";
+
+interface PersonFormState {
+  first_name: string;
+  last_name: string;
+  primary_email: string;
+  phone: string;
+  org_name: string;
+  current_role: string;
+  location: string;
+  linkedin_url: string;
+  bio_summary: string;
+}
+
+function personToForm(person: PersonDetailResult): PersonFormState {
+  return {
+    first_name: person.first_name,
+    last_name: person.last_name,
+    primary_email: person.primary_email ?? "",
+    phone: person.phone ?? "",
+    org_name: person.org_name ?? "",
+    current_role: person.current_role ?? "",
+    location: person.location ?? "",
+    linkedin_url: person.social_profiles.linkedin ?? "",
+    bio_summary: person.bio_summary ?? "",
+  };
+}
+
+function ReadOnlyField({
   label,
   value,
 }: {
@@ -24,6 +62,41 @@ function DetailField({
 }
 
 export function PersonDetailPanel({ person }: { person: PersonDetailResult }) {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState<PersonFormState>(() => personToForm(person));
+  const [saved, setSaved] = useState<boolean>(false);
+
+  const saveMutation = useMutation({
+    mutationFn: (payload: UpdatePersonRequest) =>
+      proxyPost<PersonDetailResult>("update-person", payload),
+    onSuccess: async (updated: PersonDetailResult) => {
+      setForm(personToForm(updated));
+      setSaved(true);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["person", person.person_id] }),
+        queryClient.invalidateQueries({ queryKey: ["people"] }),
+      ]);
+      window.setTimeout(() => setSaved(false), 2500);
+    },
+  });
+
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>): void => {
+    event.preventDefault();
+    const payload: UpdatePersonRequest = {
+      person_id: person.person_id,
+      first_name: form.first_name,
+      last_name: form.last_name,
+      primary_email: form.primary_email,
+      phone: form.phone,
+      org_name: form.org_name,
+      current_role: form.current_role,
+      location: form.location,
+      linkedin_url: form.linkedin_url,
+      bio_summary: form.bio_summary,
+    };
+    saveMutation.mutate(payload);
+  };
+
   return (
     <div className="flex-1 space-y-6 overflow-y-auto px-6 py-4">
       <div className="space-y-2">
@@ -35,31 +108,138 @@ export function PersonDetailPanel({ person }: { person: PersonDetailResult }) {
         <p className="text-sm text-muted-foreground">{person.message}</p>
       </div>
 
+      <form className="space-y-4" onSubmit={handleSubmit}>
+        <h3 className="text-sm font-medium">Edit contact</h3>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="person-first-name">First name</Label>
+            <Input
+              id="person-first-name"
+              value={form.first_name}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, first_name: event.target.value }))
+              }
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="person-last-name">Last name</Label>
+            <Input
+              id="person-last-name"
+              value={form.last_name}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, last_name: event.target.value }))
+              }
+            />
+          </div>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="person-email">Primary email</Label>
+          <Input
+            id="person-email"
+            type="email"
+            value={form.primary_email}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, primary_email: event.target.value }))
+            }
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="person-phone">Phone</Label>
+          <Input
+            id="person-phone"
+            value={form.phone}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, phone: event.target.value }))
+            }
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="person-org">Organization</Label>
+          <Input
+            id="person-org"
+            value={form.org_name}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, org_name: event.target.value }))
+            }
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="person-role">Role</Label>
+          <Input
+            id="person-role"
+            value={form.current_role}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, current_role: event.target.value }))
+            }
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="person-location">Location</Label>
+          <Input
+            id="person-location"
+            value={form.location}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, location: event.target.value }))
+            }
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="person-linkedin">LinkedIn URL</Label>
+          <Input
+            id="person-linkedin"
+            value={form.linkedin_url}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, linkedin_url: event.target.value }))
+            }
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="person-bio">Bio</Label>
+          <Textarea
+            id="person-bio"
+            rows={3}
+            value={form.bio_summary}
+            onChange={(event) =>
+              setForm((current) => ({ ...current, bio_summary: event.target.value }))
+            }
+          />
+        </div>
+        {saveMutation.error ? (
+          <Alert variant="destructive">
+            <AlertDescription>{saveMutation.error.message}</AlertDescription>
+          </Alert>
+        ) : null}
+        <div className="flex items-center gap-2">
+          <Button type="submit" size="sm" disabled={saveMutation.isPending}>
+            {saveMutation.isPending ? <Loader2 className="animate-spin" /> : null}
+            Save changes
+          </Button>
+          {saved ? (
+            <span className="text-xs text-muted-foreground">Saved</span>
+          ) : null}
+        </div>
+      </form>
+
+      <Separator />
+
       <dl className="grid gap-4">
-        <DetailField label="First name" value={person.first_name} />
-        <DetailField label="Last name" value={person.last_name} />
-        <DetailField label="Primary email" value={person.primary_email} />
-        <DetailField label="Phone" value={person.phone} />
-        <DetailField label="Organization" value={person.org_name} />
-        <DetailField label="Role" value={person.current_role} />
-        <DetailField label="Location" value={person.location} />
-        <DetailField
+        <ReadOnlyField
           label="First contact"
           value={formatDate(person.first_contact_at)}
         />
-        <DetailField
+        <ReadOnlyField
           label="Last contact"
           value={formatDate(person.last_contact_at)}
         />
-        <DetailField
+        <ReadOnlyField
           label="Last genuine interaction"
           value={formatDate(person.last_genuine_interaction_at)}
         />
-        <DetailField
+        <ReadOnlyField
           label="Tie strength"
           value={person.tie_strength_score.toFixed(2)}
         />
-        <DetailField
+        <ReadOnlyField
           label="Email count"
           value={person.email_count.toString()}
         />
@@ -121,16 +301,6 @@ export function PersonDetailPanel({ person }: { person: PersonDetailResult }) {
             ))}
           </div>
         </section>
-      ) : null}
-
-      {person.bio_summary ? (
-        <>
-          <Separator />
-          <section className="space-y-2">
-            <h3 className="text-sm font-medium">Bio</h3>
-            <p className="text-sm text-muted-foreground">{person.bio_summary}</p>
-          </section>
-        </>
       ) : null}
     </div>
   );

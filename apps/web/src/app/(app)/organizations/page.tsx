@@ -338,7 +338,10 @@ export default function OrganizationsPage() {
               <Skeleton className="h-24 w-full" />
             </div>
           ) : detailQuery.data ? (
-            <OrgDetailPanel org={detailQuery.data} />
+            <OrgDetailPanel
+              key={`${selectedOrgId}-${detailQuery.dataUpdatedAt}`}
+              org={detailQuery.data}
+            />
           ) : detailQuery.error ? (
             <div className="px-6 py-4">
               <Alert variant="destructive">

@@ -20,6 +20,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { resolveLinkedInConnectionsUpload } from "@/lib/linkedin-connections-upload";
 import type {
+  CancelOrgEnrichmentResult,
   ConnectSourceResult,
   EnrichOrgsResult,
   ListSourcesResult,
@@ -667,6 +668,13 @@ export default function SourcesPage() {
     [sourcesQuery],
   );
 
+  const handleCancelOrgEnrichment = useCallback((): void => {
+    void proxyPost<CancelOrgEnrichmentResult>("cancel-org-enrichment").then(() => {
+      void orgEnrichmentStatusQuery.refetch();
+      void queryClient.invalidateQueries({ queryKey: ["organizations"] });
+    });
+  }, [orgEnrichmentStatusQuery, queryClient]);
+
   const handlePhoneFileUpload = useCallback(
     (file: File): void => {
       void handleTextFileUpload("phone_contacts_upload", file);
@@ -861,11 +869,20 @@ export default function SourcesPage() {
               </p>
             ) : null}
             {step.id === "org_enrichment" &&
-            orgEnrichmentStatus?.state === "running" &&
-            orgEnrichmentStatus.orgs_total > 0 ? (
+            orgEnrichmentStatus?.state === "running" ? (
               <p className="text-xs text-muted-foreground">
-                {orgEnrichmentStatus.progress_message ??
-                  `Enriched ${orgEnrichmentStatus.orgs_enriched.toLocaleString()} of ${orgEnrichmentStatus.orgs_total.toLocaleString()}`}
+                {orgEnrichmentStatus.orgs_total > 0
+                  ? orgEnrichmentStatus.progress_message ??
+                    `Enriched ${orgEnrichmentStatus.orgs_enriched.toLocaleString()} of ${orgEnrichmentStatus.orgs_total.toLocaleString()}`
+                  : "Starting enrichment…"}
+                {" · "}
+                <button
+                  type="button"
+                  className="text-destructive hover:underline"
+                  onClick={handleCancelOrgEnrichment}
+                >
+                  Cancel
+                </button>
               </p>
             ) : null}
             {step.id === "org_enrichment" &&

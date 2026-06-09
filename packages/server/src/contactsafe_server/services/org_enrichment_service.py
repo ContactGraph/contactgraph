@@ -15,7 +15,11 @@ from urllib.parse import urlparse
 from sqlalchemy import exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from contactsafe_core.contact_schemas import EnrichOrgsResult, OrgEnrichmentStatusResult
+from contactsafe_core.contact_schemas import (
+    CancelOrgEnrichmentResult,
+    EnrichOrgsResult,
+    OrgEnrichmentStatusResult,
+)
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import (
     Org,
@@ -160,6 +164,24 @@ class OrgEnrichmentService:
             message=self._status_message(idle_state, orgs_enriched, orgs_total),
         )
 
+    async def cancel_enrichment(self, user_id: uuid.UUID) -> CancelOrgEnrichmentResult:
+        run: OrgEnrichmentRun | None = await self._latest_run(user_id)
+        if run is None or run.state != "running":
+            return CancelOrgEnrichmentResult(
+                cancelled=False,
+                message="No enrichment in progress.",
+            )
+
+        run.state = "failed"
+        run.error = "Enrichment cancelled by user."
+        run.completed_at = datetime.now(tz=UTC)
+        run.progress_message = None
+        await self._db.commit()
+        return CancelOrgEnrichmentResult(
+            cancelled=True,
+            message="Enrichment cancelled.",
+        )
+
     async def enrich_orgs(self, user_id: uuid.UUID, run_id: uuid.UUID) -> None:
         run: OrgEnrichmentRun | None = await self._db.get(OrgEnrichmentRun, run_id)
         if run is None:
@@ -173,8 +195,15 @@ class OrgEnrichmentService:
         await self._db.commit()
 
         for index, org in enumerate(orgs, start=1):
+            run = await self._db.get(OrgEnrichmentRun, run_id)
+            if run is None or run.state != "running":
+                return
+
             try:
                 await self._enrich_one_org(org)
+                run = await self._db.get(OrgEnrichmentRun, run_id)
+                if run is None or run.state != "running":
+                    return
                 run.orgs_enriched = index
                 run.progress_message = self._progress_message(
                     run.orgs_enriched,
@@ -191,10 +220,13 @@ class OrgEnrichmentService:
                 logger.exception("Failed to enrich org %s (%s)", org.id, org.canonical_name)
                 await self._db.rollback()
                 run = await self._db.get(OrgEnrichmentRun, run_id)
-                if run is None:
+                if run is None or run.state != "running":
                     return
             await asyncio.sleep(0.5)
 
+        run = await self._db.get(OrgEnrichmentRun, run_id)
+        if run is None or run.state != "running":
+            return
         run.state = "complete"
         run.completed_at = datetime.now(tz=UTC)
         run.progress_message = None

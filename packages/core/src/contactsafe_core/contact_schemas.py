@@ -215,6 +215,11 @@ class OrgEnrichmentStatusResult(BaseModel):
     message: str
 
 
+class CancelOrgEnrichmentResult(BaseModel):
+    cancelled: bool = False
+    message: str = ""
+
+
 class GetPersonRequest(BaseModel):
     person_id: str
 
@@ -230,3 +235,26 @@ class EnrichPersonResult(BaseModel):
 
 class GetOrgRequest(BaseModel):
     org_id: str
+
+
+class UpdatePersonRequest(BaseModel):
+    person_id: str
+    first_name: str | None = None
+    last_name: str | None = None
+    primary_email: str | None = None
+    phone: str | None = None
+    org_name: str | None = None
+    current_role: str | None = None
+    location: str | None = None
+    bio_summary: str | None = None
+    linkedin_url: str | None = None
+
+
+class UpdateOrgRequest(BaseModel):
+    org_id: str
+    name: str | None = None
+    primary_domain: str | None = None
+    description: str | None = None
+    linkedin_url: str | None = None
+    careers_url: str | None = None
+    categories: list[str] | None = None

@@ -470,6 +470,29 @@ export interface OrgDetailResult {
   message: string;
 }
 
+export interface UpdatePersonRequest {
+  person_id: string;
+  first_name?: string;
+  last_name?: string;
+  primary_email?: string;
+  phone?: string;
+  org_name?: string;
+  current_role?: string;
+  location?: string;
+  bio_summary?: string;
+  linkedin_url?: string;
+}
+
+export interface UpdateOrgRequest {
+  org_id: string;
+  name?: string;
+  primary_domain?: string;
+  description?: string;
+  linkedin_url?: string;
+  careers_url?: string;
+  categories?: string[];
+}
+
 export type OrgEnrichmentState = "pending" | "running" | "complete" | "failed";
 
 export interface EnrichOrgsResult {
@@ -484,6 +507,11 @@ export interface OrgEnrichmentStatusResult {
   orgs_enriched: number;
   progress_message: string | null;
   error: string | null;
+  message: string;
+}
+
+export interface CancelOrgEnrichmentResult {
+  cancelled: boolean;
   message: string;
 }
 

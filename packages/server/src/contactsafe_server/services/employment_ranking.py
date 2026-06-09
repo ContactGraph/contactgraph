@@ -13,6 +13,7 @@ DEFAULT_EMPLOYMENT_RECENCY_DAYS: Final[int] = 365
 
 # Base tier by contributor_source_kind (lower = higher priority).
 _SOURCE_BASE_TIER: Final[dict[str, int]] = {
+    "user_manual": 0,
     "scrapingdog_linkedin": 1,
     "gmail_signature": 1,
     "linkedin_profile_upload": 2,

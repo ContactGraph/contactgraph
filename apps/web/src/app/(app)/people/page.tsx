@@ -344,7 +344,10 @@ export default function PeoplePage() {
               <Skeleton className="h-24 w-full" />
             </div>
           ) : detailQuery.data ? (
-            <PersonDetailPanel person={detailQuery.data} />
+            <PersonDetailPanel
+              key={`${selectedPersonId}-${detailQuery.dataUpdatedAt}`}
+              person={detailQuery.data}
+            />
           ) : detailQuery.error ? (
             <div className="px-6 py-4">
               <Alert variant="destructive">
