@@ -435,6 +435,9 @@ export interface OrgListItem {
   org_id: string;
   name: string;
   primary_domain: string | null;
+  description: string | null;
+  careers_url: string | null;
+  linkedin_url: string | null;
   categories: string[];
   contact_count: number;
 }
@@ -456,11 +459,59 @@ export interface OrgDetailResult {
   org_id: string;
   name: string;
   primary_domain: string | null;
+  description: string | null;
+  careers_url: string | null;
+  linkedin_url: string | null;
   categories: string[];
   attributes: Record<string, unknown>;
   aliases: string[];
   people: OrgPersonSummary[];
   contact_count: number;
+  message: string;
+}
+
+export interface UpdatePersonRequest {
+  person_id: string;
+  first_name?: string;
+  last_name?: string;
+  primary_email?: string;
+  phone?: string;
+  org_name?: string;
+  current_role?: string;
+  location?: string;
+  bio_summary?: string;
+  linkedin_url?: string;
+}
+
+export interface UpdateOrgRequest {
+  org_id: string;
+  name?: string;
+  primary_domain?: string;
+  description?: string;
+  linkedin_url?: string;
+  careers_url?: string;
+  categories?: string[];
+}
+
+export type OrgEnrichmentState = "pending" | "running" | "complete" | "failed";
+
+export interface EnrichOrgsResult {
+  scheduled: boolean;
+  state: OrgEnrichmentState;
+  message: string;
+}
+
+export interface OrgEnrichmentStatusResult {
+  state: OrgEnrichmentState;
+  orgs_total: number;
+  orgs_enriched: number;
+  progress_message: string | null;
+  error: string | null;
+  message: string;
+}
+
+export interface CancelOrgEnrichmentResult {
+  cancelled: boolean;
   message: string;
 }
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -164,6 +165,9 @@ class OrgListItem(BaseModel):
     org_id: UUID
     name: str
     primary_domain: str | None = None
+    description: str | None = None
+    careers_url: str | None = None
+    linkedin_url: str | None = None
     categories: list[str] = Field(default_factory=list)
     contact_count: int = 0
 
@@ -185,12 +189,35 @@ class OrgDetailResult(BaseModel):
     org_id: UUID
     name: str
     primary_domain: str | None = None
+    description: str | None = None
+    careers_url: str | None = None
+    linkedin_url: str | None = None
     categories: list[str] = Field(default_factory=list)
     attributes: dict[str, object] = Field(default_factory=dict)
     aliases: list[str] = Field(default_factory=list)
     people: list[OrgPersonSummary] = Field(default_factory=list)
     contact_count: int = 0
     message: str
+
+
+class EnrichOrgsResult(BaseModel):
+    scheduled: bool
+    state: Literal["pending", "running", "complete", "failed"]
+    message: str
+
+
+class OrgEnrichmentStatusResult(BaseModel):
+    state: Literal["pending", "running", "complete", "failed"]
+    orgs_total: int = 0
+    orgs_enriched: int = 0
+    progress_message: str | None = None
+    error: str | None = None
+    message: str
+
+
+class CancelOrgEnrichmentResult(BaseModel):
+    cancelled: bool = False
+    message: str = ""
 
 
 class GetPersonRequest(BaseModel):
@@ -208,3 +235,26 @@ class EnrichPersonResult(BaseModel):
 
 class GetOrgRequest(BaseModel):
     org_id: str
+
+
+class UpdatePersonRequest(BaseModel):
+    person_id: str
+    first_name: str | None = None
+    last_name: str | None = None
+    primary_email: str | None = None
+    phone: str | None = None
+    org_name: str | None = None
+    current_role: str | None = None
+    location: str | None = None
+    bio_summary: str | None = None
+    linkedin_url: str | None = None
+
+
+class UpdateOrgRequest(BaseModel):
+    org_id: str
+    name: str | None = None
+    primary_domain: str | None = None
+    description: str | None = None
+    linkedin_url: str | None = None
+    careers_url: str | None = None
+    categories: list[str] | None = None

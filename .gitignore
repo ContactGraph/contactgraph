@@ -20,3 +20,4 @@ node_modules/
 apps/web/.next/
 apps/web/.env.local
 .coverage
+.cursor/

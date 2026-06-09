@@ -49,12 +49,14 @@ def test_exa_parse_results_with_provider() -> None:
                 "url": "https://linkedin.com/in/janedoe",
                 "text": "Jane Doe is a General Partner at Acme Ventures.",
                 "highlights": ["venture capital investor"],
+                "summary": "Jane Doe is a venture capital investor at Acme Ventures.",
             }
         ]
     }
     hits = _parse_results(data)
     assert len(hits) == 1
     assert hits[0].provider == "exa"
+    assert hits[0].summary == "Jane Doe is a venture capital investor at Acme Ventures."
 
 
 def test_tavily_parse_results() -> None:

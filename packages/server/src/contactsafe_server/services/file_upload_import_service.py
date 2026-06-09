@@ -2,13 +2,13 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.enums import SourceConnectionStatus, SourceType, SyncState
 from contactsafe_server.config import Settings
-from contactsafe_server.db.models import Person, Source, User, UserPersonObservation
+from contactsafe_server.db.models import EmploymentClaim, Person, Source, User, UserPersonObservation
 from contactsafe_server.services.claim_writer import (
     record_employment,
     record_person_attribute,
@@ -379,6 +379,14 @@ class FileUploadImportService:
             user.display_name = profile.name
         if profile.location and not user.location:
             user.location = profile.location
+
+        await self._db.execute(
+            delete(EmploymentClaim).where(
+                EmploymentClaim.person_id == person.id,
+                EmploymentClaim.contributor_source_kind == "linkedin_profile_upload",
+                EmploymentClaim.contributor_user_id == user_id,
+            )
+        )
 
         for exp in profile.experiences:
             org = await resolver.resolve_org(domain=None, name=exp.company)

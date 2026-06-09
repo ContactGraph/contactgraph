@@ -13,7 +13,9 @@ from uuid import UUID
 from datetime import UTC, datetime
 
 from contactsafe_core.contact_schemas import (
+    CancelOrgEnrichmentResult,
     DedupPersonsResult,
+    EnrichOrgsResult,
     EnrichPersonResult,
     EnrichStrongTiesResult,
     ListOrgsResult,
@@ -21,10 +23,13 @@ from contactsafe_core.contact_schemas import (
     ListStrongTiesResult,
     NetworkStatusResult,
     OrgDetailResult,
+    OrgEnrichmentStatusResult,
     PersonDetailResult,
     ScrapingDogEnrichmentStatusResult,
     StrongTieCompaniesResult,
     StrongTieCountResult,
+    UpdateOrgRequest,
+    UpdatePersonRequest,
 )
 from datetime import date
 
@@ -1025,6 +1030,23 @@ async def get_person(
         return detail
 
 
+async def update_person(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: UpdatePersonRequest,
+) -> PersonDetailResult:
+    if user_id is None:
+        raise ValueError("Authentication required")
+    async with ctx.session_factory() as db:
+        service: ContactsService = ContactsService(db)
+        detail: PersonDetailResult | None = await service.update_person(user_id, body)
+        if detail is None:
+            raise ValueError(f"Person not found: {body.person_id}")
+        await db.commit()
+        return detail
+
+
 async def enrich_person(
     ctx: AppContext,
     user_id: UUID | None,
@@ -1097,6 +1119,76 @@ async def get_org(
         if detail is None:
             raise ValueError(f"Organization not found: {org_id}")
         return detail
+
+
+async def update_org(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: UpdateOrgRequest,
+) -> OrgDetailResult:
+    if user_id is None:
+        raise ValueError("Authentication required")
+    async with ctx.session_factory() as db:
+        service: ContactsService = ContactsService(db)
+        detail: OrgDetailResult | None = await service.update_org(user_id, body)
+        if detail is None:
+            raise ValueError(f"Organization not found: {body.org_id}")
+        await db.commit()
+        return detail
+
+
+async def enrich_orgs(ctx: AppContext, user_id: UUID | None) -> EnrichOrgsResult:
+    if user_id is None:
+        return EnrichOrgsResult(
+            scheduled=False,
+            state="failed",
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.org_enrichment_service import OrgEnrichmentService
+
+        service = OrgEnrichmentService(db, ctx.settings)
+        result = await service.start_enrichment(user_id)
+        await db.commit()
+        return result
+
+
+async def get_org_enrichment_status(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> OrgEnrichmentStatusResult:
+    if user_id is None:
+        return OrgEnrichmentStatusResult(
+            state="failed",
+            orgs_total=0,
+            orgs_enriched=0,
+            error="Authentication required.",
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.org_enrichment_service import OrgEnrichmentService
+
+        service = OrgEnrichmentService(db, ctx.settings)
+        return await service.get_status(user_id)
+
+
+async def cancel_org_enrichment(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> CancelOrgEnrichmentResult:
+    if user_id is None:
+        return CancelOrgEnrichmentResult(
+            cancelled=False,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.org_enrichment_service import OrgEnrichmentService
+
+        service = OrgEnrichmentService(db, ctx.settings)
+        result = await service.cancel_enrichment(user_id)
+        await db.commit()
+        return result
 
 
 async def dedup_persons(
