@@ -812,6 +812,12 @@ export default function SetupPage() {
   }, [orgEnrichmentStatus?.state, queryClient]);
 
   useEffect(() => {
+    if (jobMonitorConfig?.list_id && selectedTargetListId === null) {
+      setSelectedTargetListId(jobMonitorConfig.list_id);
+    }
+  }, [jobMonitorConfig?.list_id, selectedTargetListId]);
+
+  useEffect(() => {
     if (jobDiscoveryStatus?.state !== "complete") {
       return;
     }
