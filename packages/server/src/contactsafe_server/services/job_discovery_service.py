@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -260,6 +261,10 @@ class JobDiscoveryService:
 
             apply_ats_detection_to_org(org)
             found, new_count, source, error = await self._discover_jobs_for_org(org)
+
+            if source == "theirstack":
+                await asyncio.sleep(1.0)
+
             scrape_run = JobScrapeRun(
                 org_id=org.id,
                 source=source,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime
 from typing import Any, cast
@@ -107,15 +108,31 @@ class TheirStackClient:
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
-        try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
-                response = await client.post(url, json=payload, headers=headers)
-                response.raise_for_status()
-                result: dict[str, Any] = response.json()
-                return result
-        except Exception:
-            logger.warning("TheirStack job search failed for %s", path, exc_info=True)
-            return {}
+        max_retries: int = 3
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    response = await client.post(url, json=payload, headers=headers)
+                    if response.status_code == 429 and attempt < max_retries - 1:
+                        retry_after: float = float(
+                            response.headers.get("Retry-After", "5"),
+                        )
+                        logger.info("TheirStack 429, retrying after %.1fs", retry_after)
+                        await asyncio.sleep(retry_after)
+                        continue
+                    response.raise_for_status()
+                    result: dict[str, Any] = response.json()
+                    return result
+            except httpx.HTTPStatusError:
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2.0 * (attempt + 1))
+                    continue
+                logger.warning("TheirStack request failed for %s", path, exc_info=True)
+                return {}
+            except Exception:
+                logger.warning("TheirStack request failed for %s", path, exc_info=True)
+                return {}
+        return {}
 
 
 def _snippet(text: str) -> str:
