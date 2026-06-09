@@ -6,12 +6,14 @@ import {
   CheckCircle2,
   ChevronDown,
   Circle,
+  ListPlus,
   Loader2,
   Plus,
   RefreshCw,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 
 import { LinkedInConnectionsUploadDialog } from "@/components/setup/linkedin-connections-upload-dialog";
 import { LinkedInProfileUploadDialog } from "@/components/setup/linkedin-profile-upload-dialog";
@@ -26,15 +28,26 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { resolveLinkedInConnectionsUpload } from "@/lib/linkedin-connections-upload";
 import type {
   CancelOrgEnrichmentResult,
   ConnectSourceResult,
+  CreateOrgListResult,
   EnrichOrgsResult,
+  ListOrgListsResult,
   ListSourcesResult,
   NetworkStatusResult,
   OrgEnrichmentStatusResult,
+  OrgListSummary,
   PollConnectResult,
   SourceSummary,
   SourceType,
@@ -184,6 +197,7 @@ function stepComplete(
   stepId: SetupStepId,
   sources: ReadonlyArray<SourceSummary>,
   orgEnrichmentStatus: OrgEnrichmentStatusResult | undefined,
+  orgLists: ReadonlyArray<OrgListSummary>,
 ): boolean {
   switch (stepId) {
     case "gmail": {
@@ -209,6 +223,7 @@ function stepComplete(
         orgEnrichmentStatus.orgs_enriched >= orgEnrichmentStatus.orgs_total
       );
     case "target_companies":
+      return orgLists.some((list) => list.org_count > 0);
     case "job_scrapers":
       return false;
     default:
@@ -401,6 +416,9 @@ export default function SetupPage() {
     null,
   );
   const [orgEnrichmentError, setOrgEnrichmentError] = useState<string | null>(null);
+  const [selectedTargetListId, setSelectedTargetListId] = useState<string | null>(
+    null,
+  );
 
   const clearPollTimer = useCallback((): void => {
     if (pollTimerRef.current) {
@@ -443,6 +461,24 @@ export default function SetupPage() {
       proxyPost<OrgEnrichmentStatusResult>("get-org-enrichment-status"),
     refetchInterval: (query) =>
       query.state.data?.state === "running" ? 2000 : false,
+  });
+
+  const orgListsQuery = useQuery({
+    queryKey: ["org-lists"],
+    queryFn: () => proxyPost<ListOrgListsResult>("list-org-lists"),
+  });
+
+  const createOrgListMutation = useMutation({
+    mutationFn: (name: string) =>
+      proxyPost<CreateOrgListResult>("create-org-list", { name }),
+    onSuccess: async (result: CreateOrgListResult) => {
+      toast.success(result.message);
+      setSelectedTargetListId(result.list_id);
+      await queryClient.invalidateQueries({ queryKey: ["org-lists"] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
   });
 
   const enrichOrgsMutation = useMutation({
@@ -705,6 +741,23 @@ export default function SetupPage() {
   const networkStatus: NetworkStatusResult | undefined = networkStatusQuery.data;
   const orgEnrichmentStatus: OrgEnrichmentStatusResult | undefined =
     orgEnrichmentStatusQuery.data;
+  const orgLists: OrgListSummary[] = orgListsQuery.data?.lists ?? [];
+
+  const selectedTargetList: OrgListSummary | undefined = orgLists.find(
+    (list) => list.list_id === selectedTargetListId,
+  );
+
+  const handleCreateTargetList = useCallback((): void => {
+    const name: string | null = window.prompt("New list name");
+    if (name === null) {
+      return;
+    }
+    const trimmed: string = name.trim();
+    if (trimmed.length === 0) {
+      return;
+    }
+    createOrgListMutation.mutate(trimmed);
+  }, [createOrgListMutation]);
 
   useEffect(() => {
     if (orgEnrichmentStatus?.state !== "complete") {
@@ -714,7 +767,12 @@ export default function SetupPage() {
   }, [orgEnrichmentStatus?.state, queryClient]);
 
   const renderStepRow = (step: SetupStep) => {
-    const complete: boolean = stepComplete(step.id, sources, orgEnrichmentStatus);
+    const complete: boolean = stepComplete(
+      step.id,
+      sources,
+      orgEnrichmentStatus,
+      orgLists,
+    );
     const inProgress: boolean =
       step.id === "org_enrichment"
         ? orgEnrichmentStatus?.state === "running" || enrichOrgsMutation.isPending
@@ -897,12 +955,61 @@ export default function SetupPage() {
         </div>
         <div className="flex flex-wrap gap-2 sm:justify-end sm:pt-0.5">
           {step.id === "target_companies" ? (
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/target-companies">
-                View targets
-                <ArrowRight className="size-4" />
-              </Link>
-            </Button>
+            <>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={orgListsQuery.isLoading}
+                  >
+                    {selectedTargetList !== undefined
+                      ? `${selectedTargetList.name} (${selectedTargetList.org_count})`
+                      : "Choose list…"}
+                    <ChevronDown className="size-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  {orgLists.length === 0 ? (
+                    <DropdownMenuItem disabled>No lists yet</DropdownMenuItem>
+                  ) : (
+                    orgLists.map((list) => (
+                      <DropdownMenuCheckboxItem
+                        key={list.list_id}
+                        checked={selectedTargetListId === list.list_id}
+                        onCheckedChange={() =>
+                          setSelectedTargetListId(
+                            selectedTargetListId === list.list_id
+                              ? null
+                              : list.list_id,
+                          )
+                        }
+                      >
+                        {list.name} ({list.org_count})
+                      </DropdownMenuCheckboxItem>
+                    ))
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={handleCreateTargetList}
+                    disabled={createOrgListMutation.isPending}
+                  >
+                    <ListPlus className="mr-2 size-4" />
+                    Create new list…
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              {selectedTargetList !== undefined ? (
+                <Button variant="outline" size="sm" asChild>
+                  <Link
+                    href={`/organizations?list=${encodeURIComponent(selectedTargetList.list_id)}`}
+                  >
+                    View in Organizations
+                    <ArrowRight className="size-4" />
+                  </Link>
+                </Button>
+              ) : null}
+            </>
           ) : step.comingSoon ? (
             <Button variant="outline" size="sm" disabled>
               Coming soon

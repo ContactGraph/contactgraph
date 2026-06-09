@@ -24,7 +24,7 @@ import {
   Trash2,
   Users,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 
 import {
@@ -142,6 +142,7 @@ function SelectionCheckbox({
 
 export default function OrganizationsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const [search, setSearch] = useState<string>("");
   const [sorting, setSorting] = useState<SortingState>([
@@ -162,6 +163,7 @@ export default function OrganizationsPage() {
   const [activeListId, setActiveListId] = useState<string | null>(null);
   const [newListName, setNewListName] = useState<string>("");
   const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
+  const appliedListFromUrl = useRef<boolean>(false);
 
   useEffect(() => {
     setIsDetailDirty(false);
@@ -212,6 +214,27 @@ export default function OrganizationsPage() {
     queryKey: ["org-lists"],
     queryFn: () => proxyPost<ListOrgListsResult>("list-org-lists"),
   });
+
+  useEffect(() => {
+    if (appliedListFromUrl.current) {
+      return;
+    }
+    const listParam: string | null = searchParams.get("list");
+    if (listParam === null) {
+      appliedListFromUrl.current = true;
+      return;
+    }
+    if (orgListsQuery.isLoading) {
+      return;
+    }
+    const listExists: boolean = (orgListsQuery.data?.lists ?? []).some(
+      (list) => list.list_id === listParam,
+    );
+    if (listExists) {
+      setActiveListId(listParam);
+    }
+    appliedListFromUrl.current = true;
+  }, [searchParams, orgListsQuery.isLoading, orgListsQuery.data?.lists]);
 
   const detailQuery = useQuery({
     queryKey: ["organization", selectedOrgId],
