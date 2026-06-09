@@ -227,6 +227,23 @@ class Settings(BaseSettings):
         description="Minimum delay between ScrapingDog requests for rate limiting",
     )
 
+    theirstack_api_key: str | None = Field(
+        default=None,
+        description="TheirStack API key for aggregated job discovery",
+    )
+    theirstack_webhook_secret: str | None = Field(
+        default=None,
+        description="HMAC signing secret for TheirStack webhook verification",
+    )
+    theirstack_base_url: str = Field(default="https://api.theirstack.com")
+    theirstack_request_timeout_seconds: float = Field(default=30.0)
+    theirstack_job_max_age_days: int = Field(
+        default=30,
+        description="Max age of job postings returned by TheirStack searches",
+    )
+
+    job_discovery_request_timeout_seconds: float = Field(default=30.0)
+
     @field_validator("database_url", mode="before")
     @classmethod
     def ensure_asyncpg_driver(cls, value: str) -> str:

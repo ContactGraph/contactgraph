@@ -317,3 +317,63 @@ class ModifyOrgListMembershipResult(BaseModel):
     list_id: UUID
     affected_count: int
     message: str
+
+
+class JobMonitorConfigResult(BaseModel):
+    enabled: bool = False
+    list_id: UUID | None = None
+    list_name: str | None = None
+    message: str
+
+
+class SetJobMonitorConfigRequest(BaseModel):
+    list_id: UUID | None = None
+    enabled: bool | None = None
+
+
+class StartJobDiscoveryResult(BaseModel):
+    scheduled: bool
+    state: Literal["pending", "running", "complete", "failed"]
+    message: str
+
+
+class JobDiscoveryStatusResult(BaseModel):
+    state: Literal["pending", "running", "complete", "failed"]
+    orgs_total: int = 0
+    orgs_processed: int = 0
+    jobs_found: int = 0
+    new_jobs: int = 0
+    progress_message: str | None = None
+    error: str | None = None
+    message: str
+
+
+class OrgJobItem(BaseModel):
+    job_id: UUID
+    external_job_id: str
+    source: str
+    title: str
+    location: str | None = None
+    department: str | None = None
+    url: str
+    description_snippet: str | None = None
+    salary_min: int | None = None
+    salary_max: int | None = None
+    remote_status: str | None = None
+    posted_at: datetime | None = None
+    first_seen_at: datetime
+    last_seen_at: datetime
+    is_active: bool = True
+
+
+class OrgJobsByCompany(BaseModel):
+    org_id: UUID
+    org_name: str
+    primary_domain: str | None = None
+    jobs: list[OrgJobItem] = Field(default_factory=list)
+
+
+class ListOrgJobsResult(BaseModel):
+    companies: list[OrgJobsByCompany] = Field(default_factory=list)
+    total_jobs: int = 0
+    message: str

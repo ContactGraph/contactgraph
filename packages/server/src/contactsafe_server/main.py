@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -37,8 +38,21 @@ def create_app() -> FastAPI:
         ctx: AppContext = build_app_context()
         _app.state.app_context = ctx
         await init_db(settings)
+        from contactsafe_server.services.job_discovery_scheduler import (
+            schedule_initial_job_discovery_delay,
+        )
+
+        periodic_task = asyncio.create_task(
+            schedule_initial_job_discovery_delay(),
+            name="job-discovery-startup",
+        )
         async with mcp_server.session_manager.run():
             yield
+        periodic_task.cancel()
+        try:
+            await periodic_task
+        except asyncio.CancelledError:
+            pass
         await shutdown_db()
 
     app: FastAPI = FastAPI(

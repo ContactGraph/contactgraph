@@ -1,0 +1,477 @@
+"""Discover and persist open jobs for target organizations."""
+
+from __future__ import annotations
+
+import logging
+import uuid
+from datetime import UTC, datetime
+from typing import Literal
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from contactsafe_core.contact_schemas import (
+    JobDiscoveryStatusResult,
+    JobMonitorConfigResult,
+    ListOrgJobsResult,
+    OrgJobItem,
+    OrgJobsByCompany,
+    SetJobMonitorConfigRequest,
+    StartJobDiscoveryResult,
+)
+from contactsafe_server.config import Settings
+from contactsafe_server.db.models import (
+    JobDiscoveryRun,
+    JobScrapeRun,
+    Org,
+    OrgJob,
+    OrgList,
+    OrgListMembership,
+    User,
+)
+from contactsafe_server.services.ats_detection import apply_ats_detection_to_org
+from contactsafe_server.services.ats_job_clients import AtsJobClient
+from contactsafe_server.services.job_discovery_scheduler import schedule_job_discovery
+from contactsafe_server.services.job_discovery_types import DiscoveredJob
+from contactsafe_server.services.theirstack_client import TheirStackClient
+
+logger: logging.Logger = logging.getLogger(__name__)
+
+JobDiscoveryState = Literal["pending", "running", "complete", "failed"]
+
+_LAYER1_PROVIDERS: frozenset[str] = frozenset({"greenhouse", "lever", "ashby"})
+
+
+class JobDiscoveryService:
+    def __init__(self, db: AsyncSession, settings: Settings) -> None:
+        self._db: AsyncSession = db
+        self._settings: Settings = settings
+        self._ats_client: AtsJobClient = AtsJobClient(
+            timeout_seconds=settings.job_discovery_request_timeout_seconds,
+        )
+        self._theirstack: TheirStackClient = TheirStackClient(settings)
+
+    async def get_monitor_config(self, user_id: uuid.UUID) -> JobMonitorConfigResult:
+        user: User | None = await self._db.get(User, user_id)
+        if user is None:
+            return JobMonitorConfigResult(
+                enabled=False,
+                list_id=None,
+                list_name=None,
+                message="User not found.",
+            )
+        list_name: str | None = None
+        if user.job_monitor_list_id is not None:
+            org_list: OrgList | None = await self._db.get(OrgList, user.job_monitor_list_id)
+            if org_list is not None:
+                list_name = org_list.name
+        return JobMonitorConfigResult(
+            enabled=user.job_monitor_enabled,
+            list_id=user.job_monitor_list_id,
+            list_name=list_name,
+            message="Job monitor configuration loaded.",
+        )
+
+    async def set_monitor_config(
+        self,
+        user_id: uuid.UUID,
+        body: SetJobMonitorConfigRequest,
+    ) -> JobMonitorConfigResult:
+        user: User | None = await self._db.get(User, user_id)
+        if user is None:
+            raise ValueError("User not found.")
+
+        if body.list_id is not None:
+            org_list: OrgList | None = await self._db.get(OrgList, body.list_id)
+            if org_list is None or org_list.user_id != user_id:
+                raise ValueError("Organization list not found.")
+            user.job_monitor_list_id = body.list_id
+        elif body.enabled is False:
+            user.job_monitor_list_id = None
+
+        if body.enabled is not None:
+            user.job_monitor_enabled = body.enabled
+
+        if user.job_monitor_enabled and user.job_monitor_list_id is None:
+            raise ValueError("Select an organization list before enabling monitoring.")
+
+        await self._db.flush()
+        return await self.get_monitor_config(user_id)
+
+    async def start_discovery(self, user_id: uuid.UUID) -> StartJobDiscoveryResult:
+        if await self._has_running_run(user_id):
+            return StartJobDiscoveryResult(
+                scheduled=False,
+                state="running",
+                message="Job discovery is already running.",
+            )
+
+        org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
+        if not org_ids:
+            return StartJobDiscoveryResult(
+                scheduled=False,
+                state="complete",
+                message="No organizations to scan. Select a target list with companies.",
+            )
+
+        run = JobDiscoveryRun(
+            user_id=user_id,
+            state="running",
+            started_at=datetime.now(tz=UTC),
+            orgs_total=len(org_ids),
+            orgs_processed=0,
+            progress_message="Starting job discovery…",
+        )
+        self._db.add(run)
+        await self._db.flush()
+
+        if not schedule_job_discovery(user_id, run.id):
+            run.state = "failed"
+            run.error = "Could not schedule job discovery task"
+            run.completed_at = datetime.now(tz=UTC)
+            await self._db.commit()
+            return StartJobDiscoveryResult(
+                scheduled=False,
+                state="failed",
+                message="Job discovery is already running.",
+            )
+
+        await self._db.commit()
+        return StartJobDiscoveryResult(
+            scheduled=True,
+            state="running",
+            message="Job discovery started in the background.",
+        )
+
+    async def get_status(self, user_id: uuid.UUID) -> JobDiscoveryStatusResult:
+        run: JobDiscoveryRun | None = await self._latest_run(user_id)
+        if run is None:
+            return JobDiscoveryStatusResult(
+                state="pending",
+                orgs_total=0,
+                orgs_processed=0,
+                jobs_found=0,
+                new_jobs=0,
+                progress_message=None,
+                error=None,
+                message="No job discovery runs yet.",
+            )
+        state: JobDiscoveryState = run.state  # type: ignore[assignment]
+        return JobDiscoveryStatusResult(
+            state=state,
+            orgs_total=run.orgs_total,
+            orgs_processed=run.orgs_processed,
+            jobs_found=run.jobs_found,
+            new_jobs=run.new_jobs,
+            progress_message=run.progress_message,
+            error=run.error,
+            message=self._status_message(state, run),
+        )
+
+    async def list_jobs_for_user(
+        self,
+        user_id: uuid.UUID,
+        *,
+        active_only: bool = True,
+    ) -> ListOrgJobsResult:
+        org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
+        if not org_ids:
+            return ListOrgJobsResult(companies=[], total_jobs=0, message="No monitored organizations.")
+
+        orgs_result = await self._db.execute(
+            select(Org).where(Org.id.in_(org_ids)).order_by(Org.canonical_name.asc()),
+        )
+        orgs: list[Org] = list(orgs_result.scalars().all())
+
+        jobs_query = select(OrgJob).where(OrgJob.org_id.in_(org_ids))
+        if active_only:
+            jobs_query = jobs_query.where(OrgJob.is_active.is_(True))
+        jobs_query = jobs_query.order_by(OrgJob.posted_at.desc().nullslast(), OrgJob.title.asc())
+        jobs_result = await self._db.execute(jobs_query)
+        jobs: list[OrgJob] = list(jobs_result.scalars().all())
+
+        jobs_by_org: dict[uuid.UUID, list[OrgJob]] = {}
+        for job in jobs:
+            jobs_by_org.setdefault(job.org_id, []).append(job)
+
+        companies: list[OrgJobsByCompany] = []
+        total_jobs: int = 0
+        for org in orgs:
+            org_jobs: list[OrgJob] = jobs_by_org.get(org.id, [])
+            if active_only and not org_jobs:
+                continue
+            total_jobs += len(org_jobs)
+            companies.append(
+                OrgJobsByCompany(
+                    org_id=org.id,
+                    org_name=org.canonical_name,
+                    primary_domain=org.primary_domain,
+                    jobs=[
+                        OrgJobItem(
+                            job_id=job.id,
+                            external_job_id=job.external_job_id,
+                            source=job.source,
+                            title=job.title,
+                            location=job.location,
+                            department=job.department,
+                            url=job.url,
+                            description_snippet=job.description_snippet,
+                            salary_min=job.salary_min,
+                            salary_max=job.salary_max,
+                            remote_status=job.remote_status,
+                            posted_at=job.posted_at,
+                            first_seen_at=job.first_seen_at,
+                            last_seen_at=job.last_seen_at,
+                            is_active=job.is_active,
+                        )
+                        for job in org_jobs
+                    ],
+                ),
+            )
+
+        message: str = (
+            f"Found {total_jobs} open job(s) across {len(companies)} company(ies)."
+            if total_jobs > 0
+            else "No open jobs found yet. Run job discovery from Setup."
+        )
+        return ListOrgJobsResult(companies=companies, total_jobs=total_jobs, message=message)
+
+    async def run_discovery(self, user_id: uuid.UUID, run_id: uuid.UUID) -> None:
+        run: JobDiscoveryRun | None = await self._db.get(JobDiscoveryRun, run_id)
+        if run is None or run.user_id != user_id:
+            return
+
+        org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
+        run.orgs_total = len(org_ids)
+        run.state = "running"
+        run.started_at = datetime.now(tz=UTC)
+        run.progress_message = "Scanning organizations…"
+        await self._db.commit()
+
+        total_jobs_found: int = 0
+        total_new_jobs: int = 0
+        processed: int = 0
+
+        for org_id in org_ids:
+            org: Org | None = await self._db.get(Org, org_id)
+            if org is None:
+                processed += 1
+                continue
+
+            apply_ats_detection_to_org(org)
+            found, new_count, source, error = await self._discover_jobs_for_org(org)
+            scrape_run = JobScrapeRun(
+                org_id=org.id,
+                source=source,
+                started_at=datetime.now(tz=UTC),
+                completed_at=datetime.now(tz=UTC),
+                jobs_found=found,
+                new_jobs=new_count,
+                error=error,
+            )
+            self._db.add(scrape_run)
+
+            total_jobs_found += found
+            total_new_jobs += new_count
+            processed += 1
+            run.orgs_processed = processed
+            run.jobs_found = total_jobs_found
+            run.new_jobs = total_new_jobs
+            run.progress_message = f"Scanned {processed}/{run.orgs_total} companies…"
+            await self._db.commit()
+
+        run.state = "complete"
+        run.completed_at = datetime.now(tz=UTC)
+        run.progress_message = None
+        run.error = None
+        await self._db.commit()
+
+    async def upsert_discovered_job(
+        self,
+        org_id: uuid.UUID,
+        discovered: DiscoveredJob,
+    ) -> bool:
+        """Insert or update a job. Returns True if this is a newly seen job."""
+        now: datetime = datetime.now(tz=UTC)
+        result = await self._db.execute(
+            select(OrgJob).where(
+                OrgJob.org_id == org_id,
+                OrgJob.external_job_id == discovered.external_job_id,
+                OrgJob.source == discovered.source,
+            ),
+        )
+        existing: OrgJob | None = result.scalar_one_or_none()
+        if existing is None:
+            self._db.add(
+                OrgJob(
+                    org_id=org_id,
+                    external_job_id=discovered.external_job_id,
+                    source=discovered.source,
+                    title=discovered.title,
+                    location=discovered.location,
+                    department=discovered.department,
+                    url=discovered.url,
+                    description_snippet=discovered.description_snippet,
+                    salary_min=discovered.salary_min,
+                    salary_max=discovered.salary_max,
+                    remote_status=discovered.remote_status,
+                    posted_at=discovered.posted_at,
+                    first_seen_at=now,
+                    last_seen_at=now,
+                    is_active=True,
+                ),
+            )
+            return True
+
+        existing.title = discovered.title
+        existing.location = discovered.location
+        existing.department = discovered.department
+        existing.url = discovered.url
+        existing.description_snippet = discovered.description_snippet
+        existing.salary_min = discovered.salary_min
+        existing.salary_max = discovered.salary_max
+        existing.remote_status = discovered.remote_status
+        if discovered.posted_at is not None:
+            existing.posted_at = discovered.posted_at
+        existing.last_seen_at = now
+        existing.is_active = True
+        return False
+
+    async def _discover_jobs_for_org(
+        self,
+        org: Org,
+    ) -> tuple[int, int, str, str | None]:
+        discovered_jobs: list[DiscoveredJob] = []
+        source: str = "none"
+        error: str | None = None
+
+        provider: str | None = org.ats_provider
+        token: str | None = org.ats_board_token
+        successful_source: str | None = None
+        if provider in _LAYER1_PROVIDERS and token:
+            source = provider
+            try:
+                discovered_jobs = await self._ats_client.fetch_jobs(
+                    provider=provider,  # type: ignore[arg-type]
+                    board_token=token,
+                )
+                successful_source = provider
+            except Exception as exc:
+                error = str(exc)[:500]
+                logger.exception("ATS fetch failed for org %s", org.id)
+
+        if not discovered_jobs and self._theirstack.is_configured():
+            source = "theirstack"
+            try:
+                discovered_jobs = await self._theirstack.search_jobs_for_org(org)
+                successful_source = "theirstack"
+            except Exception as exc:
+                error = str(exc)[:500]
+                logger.exception("TheirStack fetch failed for org %s", org.id)
+
+        if successful_source is None:
+            return 0, 0, source, error
+
+        if not discovered_jobs:
+            await self._mark_stale_jobs_inactive(org.id, successful_source)
+            return 0, 0, successful_source, error
+
+        new_count: int = 0
+        seen_keys: set[tuple[str, str]] = set()
+        for job in discovered_jobs:
+            seen_keys.add((job.external_job_id, job.source))
+            is_new: bool = await self.upsert_discovered_job(org.id, job)
+            if is_new:
+                new_count += 1
+
+        await self._deactivate_missing_jobs(org.id, seen_keys)
+        return len(discovered_jobs), new_count, successful_source, error
+
+    async def _deactivate_missing_jobs(
+        self,
+        org_id: uuid.UUID,
+        seen_keys: set[tuple[str, str]],
+    ) -> None:
+        result = await self._db.execute(
+            select(OrgJob).where(OrgJob.org_id == org_id, OrgJob.is_active.is_(True)),
+        )
+        for job in result.scalars().all():
+            key: tuple[str, str] = (job.external_job_id, job.source)
+            if key not in seen_keys:
+                job.is_active = False
+
+    async def _mark_stale_jobs_inactive(self, org_id: uuid.UUID, source: str) -> None:
+        result = await self._db.execute(
+            select(OrgJob).where(
+                OrgJob.org_id == org_id,
+                OrgJob.source == source,
+                OrgJob.is_active.is_(True),
+            ),
+        )
+        for job in result.scalars().all():
+            job.is_active = False
+
+    async def _list_monitored_org_ids(self, user_id: uuid.UUID) -> list[uuid.UUID]:
+        user: User | None = await self._db.get(User, user_id)
+        if user is None or user.job_monitor_list_id is None:
+            return []
+        result = await self._db.execute(
+            select(OrgListMembership.org_id).where(
+                OrgListMembership.org_list_id == user.job_monitor_list_id,
+            ),
+        )
+        return list(result.scalars().all())
+
+    async def _has_running_run(self, user_id: uuid.UUID) -> bool:
+        result = await self._db.execute(
+            select(JobDiscoveryRun.id).where(
+                JobDiscoveryRun.user_id == user_id,
+                JobDiscoveryRun.state == "running",
+            ),
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def _latest_run(self, user_id: uuid.UUID) -> JobDiscoveryRun | None:
+        result = await self._db.execute(
+            select(JobDiscoveryRun)
+            .where(JobDiscoveryRun.user_id == user_id)
+            .order_by(JobDiscoveryRun.created_at.desc())
+            .limit(1),
+        )
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    def _status_message(state: JobDiscoveryState, run: JobDiscoveryRun) -> str:
+        if state == "running":
+            return (
+                f"Scanning companies ({run.orgs_processed}/{run.orgs_total}). "
+                f"{run.jobs_found} jobs found so far."
+            )
+        if state == "complete":
+            return (
+                f"Discovery complete. {run.jobs_found} jobs found "
+                f"({run.new_jobs} new)."
+            )
+        if state == "failed":
+            return run.error or "Job discovery failed."
+        return "Job discovery pending."
+
+    async def maybe_start_scheduled_discovery(self, user_id: uuid.UUID) -> bool:
+        if await self._has_running_run(user_id):
+            return False
+        org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
+        if not org_ids:
+            return False
+        run = JobDiscoveryRun(
+            user_id=user_id,
+            state="running",
+            started_at=datetime.now(tz=UTC),
+            orgs_total=len(org_ids),
+            orgs_processed=0,
+            progress_message="Scheduled scan…",
+        )
+        self._db.add(run)
+        await self._db.flush()
+        run_id: uuid.UUID = run.id
+        await self._db.commit()
+        return schedule_job_discovery(user_id, run_id)

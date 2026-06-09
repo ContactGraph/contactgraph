@@ -8,6 +8,7 @@ Authentication uses the same JWT tokens as the MCP endpoint.  Admin users
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from typing import Annotated, Any
@@ -35,9 +36,14 @@ from contactsafe_core.contact_schemas import (
     ListPeopleRequest,
     ListPeopleResult,
     ListStrongTiesResult,
+    JobDiscoveryStatusResult,
+    JobMonitorConfigResult,
+    ListOrgJobsResult,
     ModifyOrgListMembershipRequest,
     ModifyOrgListMembershipResult,
     NetworkStatusResult,
+    SetJobMonitorConfigRequest,
+    StartJobDiscoveryResult,
     OrgDetailResult,
     OrgEnrichmentStatusResult,
     PersonDetailResult,
@@ -694,6 +700,71 @@ async def api_remove_orgs_from_list(
         return await actions.remove_orgs_from_list(ctx, user_id, body=body)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/get-job-monitor-config", response_model=JobMonitorConfigResult)
+async def api_get_job_monitor_config(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> JobMonitorConfigResult:
+    return await actions.get_job_monitor_config(ctx, user_id)
+
+
+@router.post("/set-job-monitor-config", response_model=JobMonitorConfigResult)
+async def api_set_job_monitor_config(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: SetJobMonitorConfigRequest,
+) -> JobMonitorConfigResult:
+    try:
+        return await actions.set_job_monitor_config(ctx, user_id, body=body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/start-job-discovery", response_model=StartJobDiscoveryResult)
+async def api_start_job_discovery(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> StartJobDiscoveryResult:
+    return await actions.start_job_discovery(ctx, user_id)
+
+
+@router.post("/get-job-discovery-status", response_model=JobDiscoveryStatusResult)
+async def api_get_job_discovery_status(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> JobDiscoveryStatusResult:
+    return await actions.get_job_discovery_status(ctx, user_id)
+
+
+@router.post("/list-org-jobs", response_model=ListOrgJobsResult)
+async def api_list_org_jobs(ctx: Ctx, user_id: EffectiveUser) -> ListOrgJobsResult:
+    return await actions.list_org_jobs(ctx, user_id)
+
+
+@router.post("/webhooks/theirstack")
+async def api_theirstack_webhook(request: Request, ctx: Ctx) -> dict[str, bool]:
+    payload: bytes = await request.body()
+    signature: str | None = request.headers.get("X-TheirStack-Signature-256")
+    try:
+        body: dict[str, Any] = json.loads(payload.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    from contactsafe_server.services.theirstack_webhook import handle_theirstack_webhook
+
+    async with ctx.session_factory() as db:
+        accepted: bool = await handle_theirstack_webhook(
+            db,
+            ctx.settings,
+            payload,
+            signature,
+            body,
+        )
+    if not accepted:
+        raise HTTPException(status_code=403, detail="Invalid webhook signature")
+    return {"ok": True}
 
 
 @router.post("/dedup-persons", response_model=DedupPersonsResult)
