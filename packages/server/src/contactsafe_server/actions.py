@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 
 from contactsafe_core.contact_schemas import (
     DedupPersonsResult,
+    EnrichPersonResult,
     EnrichStrongTiesResult,
     ListOrgsResult,
     ListPeopleResult,
@@ -170,6 +171,37 @@ async def connect_source(
         return result
 
 
+async def cancel_sync(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    source_id: str,
+) -> "CancelSyncResult":
+    from contactsafe_core.schemas import CancelSyncResult
+    from contactsafe_core.enums import SyncState
+    from contactsafe_server.services.import_scheduler import release_sync_lock
+
+    if user_id is None:
+        return CancelSyncResult(cancelled=False, message="Not authenticated.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.db.models import Source
+        from sqlalchemy import select
+
+        result = await db.execute(
+            select(Source).where(Source.id == UUID(source_id), Source.user_id == user_id),
+        )
+        source: Source | None = result.scalar_one_or_none()
+        if source is None:
+            return CancelSyncResult(cancelled=False, message="Source not found.")
+        if source.sync_state not in (SyncState.SYNCING.value, SyncState.PENDING.value):
+            return CancelSyncResult(cancelled=False, message="No import in progress.")
+        source.sync_state = SyncState.FAILED.value
+        source.sync_error = "Import cancelled by user."
+        await db.commit()
+        release_sync_lock(source.id, source.user_id)
+        return CancelSyncResult(cancelled=True, message="Import cancelled.")
+
+
 async def list_sources(
     ctx: AppContext,
     user_id: UUID | None,
@@ -184,7 +216,9 @@ async def list_sources(
         )
     async with ctx.session_factory() as db:
         sources: SourceService = build_source_service(db)
-        return await sources.list_sources_for_user(user_id)
+        result: ListSourcesResult = await sources.list_sources_for_user(user_id)
+        await db.commit()
+        return result
 
 
 async def get_source_status(
@@ -989,6 +1023,51 @@ async def get_person(
         if detail is None:
             raise ValueError(f"Person not found: {person_id}")
         return detail
+
+
+async def enrich_person(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    person_id: str,
+) -> EnrichPersonResult:
+    if user_id is None:
+        raise ValueError("Authentication required")
+    parsed_id: UUID = UUID(person_id)
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.enrichment_queue_service import enqueue_enrichment
+
+        await enqueue_enrichment(
+            db,
+            ctx.settings,
+            person_id=parsed_id,
+            trigger_user_id=user_id,
+        )
+        await db.commit()
+
+        from contactsafe_server.services.contact_enrichment_worker import ContactEnrichmentWorker
+        from contactsafe_server.db.models import EnrichmentQueueItem
+
+        item: EnrichmentQueueItem | None = (
+            await db.execute(
+                select(EnrichmentQueueItem).where(
+                    EnrichmentQueueItem.person_id == parsed_id,
+                    EnrichmentQueueItem.status == "pending",
+                ).order_by(EnrichmentQueueItem.created_at.desc()).limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if item is None:
+            return EnrichPersonResult(message="No enrichment needed.", queued=False)
+
+        await db.commit()
+
+        worker = ContactEnrichmentWorker(db, ctx.settings)
+        refreshed: EnrichmentQueueItem | None = await db.get(EnrichmentQueueItem, item.id)
+        if refreshed is not None:
+            await worker.enrich_one(refreshed, skip_org_rebuild=True)
+
+        return EnrichPersonResult(message="Enrichment complete.", queued=True)
 
 
 async def list_orgs(ctx: AppContext, user_id: UUID | None) -> ListOrgsResult:

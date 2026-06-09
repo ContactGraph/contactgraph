@@ -19,6 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import (
     DedupPersonsResult,
+    EnrichPersonRequest,
+    EnrichPersonResult,
     EnrichStrongTiesResult,
     GetOrgRequest,
     GetPersonRequest,
@@ -34,6 +36,8 @@ from contactsafe_core.contact_schemas import (
     StrongTieCountResult,
 )
 from contactsafe_core.schemas import (
+    CancelSyncRequest,
+    CancelSyncResult,
     ConnectSourceRequest,
     ConnectSourceResult,
     DeleteUserExperienceRequest,
@@ -273,6 +277,15 @@ async def api_poll_connect(
 @router.post("/list-sources", response_model=ListSourcesResult)
 async def api_list_sources(ctx: Ctx, user_id: EffectiveUser) -> ListSourcesResult:
     return await actions.list_sources(ctx, user_id)
+
+
+@router.post("/cancel-sync")
+async def api_cancel_sync(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: CancelSyncRequest,
+) -> CancelSyncResult:
+    return await actions.cancel_sync(ctx, user_id, source_id=body.source_id)
 
 
 @router.post("/get-source-status", response_model=SourceStatusResult)
@@ -533,6 +546,18 @@ async def api_get_person(
         return await actions.get_person(ctx, user_id, person_id=body.person_id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/enrich-person", response_model=EnrichPersonResult)
+async def api_enrich_person(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: EnrichPersonRequest,
+) -> EnrichPersonResult:
+    try:
+        return await actions.enrich_person(ctx, user_id, person_id=body.person_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/list-orgs", response_model=ListOrgsResult)

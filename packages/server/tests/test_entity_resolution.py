@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.db.models import Base, Org, OrgAlias, Person, PersonAlias
-from contactsafe_server.services.entity_resolution import EntityResolver, MergeConflict
+from contactsafe_server.services.entity_resolution import EntityResolver, MergeConflict, build_last_name_index
 
 @pytest.fixture(autouse=True)
 async def _setup_tables(db_engine):
@@ -275,7 +275,8 @@ async def test_resolve_linkedin_connection_matches_by_url(
     )
     matched = await resolver.resolve_linkedin_connection(
         linkedin_url="https://linkedin.com/in/phone-contact/",
-        display_name="Different Name",
+        first_name="Different",
+        last_name="Name",
         email="other@example.com",
     )
     assert matched.id == existing.id
@@ -291,13 +292,14 @@ async def test_resolve_linkedin_connection_matches_by_email_without_url_hit(
     )
     matched = await resolver.resolve_linkedin_connection(
         linkedin_url="https://linkedin.com/in/new-linkedin",
-        display_name="LinkedIn Name",
+        first_name="LinkedIn",
+        last_name="Name",
         email="shared@example.com",
     )
     assert matched.id == existing.id
 
 
-async def test_resolve_linkedin_connection_matches_by_canonical_name(
+async def test_resolve_linkedin_connection_matches_by_name_components(
     db_session: AsyncSession,
 ) -> None:
     resolver = EntityResolver(db_session)
@@ -306,11 +308,83 @@ async def test_resolve_linkedin_connection_matches_by_canonical_name(
         display_name="Jane Doe",
         phone="+15551234567",
     )
+    all_persons = list((await db_session.execute(select(Person))).scalars().all())
+    name_index = build_last_name_index(all_persons)
+
     matched = await resolver.resolve_linkedin_connection(
         linkedin_url="https://linkedin.com/in/jane-doe",
-        display_name="Jane Doe",
+        first_name="Jane",
+        last_name="Doe",
+        name_index=name_index,
     )
     assert matched.id == phone_person.id
+
+
+async def test_resolve_linkedin_connection_matches_nickname(
+    db_session: AsyncSession,
+) -> None:
+    resolver = EntityResolver(db_session)
+    phone_person = await resolver.resolve_person(
+        emails=["tim@example.com"],
+        display_name="Timothy Johnson",
+        phone="+15559876543",
+    )
+    all_persons = list((await db_session.execute(select(Person))).scalars().all())
+    name_index = build_last_name_index(all_persons)
+
+    matched = await resolver.resolve_linkedin_connection(
+        linkedin_url="https://linkedin.com/in/tim-johnson",
+        first_name="Tim",
+        last_name="Johnson",
+        name_index=name_index,
+    )
+    assert matched.id == phone_person.id
+
+
+async def test_resolve_linkedin_connection_no_match_different_last_name(
+    db_session: AsyncSession,
+) -> None:
+    resolver = EntityResolver(db_session)
+    await resolver.resolve_person(
+        emails=["jane@example.com"],
+        display_name="Jane Doe",
+    )
+    all_persons = list((await db_session.execute(select(Person))).scalars().all())
+    name_index = build_last_name_index(all_persons)
+
+    result = await resolver.resolve_linkedin_connection(
+        linkedin_url="https://linkedin.com/in/jane-smith",
+        first_name="Jane",
+        last_name="Smith",
+        name_index=name_index,
+    )
+    # Different last name → should create a new person
+    assert result.canonical_name == "Jane Smith"
+
+
+async def test_resolve_linkedin_connection_ambiguous_skips_match(
+    db_session: AsyncSession,
+) -> None:
+    resolver = EntityResolver(db_session)
+    await resolver.resolve_person(
+        emails=["mike1@example.com"],
+        display_name="Michael Brown",
+    )
+    await resolver.resolve_person(
+        emails=["mike2@example.com"],
+        display_name="Mike Brown",
+    )
+    all_persons = list((await db_session.execute(select(Person))).scalars().all())
+    name_index = build_last_name_index(all_persons)
+
+    result = await resolver.resolve_linkedin_connection(
+        linkedin_url="https://linkedin.com/in/mike-brown",
+        first_name="Mike",
+        last_name="Brown",
+        name_index=name_index,
+    )
+    # Two "Brown" candidates both match "Mike" → ambiguous, creates new
+    assert result.canonical_name == "Mike Brown"
 
 
 async def test_resolve_person_github_takes_priority_over_email(

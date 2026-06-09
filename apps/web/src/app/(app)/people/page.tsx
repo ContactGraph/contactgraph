@@ -16,7 +16,6 @@ import {
   CompactCell,
   CompactSortHeader,
   CompactTableShell,
-  dateSortingFn,
 } from "@/components/data-table/compact-table";
 import { EntityActionsMenu } from "@/components/entity-actions-menu";
 import { PersonDetailPanel } from "@/components/person-detail-panel";
@@ -34,20 +33,21 @@ import {
 } from "@/components/ui/sheet";
 import type { ListPeopleResult, PersonDetailResult, PersonListItem } from "@/lib/api-types";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
-import { formatDateCompact, formatSourceAbbrev } from "@/lib/formatters";
 import { proxyPost } from "@/lib/proxy-client";
 
 export default function PeoplePage() {
   const [search, setSearch] = useState<string>("");
   const [sorting, setSorting] = useState<SortingState>([
-    { id: "tie_strength_score", desc: true },
+    { id: "name", desc: false },
   ]);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+
+  const [filter, setFilter] = useState<"all" | "phone_linkedin" | "phone_only" | "linkedin_only">("phone_linkedin");
 
   const peopleQuery = useQuery({
     queryKey: ["people"],
     queryFn: () =>
-      proxyPost<ListPeopleResult>("list-people", { network_only: true }),
+      proxyPost<ListPeopleResult>("list-people", { network_only: false }),
   });
 
   const detailQuery = useQuery({
@@ -62,20 +62,31 @@ export default function PeoplePage() {
   const columns: ColumnDef<PersonListItem>[] = useMemo(
     () => [
       {
-        accessorKey: "first_name",
-        header: ({ column }) => <CompactSortHeader column={column} label="First" />,
-        cell: ({ row }) => (
-          <CompactCell value={row.original.first_name || "—"} />
-        ),
-        meta: { width: "w-[4.25rem]" },
+        id: "name",
+        accessorFn: (row: PersonListItem) => row.display_name,
+        header: ({ column }) => <CompactSortHeader column={column} label="Name" />,
+        cell: ({ row }) => {
+          const person: PersonListItem = row.original;
+          return (
+            <div className="flex items-center gap-1.5 truncate">
+              <span className="truncate">{person.display_name}</span>
+              {person.is_strong_tie ? (
+                <Badge variant="secondary" className="shrink-0 px-1 py-0 text-[10px]">
+                  Pro
+                </Badge>
+              ) : null}
+            </div>
+          );
+        },
+        meta: { width: "w-[10rem]" },
       },
       {
-        accessorKey: "last_name",
-        header: ({ column }) => <CompactSortHeader column={column} label="Last" />,
+        accessorKey: "phone",
+        header: "Phone",
         cell: ({ row }) => (
-          <CompactCell value={row.original.last_name || "—"} />
+          <CompactCell value={row.original.phone ?? "—"} />
         ),
-        meta: { width: "w-[4.25rem]" },
+        meta: { width: "w-[5.5rem]" },
       },
       {
         accessorKey: "primary_email",
@@ -87,105 +98,45 @@ export default function PeoplePage() {
             }
           />
         ),
-        meta: { width: "w-[7rem]" },
-      },
-      {
-        accessorKey: "phone",
-        header: "Phone",
-        cell: ({ row }) => (
-          <CompactCell value={row.original.phone ?? "—"} />
-        ),
-        meta: { width: "w-[5.25rem]" },
-      },
-      {
-        accessorKey: "org_name",
-        header: ({ column }) => <CompactSortHeader column={column} label="Org" />,
-        cell: ({ row }) => (
-          <CompactCell value={row.original.org_name ?? "—"} />
-        ),
-        meta: { width: "w-[5.5rem]" },
+        meta: { width: "w-[9rem]" },
       },
       {
         accessorKey: "current_role",
-        header: "Role",
+        header: ({ column }) => <CompactSortHeader column={column} label="Title" />,
         cell: ({ row }) => (
           <CompactCell value={row.original.current_role ?? "—"} />
         ),
-        meta: { width: "w-[4.75rem]" },
+        meta: { width: "w-[7rem]" },
       },
       {
-        id: "strong_tie",
-        accessorFn: (row: PersonListItem) => row.is_strong_tie,
-        header: "Prof.",
-        cell: ({ row }) =>
-          row.original.is_strong_tie ? (
-            <Badge variant="secondary" className="px-1 py-0 text-[10px]">
-              Prof.
-            </Badge>
-          ) : (
-            <CompactCell value="—" />
-          ),
-        meta: { width: "w-[3.5rem]" },
-      },
-      {
-        accessorKey: "linkedin_url",
-        header: "LI",
+        id: "company",
+        accessorFn: (row: PersonListItem) => row.org_name ?? "",
+        header: ({ column }) => <CompactSortHeader column={column} label="Company" />,
         cell: ({ row }) => (
-          <CompactCell
-            value={row.original.linkedin_url ? "Yes" : "—"}
-            title={row.original.linkedin_url ?? undefined}
-          />
+          <CompactCell value={row.original.org_name ?? "—"} />
         ),
-        meta: { width: "w-[2.5rem]" },
+        meta: { width: "w-[7rem]" },
       },
       {
-        accessorKey: "tie_strength_score",
-        header: ({ column }) => (
-          <CompactSortHeader column={column} label="Tie" />
-        ),
-        cell: ({ row }) => (
-          <CompactCell
-            value={row.original.tie_strength_score.toFixed(2)}
-            title={`Tie strength: ${row.original.tie_strength_score.toFixed(2)}`}
-          />
-        ),
-        meta: { width: "w-[3rem]" },
-      },
-      {
-        id: "sources",
-        accessorFn: (row: PersonListItem) => row.sources.join(", "),
-        header: "Src",
-        cell: ({ row }) => (
-          <CompactCell
-            value={
-              row.original.sources.length > 0
-                ? row.original.sources
-                    .map((source: string) => formatSourceAbbrev(source))
-                    .join(", ")
-                : "—"
-            }
-            title={row.original.sources.join(", ")}
-          />
-        ),
-        meta: { width: "w-[3.75rem]" },
-      },
-      {
-        accessorKey: "first_contact_at",
-        header: ({ column }) => <CompactSortHeader column={column} label="First" />,
-        cell: ({ row }) => (
-          <CompactCell value={formatDateCompact(row.original.first_contact_at)} />
-        ),
-        sortingFn: dateSortingFn,
-        meta: { width: "w-[3.5rem]" },
-      },
-      {
-        accessorKey: "last_contact_at",
-        header: ({ column }) => <CompactSortHeader column={column} label="Last" />,
-        cell: ({ row }) => (
-          <CompactCell value={formatDateCompact(row.original.last_contact_at)} />
-        ),
-        sortingFn: dateSortingFn,
-        meta: { width: "w-[3.5rem]" },
+        id: "linkedin",
+        accessorFn: (row: PersonListItem) => row.linkedin_url ?? "",
+        header: "LinkedIn",
+        cell: ({ row }) => {
+          const url: string | null = row.original.linkedin_url;
+          if (!url) return <CompactCell value="—" />;
+          return (
+            <a
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-xs text-primary hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              Profile ↗
+            </a>
+          );
+        },
+        meta: { width: "w-[4rem]" },
       },
       {
         id: "actions",
@@ -193,7 +144,10 @@ export default function PeoplePage() {
         enableSorting: false,
         cell: ({ row }) => (
           <div className="flex justify-end">
-            <EntityActionsMenu entityLabel={row.original.display_name} />
+            <EntityActionsMenu
+              entityLabel={row.original.display_name}
+              personId={row.original.person_id}
+            />
           </div>
         ),
         meta: { width: "w-[2rem]", stickyRight: true },
@@ -202,8 +156,27 @@ export default function PeoplePage() {
     [],
   );
 
+  const filteredPeople: PersonListItem[] = useMemo(() => {
+    const all: PersonListItem[] = peopleQuery.data?.people ?? [];
+    if (filter === "all") return all;
+    return all.filter((p: PersonListItem) => {
+      const hasPhone: boolean = !!p.phone;
+      const hasLinkedin: boolean = !!p.linkedin_url;
+      switch (filter) {
+        case "phone_linkedin":
+          return hasPhone && hasLinkedin;
+        case "phone_only":
+          return hasPhone && !hasLinkedin;
+        case "linkedin_only":
+          return !hasPhone && hasLinkedin;
+        default:
+          return true;
+      }
+    });
+  }, [peopleQuery.data?.people, filter]);
+
   const table = useReactTable({
-    data: peopleQuery.data?.people ?? [],
+    data: filteredPeople,
     columns,
     state: { sorting, globalFilter: search },
     onSortingChange: setSorting,
@@ -216,18 +189,12 @@ export default function PeoplePage() {
       const person: PersonListItem = row.original;
       const haystack: string = [
         person.display_name,
-        person.first_name,
-        person.last_name,
         person.primary_email,
         person.phone,
         person.org_name,
         person.current_role,
-        person.linkedin_url,
-        person.is_strong_tie ? "strong professional tie" : "",
-        person.scrapingdog_enriched ? "enriched" : "",
+        person.is_strong_tie ? "professional tie" : "",
         person.emails.join(" "),
-        person.sources.join(" "),
-        person.tie_strength_score.toString(),
       ]
         .filter(Boolean)
         .join(" ")
@@ -250,32 +217,22 @@ export default function PeoplePage() {
       .rows.map((row) => row.original);
     const csv: string = buildCsv(
       [
-        "First",
-        "Last",
-        "Email",
+        "Name",
         "Phone",
-        "Org",
-        "Role",
-        "Strong Professional Tie",
+        "Email",
+        "Title",
+        "Company",
+        "Professional Tie",
         "LinkedIn",
-        "Tie",
-        "Sources",
-        "First Contact",
-        "Last Contact",
       ],
       rows.map((person: PersonListItem) => [
-        person.first_name,
-        person.last_name,
-        person.primary_email ?? person.emails[0] ?? "",
+        person.display_name,
         person.phone ?? "",
-        person.org_name ?? "",
+        person.primary_email ?? person.emails[0] ?? "",
         person.current_role ?? "",
+        person.org_name ?? "",
         person.is_strong_tie ? "yes" : "",
         person.linkedin_url ?? "",
-        person.tie_strength_score.toFixed(2),
-        person.sources.map((source: string) => formatSourceAbbrev(source)).join("; "),
-        formatDateCompact(person.first_contact_at),
-        formatDateCompact(person.last_contact_at),
       ]),
     );
     downloadCsv(csvFilename("people"), csv);
@@ -290,18 +247,18 @@ export default function PeoplePage() {
             {peopleQuery.isLoading
               ? "Loading your network…"
               : peopleQuery.data
-                ? `${peopleQuery.data.total.toLocaleString()} contacts · ${peopleQuery.data.strong_tie_count.toLocaleString()} strong professional ties · ${peopleQuery.data.enriched_count.toLocaleString()} enriched`
+                ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
                 : "No network data available."}
           </p>
         </div>
-        <div className="flex w-full max-w-md items-center gap-2">
-          <div className="relative flex-1">
+        <div className="flex items-center gap-2">
+          <div className="relative w-64">
             <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
               placeholder="Search people…"
-              className="h-8 pl-8 text-xs"
+              className="h-8 pl-8 text-sm focus:w-80 transition-all duration-200"
             />
           </div>
           <Button
@@ -316,6 +273,26 @@ export default function PeoplePage() {
             CSV
           </Button>
         </div>
+      </div>
+
+      <div className="flex gap-1">
+        {([
+          ["phone_linkedin", "Phone + LinkedIn"],
+          ["phone_only", "Phone only"],
+          ["linkedin_only", "LinkedIn only"],
+          ["all", "All"],
+        ] as const).map(([value, label]) => (
+          <Button
+            key={value}
+            type="button"
+            variant={filter === value ? "default" : "outline"}
+            size="sm"
+            className="h-8 text-xs px-2.5"
+            onClick={() => setFilter(value)}
+          >
+            {label}
+          </Button>
+        ))}
       </div>
 
       {peopleQuery.error ? (
@@ -336,7 +313,7 @@ export default function PeoplePage() {
             table={table}
             columnCount={columns.length}
             emptyMessage="No phone contacts in your network yet. Import them from Sources."
-            minWidth="54rem"
+            minWidth="44rem"
             onRowClick={(person: PersonListItem) =>
               setSelectedPersonId(person.person_id)
             }

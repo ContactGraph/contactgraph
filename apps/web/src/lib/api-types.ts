@@ -309,6 +309,11 @@ export interface PersonListItem {
   scrapingdog_enriched: boolean;
 }
 
+export interface EnrichPersonResult {
+  message: string;
+  queued: boolean;
+}
+
 export interface ListPeopleRequest {
   network_only?: boolean;
 }

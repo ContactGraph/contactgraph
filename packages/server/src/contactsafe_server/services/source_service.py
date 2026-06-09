@@ -205,6 +205,9 @@ class SourceService:
             existing.connection_status = SourceConnectionStatus.CONNECTED.value
             existing.sync_state = SyncState.PENDING.value
             existing.sync_error = None
+            existing.contacts_found = 0
+            existing.contacts_resolved = 0
+            existing.contacts_pending = 0
             await self._db.flush()
             return existing
 
@@ -491,6 +494,7 @@ class SourceService:
         await self._recover_orphaned_sync(source)
 
         if self._sync_in_progress(source, user_id):
+            logger.info("request_sync blocked: sync in progress for source %s / user %s", source.id, user_id)
             await self._db.refresh(source)
             return SyncSourceResult(
                 source_id=source.id,
@@ -501,6 +505,7 @@ class SourceService:
             )
 
         if not schedule_source_sync(source.id, user_id):
+            logger.info("request_sync blocked: schedule_source_sync returned False for source %s", source.id)
             return SyncSourceResult(
                 source_id=source.id,
                 scheduled=False,
@@ -511,6 +516,7 @@ class SourceService:
 
         claimed: bool = await self._try_claim_sync(source)
         if not claimed:
+            logger.info("request_sync blocked: _try_claim_sync failed for source %s (sync_state=%s)", source.id, source.sync_state)
             release_sync_lock(source.id, user_id)
             await self._db.refresh(source)
             return SyncSourceResult(

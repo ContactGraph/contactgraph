@@ -197,5 +197,14 @@ class GetPersonRequest(BaseModel):
     person_id: str
 
 
+class EnrichPersonRequest(BaseModel):
+    person_id: str
+
+
+class EnrichPersonResult(BaseModel):
+    message: str
+    queued: bool
+
+
 class GetOrgRequest(BaseModel):
     org_id: str

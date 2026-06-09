@@ -109,23 +109,39 @@ export function LinkedInConnectionsUploadDialog({
           <div className="space-y-2 text-sm text-muted-foreground">
             <p className="font-medium text-foreground">Export from LinkedIn</p>
             <p>
-              1. Go to LinkedIn → Settings &amp; Privacy → Data privacy →{" "}
-              <span className="text-foreground">Get a copy of your data</span>.
+              1. Click your avatar in the top navbar (the{" "}
+              <span className="text-foreground">Me</span> menu).
             </p>
             <p>
-              2. Choose <span className="text-foreground">Connections</span>{" "}
-              (or request the larger archive that includes connections).
-            </p>
-            <p>3. Submit the request. LinkedIn usually emails you within 24 hours when your download is ready.</p>
-            <p>
-              4. Open the email from LinkedIn and download the{" "}
-              <span className="text-foreground">.zip</span> file from the link.
+              2. Click{" "}
+              <span className="text-foreground">Settings &amp; Privacy</span>.
             </p>
             <p>
-              5. Upload the{" "}
-              <span className="text-foreground">.zip</span> from Downloads, or
-              open the unzipped folder and select{" "}
-              <span className="text-foreground">Connections.csv</span>.
+              3. Click the{" "}
+              <span className="text-foreground">Data Privacy</span> tab on the
+              left.
+            </p>
+            <p>
+              4. Click{" "}
+              <span className="text-foreground">Download your Data</span>.
+            </p>
+            <p>
+              5. Select{" "}
+              <span className="text-foreground">Download Larger Archive</span>{" "}
+              and click{" "}
+              <span className="text-foreground">Request archive</span>.
+            </p>
+            <p>
+              6. Wait for the email from LinkedIn (can take up to 24 hours).
+            </p>
+            <p>
+              7. Click the link in the email to download the{" "}
+              <span className="text-foreground">.zip</span> file.
+            </p>
+            <p>
+              8. Open the .zip, then find{" "}
+              <span className="text-foreground">Connections.csv</span> in the
+              extracted folder and upload it here.
             </p>
           </div>
 

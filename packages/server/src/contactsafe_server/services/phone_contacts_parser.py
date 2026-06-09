@@ -6,9 +6,12 @@ import csv
 import io
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import vobject
+
+_FieldLookup = Callable[..., str | None]
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -73,10 +76,8 @@ def _vcard_to_contact(component: vobject.base.Component) -> ParsedPhoneContact |
     urls: list[str] = _vcard_urls(component)
     address: str | None = _vcard_address(component)
 
-    if not display_name and not emails and not phones:
-        return None
     if not display_name:
-        display_name = emails[0] if emails else (phones[0] if phones else "Unknown")
+        return None
 
     return ParsedPhoneContact(
         display_name=display_name,
@@ -199,6 +200,11 @@ def _parse_csv(content: str) -> list[ParsedPhoneContact]:
                 return normalized_fields[key]
         return None
 
+    is_google_csv: bool = field("given name") is not None
+
+    if is_google_csv:
+        return _parse_google_csv(reader, field)
+
     name_col: str | None = field("name", "display name", "full name")
     email_col: str | None = field("email", "e-mail", "email address")
     phone_col: str | None = field("phone", "mobile", "telephone", "phone number")
@@ -210,15 +216,75 @@ def _parse_csv(content: str) -> list[ParsedPhoneContact]:
         phone_raw: str = (row.get(phone_col or "", "") or "").strip()
         emails: tuple[str, ...] = (email_raw,) if email_raw else ()
         phones: tuple[str, ...] = (phone_raw,) if phone_raw else ()
-        if not display_name and not emails and not phones:
-            continue
         if not display_name:
-            display_name = email_raw or phone_raw or "Unknown"
+            continue
         contacts.append(
             ParsedPhoneContact(
                 display_name=display_name,
                 emails=emails,
                 phone_numbers=phones,
+            )
+        )
+    return contacts
+
+
+def _parse_google_csv(
+    reader: csv.DictReader[str],
+    field: _FieldLookup,
+) -> list[ParsedPhoneContact]:
+    """Parse Google Contacts CSV export format.
+
+    Google CSV uses structured column names like 'Given Name', 'Family Name',
+    'Phone 1 - Value', 'E-mail 1 - Value', etc.
+    """
+    given_col: str | None = field("given name")
+    family_col: str | None = field("family name")
+    name_col: str | None = field("name", "display name", "full name")
+    org_col: str | None = field("organization 1 - name")
+    title_col: str | None = field("organization 1 - title")
+
+    all_fields: set[str] = set(reader.fieldnames or [])
+    email_cols: list[str] = sorted(
+        col for col in all_fields
+        if col.lower().startswith("e-mail") and col.lower().endswith("- value")
+    )
+    phone_cols: list[str] = sorted(
+        col for col in all_fields
+        if col.lower().startswith("phone") and col.lower().endswith("- value")
+    )
+
+    contacts: list[ParsedPhoneContact] = []
+    for row in reader:
+        given: str = (row.get(given_col or "", "") or "").strip()
+        family: str = (row.get(family_col or "", "") or "").strip()
+        display_name: str = f"{given} {family}".strip()
+        if not display_name and name_col:
+            display_name = (row.get(name_col, "") or "").strip()
+        if not display_name:
+            continue
+
+        emails: list[str] = []
+        for col in email_cols:
+            val: str = (row.get(col, "") or "").strip().lower()
+            if val and val not in emails:
+                emails.append(val)
+
+        phones: list[str] = []
+        for col in phone_cols:
+            val = (row.get(col, "") or "").strip()
+            if val and val not in phones:
+                phones.append(val)
+
+        org_name: str | None = (row.get(org_col or "", "") or "").strip() or None
+        org_title: str | None = (row.get(title_col or "", "") or "").strip() or None
+
+        contacts.append(
+            ParsedPhoneContact(
+                display_name=display_name,
+                emails=tuple(emails),
+                phone_numbers=tuple(phones),
+                org_name=org_name,
+                org_title=org_title,
             )
         )
     return contacts

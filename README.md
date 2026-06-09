@@ -1,17 +1,16 @@
 # ContactGraph
 
-Agent-native personal contact graph built from messaging, email, and calendar data. ContactGraph exposes **MCP tools** for connecting sources, syncing, and natural-language search.
+Your phone contacts are your real professional network — but they're trapped on your phone with no company info, no titles, and no way to search them. ContactGraph fixes that.
+
+1. **Upload phone contacts** — your `.vcf` file becomes your authoritative network in the cloud
+2. **Link with LinkedIn** — upload your LinkedIn Connections CSV to match contacts with current company, title, and LinkedIn profile
+3. **See your strong professional ties** — people in both your phone and LinkedIn, with accurate employer info, all in one place
+4. **Take action** — use your enriched network for job searching, fundraising, recruiting, or warm intros (coming soon)
+5. **Connect graphs** — share your ContactGraph with selected friends to extend your network beyond first degree (coming soon)
 
 **Production:** [https://www.contactgraph.ai](https://www.contactgraph.ai)  
 **MCP endpoint:** `https://www.contactgraph.ai/mcp`  
 **Agent skill file:** `https://www.contactgraph.ai/skill.md`
-
-Example questions your agent will be able to answer once connected and synced:
-
-- What investors do I know?
-- Who do I know at ACME?
-- Who do I know who works in RevOps?
-- Where does Jim Smith work now?
 
 ## Quick start for humans
 
@@ -246,18 +245,17 @@ make dev
 
 ---
 
-## Data sources (extensible framework)
+## Data sources
 
-ContactGraph is built as an **extensible source framework**. Every connector uses the same MCP workflow (`connect_source` → `sync_source` → `query_network`) and writes into one unified graph (people, orgs, employment edges, relationship strength).
+| Source | Type | What it does |
+|--------|------|-------------|
+| **Phone contacts** | `.vcf` upload | Your authoritative network — names, phone numbers, emails |
+| **LinkedIn Connections** | `.csv` upload | Matches contacts by name/email/URL; adds current company, title, and LinkedIn profile link |
+| **Gmail** | OAuth | Email metadata (headers only) for tie strength, relationship signals, and additional contact matching |
+| **LinkedIn profile** | PDF upload | Your own work history for your profile |
+| **ScrapingDog** | API (optional) | Live LinkedIn profile scraping for strong professional ties — refreshes employer data beyond the CSV |
 
-| Source | `source_type` | Status |
-|--------|---------------|--------|
-| **Gmail** | `google_mail` | **Shipped** — imports email metadata (headers only) into contacts, org links, and tie strength |
-| **Google Contacts** | `google_contacts` | **Shipped** — imports contacts (names, phone numbers, orgs) from Google Contacts / People API |
-| Google Calendar | `google_calendar` | Planned — co-attendance and relationship signals from events |
-| Other (LinkedIn, WhatsApp, CRM, …) | TBD | Roadmap |
-
-**Gmail is the first data source, not the architecture.** New sources add importers and OAuth scopes behind the same tools and graph schema — agents and humans do not need new MCP tool names when we ship the next connector.
+**Phone contacts are your network. Everything else is enrichment.** The People page shows your phone contacts; LinkedIn and Gmail add company, title, and tie strength data to those contacts. A **strong professional tie** is someone who appears in both your phone and your LinkedIn connections.
 
 ---
 
