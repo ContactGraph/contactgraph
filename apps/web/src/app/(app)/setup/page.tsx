@@ -1183,7 +1183,7 @@ export default function SetupPage() {
         return (
           <Card key={sectionId}>
             <CardHeader>
-              <CardTitle>{meta.title}</CardTitle>
+              <CardTitle className="text-base">{meta.title}</CardTitle>
               <CardDescription>{meta.description}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
