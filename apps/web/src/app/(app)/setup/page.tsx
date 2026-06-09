@@ -133,7 +133,7 @@ const setupSteps: ReadonlyArray<SetupStep> = [
   {
     id: "job_scrapers",
     section: "job_search",
-    title: "Set up daily job scrapers",
+    title: "Search for jobs",
     description:
       "Monitor career pages at your target companies and get daily alerts.",
   },
