@@ -90,6 +90,7 @@ def test_parse_org_enrichment_hits_extracts_company_fields() -> None:
             url="https://www.acme.com/about",
             text="Acme Corp is a leading widget company.",
             highlights=[],
+            summary="Acme Corp builds enterprise widgets for global customers.",
         ),
     ]
     careers_hits: list[WebSearchHit] = [
@@ -100,21 +101,11 @@ def test_parse_org_enrichment_hits_extracts_company_fields() -> None:
             highlights=[],
         ),
     ]
-    description_hits: list[WebSearchHit] = [
-        WebSearchHit(
-            title="Acme Corp",
-            url="https://www.acme.com",
-            text="",
-            highlights=[],
-            summary="Acme Corp builds enterprise widgets for global customers.",
-        ),
-    ]
 
     parsed = parse_org_enrichment_hits(
         company_name="Acme Corp",
         company_hits=company_hits,
         careers_hits=careers_hits,
-        description_hits=description_hits,
     )
 
     assert parsed.linkedin_url == "https://www.linkedin.com/company/acme-corp"

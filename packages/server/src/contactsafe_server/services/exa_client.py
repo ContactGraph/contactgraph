@@ -80,12 +80,12 @@ class ExaClient:
             num_results=num_results,
         )
 
-    async def search_with_summary(
+    async def search_company_enrichment(
         self,
         *,
         query: str,
         summary_query: str,
-        num_results: int = 3,
+        num_results: int = 5,
     ) -> list[WebSearchHit]:
         if not self._api_key:
             return []
@@ -94,6 +94,8 @@ class ExaClient:
             category=None,
             num_results=num_results,
             contents={
+                "text": {"maxCharacters": 2000},
+                "highlights": True,
                 "summary": {"query": summary_query},
             },
         )

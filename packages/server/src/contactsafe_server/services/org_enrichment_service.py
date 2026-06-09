@@ -201,28 +201,26 @@ class OrgEnrichmentService:
         await self._db.commit()
 
     async def _enrich_one_org(self, org: Org) -> None:
-        company_hits: list[WebSearchHit] = await self._exa.search_raw(
-            query=f'"{org.canonical_name}" company',
-            num_results=5,
+        summary_query: str = (
+            f"What does {org.canonical_name} do? "
+            "Describe their product or business in one or two sentences."
         )
-        careers_hits: list[WebSearchHit] = await self._exa.search_raw(
-            query=f'"{org.canonical_name}" careers jobs',
-            num_results=5,
-        )
-        description_hits: list[WebSearchHit] = await self._exa.search_with_summary(
-            query=f'"{org.canonical_name}" company',
-            summary_query=(
-                f"What does {org.canonical_name} do? "
-                "Describe their product or business in one or two sentences."
+        company_hits, careers_hits = await asyncio.gather(
+            self._exa.search_company_enrichment(
+                query=f'"{org.canonical_name}" company',
+                summary_query=summary_query,
+                num_results=5,
             ),
-            num_results=3,
+            self._exa.search_raw(
+                query=f'"{org.canonical_name}" careers jobs',
+                num_results=5,
+            ),
         )
 
         parsed = parse_org_enrichment_hits(
             company_name=org.canonical_name,
             company_hits=company_hits,
             careers_hits=careers_hits,
-            description_hits=description_hits,
         )
 
         if parsed.primary_domain is not None:
@@ -359,15 +357,11 @@ def parse_org_enrichment_hits(
     company_name: str,
     company_hits: list[WebSearchHit],
     careers_hits: list[WebSearchHit],
-    description_hits: list[WebSearchHit] | None = None,
 ) -> ParsedOrgEnrichment:
     linkedin_url: str | None = _pick_linkedin_company_url(company_hits + careers_hits)
     careers_url: str | None = _pick_careers_url(careers_hits + company_hits)
     primary_domain: str | None = _pick_primary_domain(company_hits, company_name)
-    description: str | None = _pick_description(
-        description_hits or company_hits,
-        company_name,
-    )
+    description: str | None = _pick_description(company_hits, company_name)
     return ParsedOrgEnrichment(
         primary_domain=primary_domain,
         description=description,
