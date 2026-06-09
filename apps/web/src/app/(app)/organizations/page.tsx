@@ -41,6 +41,7 @@ import {
 import type { ListOrgsResult, OrgDetailResult, OrgListItem } from "@/lib/api-types";
 import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
+import { formatIndustryTags } from "@/lib/industry-tags";
 import { proxyPost } from "@/lib/proxy-client";
 
 function websiteUrl(domain: string | null): string | null {
@@ -185,12 +186,12 @@ export default function OrganizationsPage() {
       },
       {
         id: "categories",
-        accessorFn: (row: OrgListItem) => row.categories.join(", "),
+        accessorFn: (row: OrgListItem) => formatIndustryTags(row.categories),
         header: "Categories",
         cell: ({ row }) => (
           <CompactCell
-            value={row.original.categories.join(", ") || "—"}
-            title={row.original.categories.join(", ")}
+            value={formatIndustryTags(row.original.categories)}
+            title={formatIndustryTags(row.original.categories)}
           />
         ),
         meta: { width: "w-[6.5rem]" },
@@ -271,7 +272,7 @@ export default function OrganizationsPage() {
         org.name,
         org.primary_domain,
         org.description,
-        org.categories.join(" "),
+        org.categories.map((tag) => formatIndustryTags([tag])).join(" "),
       ]
         .filter(Boolean)
         .join(" ")
@@ -298,7 +299,7 @@ export default function OrganizationsPage() {
         org.description ?? "",
         org.primary_domain ?? "",
         org.careers_url ?? "",
-        org.categories.join("; "),
+        formatIndustryTags(org.categories),
         org.contact_count.toString(),
       ]),
     );

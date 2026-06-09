@@ -30,6 +30,13 @@ from contactsafe_server.db.models import (
 )
 from contactsafe_server.services.contacts_service import PHONE_RELATIONSHIP
 from contactsafe_server.services.exa_client import ExaClient
+from contactsafe_server.services.org_industry_taxonomy import (
+    build_company_summary_query,
+    exa_company_summary_schema,
+    infer_industry_tags_from_text,
+    normalize_industry_tags,
+    parse_structured_company_summary,
+)
 from contactsafe_server.services.strong_tie_matcher import LINKEDIN_CONNECTIONS_RELATIONSHIP
 from contactsafe_server.services.web_search_types import WebSearchHit
 
@@ -233,14 +240,12 @@ class OrgEnrichmentService:
         await self._db.commit()
 
     async def _enrich_one_org(self, org: Org) -> None:
-        summary_query: str = (
-            f"What does {org.canonical_name} do? "
-            "Describe their product or business in one or two sentences."
-        )
+        summary_query: str = build_company_summary_query(org.canonical_name)
         company_hits, careers_hits = await asyncio.gather(
             self._exa.search_company_enrichment(
                 query=f'"{org.canonical_name}" company',
                 summary_query=summary_query,
+                summary_schema=exa_company_summary_schema(),
                 num_results=5,
             ),
             self._exa.search_raw(
@@ -263,6 +268,8 @@ class OrgEnrichmentService:
             org.careers_url = parsed.careers_url
         if parsed.linkedin_url is not None:
             org.linkedin_url = parsed.linkedin_url
+        if parsed.categories:
+            org.categories = parsed.categories
 
         attributes: dict[str, object] = dict(org.attributes or {})
         attributes["exa_enriched_at"] = datetime.now(tz=UTC).isoformat()
@@ -382,6 +389,7 @@ class ParsedOrgEnrichment:
     description: str | None
     careers_url: str | None
     linkedin_url: str | None
+    categories: list[str]
 
 
 def parse_org_enrichment_hits(
@@ -394,11 +402,13 @@ def parse_org_enrichment_hits(
     careers_url: str | None = _pick_careers_url(careers_hits + company_hits)
     primary_domain: str | None = _pick_primary_domain(company_hits, company_name)
     description: str | None = _pick_description(company_hits, company_name)
+    categories: list[str] = _pick_industry_tags(company_hits, company_name, description)
     return ParsedOrgEnrichment(
         primary_domain=primary_domain,
         description=description,
         careers_url=careers_url,
         linkedin_url=linkedin_url,
+        categories=categories,
     )
 
 
@@ -521,9 +531,14 @@ def _pick_description(hits: list[WebSearchHit], company_name: str) -> str | None
     normalized_company: str = company_name.lower()
 
     for hit in hits:
+        structured = parse_structured_company_summary(hit.summary)
+        if structured is not None and structured.description:
+            summary: str = _summarize_description(structured.description)
+            if len(summary) >= 20:
+                return summary
         if not hit.summary.strip():
             continue
-        summary: str = _summarize_description(hit.summary)
+        summary = _summarize_description(hit.summary)
         if _is_valid_description(summary, normalized_company):
             return summary
 
@@ -541,6 +556,29 @@ def _pick_description(hits: list[WebSearchHit], company_name: str) -> str | None
             best = candidate
 
     return best
+
+
+def _pick_industry_tags(
+    hits: list[WebSearchHit],
+    company_name: str,
+    description: str | None,
+) -> list[str]:
+    collected: list[str] = []
+    for hit in hits:
+        structured = parse_structured_company_summary(hit.summary)
+        if structured is not None:
+            collected.extend(structured.industries)
+    if collected:
+        return normalize_industry_tags(collected)
+
+    fallback_texts: list[str] = [company_name]
+    if description:
+        fallback_texts.append(description)
+    for hit in hits:
+        if hit.text.strip():
+            fallback_texts.append(hit.text)
+        fallback_texts.extend(hit.highlights)
+    return infer_industry_tags_from_text(*fallback_texts)
 
 
 def _domain_from_url(url: str) -> str | None:

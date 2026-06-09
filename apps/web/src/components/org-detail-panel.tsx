@@ -178,7 +178,7 @@ export const OrgDetailPanel = forwardRef<
             onChange={(event) =>
               setForm((current) => ({ ...current, categories: event.target.value }))
             }
-            placeholder="fintech, saas"
+            placeholder="naics:51, venture_capital"
           />
         </div>
         {saveMutation.error ? (

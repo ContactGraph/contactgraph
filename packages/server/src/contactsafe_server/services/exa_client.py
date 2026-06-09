@@ -85,10 +85,14 @@ class ExaClient:
         *,
         query: str,
         summary_query: str,
+        summary_schema: dict[str, object] | None = None,
         num_results: int = 5,
     ) -> list[WebSearchHit]:
         if not self._api_key:
             return []
+        summary_config: dict[str, object] = {"query": summary_query}
+        if summary_schema is not None:
+            summary_config["schema"] = summary_schema
         return await self._search(
             query=query,
             category=None,
@@ -96,7 +100,7 @@ class ExaClient:
             contents={
                 "text": {"maxCharacters": 2000},
                 "highlights": True,
-                "summary": {"query": summary_query},
+                "summary": summary_config,
             },
         )
 
