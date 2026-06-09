@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, MoreHorizontal, Sparkles } from "lucide-react";
+import { Loader2, MoreHorizontal, Pencil, Sparkles } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -18,9 +18,14 @@ import { proxyPost } from "@/lib/proxy-client";
 interface EntityActionsMenuProps {
   entityLabel: string;
   personId: string;
+  onEdit?: () => void;
 }
 
-export function EntityActionsMenu({ entityLabel, personId }: EntityActionsMenuProps) {
+export function EntityActionsMenu({
+  entityLabel,
+  personId,
+  onEdit,
+}: EntityActionsMenuProps) {
   const queryClient = useQueryClient();
 
   const enrichMutation = useMutation({
@@ -65,7 +70,14 @@ export function EntityActionsMenu({ entityLabel, personId }: EntityActionsMenuPr
           )}
           {enrichMutation.isPending ? "Enriching…" : "Enrich"}
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => notifyComingSoon("Edit")}>
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit?.();
+          }}
+          disabled={onEdit === undefined}
+        >
+          <Pencil className="mr-2 size-4" />
           Edit
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => notifyComingSoon("Merge")}>

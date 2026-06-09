@@ -153,6 +153,10 @@ export interface UserProfileResult {
   headline: string | null;
   location: string | null;
   google_profile_name: string | null;
+  phone: string | null;
+  linkedin_url: string | null;
+  bio_summary: string | null;
+  social_profiles: Record<string, string>;
   experiences: UserExperience[];
   message: string;
 }
@@ -160,6 +164,10 @@ export interface UserProfileResult {
 export interface UpdateUserProfileRequest {
   display_name?: string | null;
   location?: string | null;
+  phone?: string | null;
+  linkedin_url?: string | null;
+  bio_summary?: string | null;
+  social_profiles?: Record<string, string> | null;
 }
 
 export interface SaveUserExperienceRequest {
@@ -418,6 +426,7 @@ export interface PersonDetailResult {
   inferred_categories: string[];
   descriptive_tags: string[];
   social_profiles: Record<string, string>;
+  linkedin_url: string | null;
   web_links: string[];
   sources: string[];
   first_contact_at: string | null;
@@ -481,6 +490,7 @@ export interface UpdatePersonRequest {
   location?: string;
   bio_summary?: string;
   linkedin_url?: string;
+  social_profiles?: Record<string, string>;
 }
 
 export interface UpdateOrgRequest {

@@ -2,7 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,8 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import type { OrgDetailResult, UpdateOrgRequest } from "@/lib/api-types";
+import { isRecordFormDirty } from "@/lib/detail-form-dirty";
+import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { proxyPost } from "@/lib/proxy-client";
 
 interface OrgFormState {
@@ -41,10 +43,37 @@ function parseCategories(raw: string): string[] {
     .filter(Boolean);
 }
 
-export function OrgDetailPanel({ org }: { org: OrgDetailResult }) {
+function buildUpdatePayload(orgId: string, form: OrgFormState): UpdateOrgRequest {
+  return {
+    org_id: orgId,
+    name: form.name,
+    primary_domain: form.primary_domain,
+    description: form.description,
+    linkedin_url: form.linkedin_url,
+    careers_url: form.careers_url,
+    categories: parseCategories(form.categories),
+  };
+}
+
+export const OrgDetailPanel = forwardRef<
+  EditableDetailPanelHandle,
+  {
+    org: OrgDetailResult;
+    onDirtyChange?: (isDirty: boolean) => void;
+  }
+>(function OrgDetailPanel({ org, onDirtyChange }, ref) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState<OrgFormState>(() => orgToForm(org));
   const [saved, setSaved] = useState<boolean>(false);
+  const baseline: OrgFormState = useMemo(() => orgToForm(org), [org]);
+  const isDirty: boolean = useMemo(
+    () => isRecordFormDirty(form, baseline),
+    [form, baseline],
+  );
+
+  useEffect(() => {
+    onDirtyChange?.(isDirty);
+  }, [isDirty, onDirtyChange]);
 
   const saveMutation = useMutation({
     mutationFn: (payload: UpdateOrgRequest) =>
@@ -60,18 +89,27 @@ export function OrgDetailPanel({ org }: { org: OrgDetailResult }) {
     },
   });
 
+  useImperativeHandle(
+    ref,
+    () => ({
+      save: async (): Promise<boolean> => {
+        if (!isDirty) {
+          return true;
+        }
+        try {
+          await saveMutation.mutateAsync(buildUpdatePayload(org.org_id, form));
+          return true;
+        } catch {
+          return false;
+        }
+      },
+    }),
+    [form, isDirty, org.org_id, saveMutation],
+  );
+
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>): void => {
     event.preventDefault();
-    const payload: UpdateOrgRequest = {
-      org_id: org.org_id,
-      name: form.name,
-      primary_domain: form.primary_domain,
-      description: form.description,
-      linkedin_url: form.linkedin_url,
-      careers_url: form.careers_url,
-      categories: parseCategories(form.categories),
-    };
-    saveMutation.mutate(payload);
+    saveMutation.mutate(buildUpdatePayload(org.org_id, form));
   };
 
   return (
@@ -149,7 +187,11 @@ export function OrgDetailPanel({ org }: { org: OrgDetailResult }) {
           </Alert>
         ) : null}
         <div className="flex items-center gap-2">
-          <Button type="submit" size="sm" disabled={saveMutation.isPending}>
+          <Button
+            type="submit"
+            size="sm"
+            disabled={!isDirty || saveMutation.isPending}
+          >
             {saveMutation.isPending ? <Loader2 className="animate-spin" /> : null}
             Save changes
           </Button>
@@ -202,4 +244,4 @@ export function OrgDetailPanel({ org }: { org: OrgDetailResult }) {
       </section>
     </div>
   );
-}
+});

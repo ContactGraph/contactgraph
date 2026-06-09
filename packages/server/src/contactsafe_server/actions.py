@@ -61,13 +61,15 @@ from contactsafe_core.schemas import (
     ViewTrustedUsersResult,
 )
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from contactsafe_server.db.models import ConnectSession, EmploymentClaim, Org, PersonAttributeClaim, Source, User
-from contactsafe_server.services.claim_writer import record_employment
+from contactsafe_server.db.models import ConnectSession, EmploymentClaim, Org, Person, PersonAlias, PersonAttributeClaim, Source, User
+from contactsafe_server.services.claim_writer import record_employment, record_person_attribute
+from contactsafe_server.services.contacts_service import normalize_social_platform
 from contactsafe_server.services.entity_resolution import EntityResolver
 from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
+from contactsafe_server.services.phone_normalization import normalize_phone
 from contactsafe_server.services.user_person_service import ensure_user_person
 from contactsafe_server.deps import (
     AppContext,
@@ -365,6 +367,36 @@ async def _load_user_headline(
     return row
 
 
+async def _load_user_person_fields(
+    db: AsyncSession,
+    person_id: UUID,
+) -> dict[str, object]:
+    """Load phone, linkedin_url, bio_summary, social_profiles from the user's Person."""
+    person: Person | None = await db.get(Person, person_id)
+    if person is None:
+        return {}
+
+    phones: list[str] = list(dict.fromkeys(person.phone_numbers or []))
+    social_profiles: dict[str, str] = dict(person.social_profiles or {})
+
+    alias_result = await db.execute(
+        select(PersonAlias.value).where(
+            PersonAlias.person_id == person_id,
+            PersonAlias.kind == "linkedin_url",
+        ).limit(1)
+    )
+    linkedin_url: str | None = alias_result.scalar_one_or_none()
+    if linkedin_url is None:
+        linkedin_url = social_profiles.get("linkedin")
+
+    return {
+        "phone": phones[0] if phones else None,
+        "linkedin_url": linkedin_url,
+        "bio_summary": person.bio_summary,
+        "social_profiles": social_profiles,
+    }
+
+
 async def get_user_profile(
     ctx: AppContext,
     user_id: UUID | None,
@@ -377,23 +409,92 @@ async def get_user_profile(
             return UserProfileResult(message="User not found.")
         experiences: list[UserExperience] = await _load_user_experiences(db, user)
         headline: str | None = await _load_user_headline(db, user)
+
+        person_fields: dict[str, object] = {}
+        if user.person_id is not None:
+            person_fields = await _load_user_person_fields(db, user.person_id)
+
         return UserProfileResult(
             email=user.email,
             display_name=user.display_name or user.google_profile_name,
             headline=headline,
             location=user.location,
             google_profile_name=user.google_profile_name,
+            phone=person_fields.get("phone"),  # type: ignore[arg-type]
+            linkedin_url=person_fields.get("linkedin_url"),  # type: ignore[arg-type]
+            bio_summary=person_fields.get("bio_summary"),  # type: ignore[arg-type]
+            social_profiles=person_fields.get("social_profiles", {}),  # type: ignore[arg-type]
             experiences=experiences,
             message="User profile loaded.",
+        )
+
+
+_MANUAL_SOURCE_KIND: str = "user_manual"
+_MANUAL_CONFIDENCE: float = 1.0
+
+
+async def _apply_user_person_attribute(
+    db: AsyncSession,
+    *,
+    person_id: UUID,
+    user_id: UUID,
+    kind: str,
+    value: str | None,
+) -> None:
+    if value is None:
+        return
+    cleaned: str = value.strip()
+    if not cleaned:
+        return
+    await record_person_attribute(
+        db,
+        person_id=person_id,
+        kind=kind,
+        value=cleaned,
+        contributor_user_id=user_id,
+        contributor_source_kind=_MANUAL_SOURCE_KIND,
+        confidence=_MANUAL_CONFIDENCE,
+    )
+
+
+async def _sync_user_social_profiles(
+    db: AsyncSession,
+    *,
+    person_id: UUID,
+    user_id: UUID,
+    profiles: dict[str, str],
+) -> None:
+    await db.execute(
+        delete(PersonAttributeClaim).where(
+            PersonAttributeClaim.person_id == person_id,
+            PersonAttributeClaim.kind.like("social_profile.%"),
+            PersonAttributeClaim.kind != "social_profile.linkedin",
+        )
+    )
+    seen_platforms: set[str] = set()
+    for raw_platform, raw_url in profiles.items():
+        platform: str | None = normalize_social_platform(raw_platform)
+        if platform is None or platform in seen_platforms:
+            continue
+        url: str = raw_url.strip().rstrip("/")
+        if not url:
+            continue
+        seen_platforms.add(platform)
+        await record_person_attribute(
+            db,
+            person_id=person_id,
+            kind=f"social_profile.{platform}",
+            value=url,
+            contributor_user_id=user_id,
+            contributor_source_kind=_MANUAL_SOURCE_KIND,
+            confidence=_MANUAL_CONFIDENCE,
         )
 
 
 async def update_user_profile(
     ctx: AppContext,
     user_id: UUID | None,
-    *,
-    display_name: str | None = None,
-    location: str | None = None,
+    body: UpdateUserProfileRequest,
 ) -> UserProfileResult:
     if user_id is None:
         return UserProfileResult(message="Authentication required. Provide a Bearer token.")
@@ -401,19 +502,77 @@ async def update_user_profile(
         user: User | None = await db.get(User, user_id)
         if user is None:
             return UserProfileResult(message="User not found.")
-        if display_name is not None:
-            cleaned_name: str = display_name.strip()
+        if body.display_name is not None:
+            cleaned_name: str = body.display_name.strip()
             user.display_name = cleaned_name or None
-        if location is not None:
-            cleaned_location: str = location.strip()
+        if body.location is not None:
+            cleaned_location: str = body.location.strip()
             user.location = cleaned_location or None
+
+        has_person_fields: bool = any(
+            getattr(body, f) is not None
+            for f in ("phone", "linkedin_url", "bio_summary", "social_profiles")
+        )
+        if has_person_fields:
+            person: Person = await ensure_user_person(db, user)
+            resolver: EntityResolver = EntityResolver(db)
+
+            await _apply_user_person_attribute(
+                db, person_id=person.id, user_id=user.id, kind="phone", value=body.phone,
+            )
+            if body.phone is not None and body.phone.strip():
+                normalized_phone: str = normalize_phone(body.phone.strip())
+                await resolver.add_person_alias(
+                    person_id=person.id, kind="phone", value=normalized_phone, confidence=_MANUAL_CONFIDENCE,
+                )
+
+            await _apply_user_person_attribute(
+                db, person_id=person.id, user_id=user.id, kind="bio_summary", value=body.bio_summary,
+            )
+            await _apply_user_person_attribute(
+                db, person_id=person.id, user_id=user.id, kind="location", value=body.location,
+            )
+
+            if body.linkedin_url is not None:
+                linkedin: str = body.linkedin_url.strip().rstrip("/")
+                if linkedin:
+                    await record_person_attribute(
+                        db,
+                        person_id=person.id,
+                        kind="social_profile.linkedin",
+                        value=linkedin,
+                        contributor_user_id=user.id,
+                        contributor_source_kind=_MANUAL_SOURCE_KIND,
+                        confidence=_MANUAL_CONFIDENCE,
+                    )
+                    await resolver.add_person_alias(
+                        person_id=person.id, kind="linkedin_url", value=linkedin, confidence=_MANUAL_CONFIDENCE,
+                    )
+
+            if body.social_profiles is not None:
+                await _sync_user_social_profiles(
+                    db, person_id=person.id, user_id=user.id, profiles=body.social_profiles,
+                )
+
+            recompute: PersonProfileRecompute = PersonProfileRecompute(db)
+            await recompute.recompute_persons([person.id])
+
         await db.commit()
         await db.refresh(user)
+
+        person_fields: dict[str, object] = {}
+        if user.person_id is not None:
+            person_fields = await _load_user_person_fields(db, user.person_id)
+
         return UserProfileResult(
             email=user.email,
             display_name=user.display_name or user.google_profile_name,
             location=user.location,
             google_profile_name=user.google_profile_name,
+            phone=person_fields.get("phone"),  # type: ignore[arg-type]
+            linkedin_url=person_fields.get("linkedin_url"),  # type: ignore[arg-type]
+            bio_summary=person_fields.get("bio_summary"),  # type: ignore[arg-type]
+            social_profiles=person_fields.get("social_profiles", {}),  # type: ignore[arg-type]
             message="Profile updated.",
         )
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -20,6 +20,7 @@ import {
 } from "@/components/data-table/compact-table";
 import { EntityActionsMenu } from "@/components/entity-actions-menu";
 import { PersonDetailPanel } from "@/components/person-detail-panel";
+import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,6 +34,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type { ListPeopleResult, PersonDetailResult, PersonListItem } from "@/lib/api-types";
+import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { proxyPost } from "@/lib/proxy-client";
 
@@ -43,8 +45,45 @@ export default function PeoplePage() {
     { id: "name", desc: false },
   ]);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const [isDetailDirty, setIsDetailDirty] = useState<boolean>(false);
+  const [discardDialogOpen, setDiscardDialogOpen] = useState<boolean>(false);
+  const [isClosingSave, setIsClosingSave] = useState<boolean>(false);
+  const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
 
   const [filter, setFilter] = useState<"all" | "phone_linkedin" | "phone_only" | "linkedin_only">("phone_linkedin");
+
+  useEffect(() => {
+    setIsDetailDirty(false);
+  }, [selectedPersonId]);
+
+  const closeDetailPanel = (): void => {
+    setSelectedPersonId(null);
+    setIsDetailDirty(false);
+    setDiscardDialogOpen(false);
+  };
+
+  const handleDetailSheetOpenChange = (open: boolean): void => {
+    if (open) {
+      return;
+    }
+    if (isDetailDirty) {
+      setDiscardDialogOpen(true);
+      return;
+    }
+    closeDetailPanel();
+  };
+
+  const handleSaveAndClose = async (): Promise<void> => {
+    setIsClosingSave(true);
+    try {
+      const saved: boolean = (await detailPanelRef.current?.save()) ?? false;
+      if (saved) {
+        closeDetailPanel();
+      }
+    } finally {
+      setIsClosingSave(false);
+    }
+  };
 
   const peopleQuery = useQuery({
     queryKey: ["people"],
@@ -149,6 +188,7 @@ export default function PeoplePage() {
             <EntityActionsMenu
               entityLabel={row.original.display_name}
               personId={row.original.person_id}
+              onEdit={() => setSelectedPersonId(row.original.person_id)}
             />
           </div>
         ),
@@ -325,11 +365,7 @@ export default function PeoplePage() {
 
       <Sheet
         open={selectedPersonId !== null}
-        onOpenChange={(open: boolean) => {
-          if (!open) {
-            setSelectedPersonId(null);
-          }
-        }}
+        onOpenChange={handleDetailSheetOpenChange}
       >
         <SheetContent className="flex w-full flex-col p-0 sm:max-w-xl">
           <SheetHeader>
@@ -345,8 +381,10 @@ export default function PeoplePage() {
             </div>
           ) : detailQuery.data ? (
             <PersonDetailPanel
+              ref={detailPanelRef}
               key={`${selectedPersonId}-${detailQuery.dataUpdatedAt}`}
               person={detailQuery.data}
+              onDirtyChange={setIsDetailDirty}
             />
           ) : detailQuery.error ? (
             <div className="px-6 py-4">
@@ -357,6 +395,14 @@ export default function PeoplePage() {
           ) : null}
         </SheetContent>
       </Sheet>
+
+      <UnsavedChangesDialog
+        open={discardDialogOpen}
+        onOpenChange={setDiscardDialogOpen}
+        onSave={handleSaveAndClose}
+        onDiscard={closeDetailPanel}
+        isSaving={isClosingSave}
+      />
     </div>
   );
 }

@@ -148,6 +148,7 @@ class PersonDetailResult(BaseModel):
     inferred_categories: list[str] = Field(default_factory=list)
     descriptive_tags: list[str] = Field(default_factory=list)
     social_profiles: dict[str, str] = Field(default_factory=dict)
+    linkedin_url: str | None = None
     web_links: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)
     first_contact_at: datetime | None = None
@@ -248,6 +249,7 @@ class UpdatePersonRequest(BaseModel):
     location: str | None = None
     bio_summary: str | None = None
     linkedin_url: str | None = None
+    social_profiles: dict[str, str] | None = None
 
 
 class UpdateOrgRequest(BaseModel):
