@@ -1,7 +1,16 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { CheckCircle2, Circle, Loader2, Plus, RefreshCw } from "lucide-react";
+import {
+  ArrowRight,
+  CheckCircle2,
+  ChevronDown,
+  Circle,
+  Loader2,
+  Plus,
+  RefreshCw,
+} from "lucide-react";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { LinkedInConnectionsUploadDialog } from "@/components/setup/linkedin-connections-upload-dialog";
@@ -35,6 +44,7 @@ import type {
 } from "@/lib/api-types";
 import { formatSourceType, SyncStateBadge } from "@/lib/formatters";
 import { proxyPost } from "@/lib/proxy-client";
+import { cn } from "@/lib/utils";
 
 const IMPORT_COMPLETE_STATES: ReadonlySet<SyncState> = new Set([
   "partial",
@@ -46,47 +56,109 @@ type SetupStepId =
   | "gmail"
   | "linkedin"
   | "linkedin_profile"
-  | "org_enrichment";
+  | "org_enrichment"
+  | "target_companies"
+  | "job_scrapers";
+
+type SetupSectionId = "network" | "job_search";
 
 interface SetupStep {
   id: SetupStepId;
+  section: SetupSectionId;
   title: string;
   description: string;
   optional?: boolean;
-  phase: "network" | "enrich";
+  comingSoon?: boolean;
+}
+
+interface FutureSection {
+  id: string;
+  title: string;
+  description: string;
 }
 
 const setupSteps: ReadonlyArray<SetupStep> = [
   {
     id: "phone",
-    phase: "network",
-    title: "Import your network",
+    section: "network",
+    title: "Import phone contacts",
     description:
       "Upload phone contacts (.vcf) from iPhone or Android — this is your authoritative network.",
   },
   {
     id: "linkedin",
-    phase: "enrich",
-    title: "Upload LinkedIn connections",
+    section: "network",
+    title: "Import LinkedIn connections",
     description:
-      "Match LinkedIn profiles to phone contacts and identify strong professional ties.",
-  },
-  {
-    id: "linkedin_profile",
-    phase: "enrich",
-    title: "Upload your LinkedIn profile",
-    description:
-      "Optional PDF export of your own profile for better self-identification during enrichment.",
-    optional: true,
+      "Upload your LinkedIn Connections.csv — identifies your strong professional ties.",
   },
   {
     id: "org_enrichment",
-    phase: "enrich",
+    section: "network",
     title: "Enrich companies",
     description:
-      "Look up company websites, descriptions, careers pages, and LinkedIn profiles.",
+      "Look up company websites and profiles — maps companies where you have strong ties.",
+  },
+  {
+    id: "linkedin_profile",
+    section: "job_search",
+    title: "Upload your LinkedIn profile",
+    description:
+      "Export your profile as PDF so we can match you to relevant roles and companies.",
+  },
+  {
+    id: "target_companies",
+    section: "job_search",
+    title: "Select target companies",
+    description:
+      "Browse companies with strong ties and filter by industry, size, and more.",
+  },
+  {
+    id: "job_scrapers",
+    section: "job_search",
+    title: "Set up daily job scrapers",
+    description:
+      "Monitor career pages at your target companies and get daily alerts.",
+    comingSoon: true,
   },
 ];
+
+const futureSections: ReadonlyArray<FutureSection> = [
+  {
+    id: "hiring",
+    title: "Hiring",
+    description:
+      "Edit your organization profile, upload a job description, and find warm matches in your network.",
+  },
+  {
+    id: "fundraising",
+    title: "Fundraising",
+    description:
+      "Identify investors and warm introductions through your professional network.",
+  },
+  {
+    id: "outreach",
+    title: "Ongoing warm outreach",
+    description:
+      "Stay in touch with key relationships — a personal CRM built on your network.",
+  },
+];
+
+const sectionMeta: Record<
+  SetupSectionId,
+  { title: string; description: string }
+> = {
+  network: {
+    title: "Build your network",
+    description:
+      "Start here. Import contacts and enrich companies before using any workflow below.",
+  },
+  job_search: {
+    title: "Job search",
+    description:
+      "Upload your profile, pick target companies, and set up job monitoring.",
+  },
+};
 
 function sourceForType(
   sources: ReadonlyArray<SourceSummary>,
@@ -136,6 +208,9 @@ function stepComplete(
         orgEnrichmentStatus.orgs_total > 0 &&
         orgEnrichmentStatus.orgs_enriched >= orgEnrichmentStatus.orgs_total
       );
+    case "target_companies":
+    case "job_scrapers":
+      return false;
     default:
       return false;
   }
@@ -165,93 +240,6 @@ interface StepImportStatusDisplay {
   count: number | null;
   suffix: string;
   retryLabel: string;
-}
-
-function buildConnectedSourcesSummary(
-  sources: ReadonlyArray<SourceSummary>,
-  networkStatus: NetworkStatusResult | undefined,
-  orgEnrichmentStatus: OrgEnrichmentStatusResult | undefined,
-  isLoading: boolean,
-): string {
-  if (isLoading) {
-    return "Loading connected sources…";
-  }
-
-  const parts: string[] = [];
-
-  const phoneSource: SourceSummary | undefined = sourceForType(
-    sources,
-    "phone_contacts_upload",
-  );
-  if (phoneSource?.sync_state === "complete") {
-    parts.push(
-      `Phone contacts (${phoneSource.contacts_resolved.toLocaleString()} uploaded)`,
-    );
-  } else if (
-    phoneSource?.sync_state === "syncing" ||
-    phoneSource?.sync_state === "pending"
-  ) {
-    parts.push("Phone contacts (importing…)");
-  }
-
-  const linkedinSource: SourceSummary | undefined = sourceForType(
-    sources,
-    "linkedin_connections_upload",
-  );
-  if (linkedinSource?.sync_state === "complete") {
-    parts.push(
-      `LinkedIn connections (${linkedinSource.contacts_resolved.toLocaleString()} imported)`,
-    );
-  } else if (
-    linkedinSource?.sync_state === "syncing" ||
-    linkedinSource?.sync_state === "pending"
-  ) {
-    parts.push("LinkedIn connections (importing…)");
-  }
-
-  const linkedinProfileSource: SourceSummary | undefined = sourceForType(
-    sources,
-    "linkedin_profile_upload",
-  );
-  if (linkedinProfileSource?.sync_state === "complete") {
-    parts.push("LinkedIn profile uploaded");
-  }
-
-  const gmailSource: SourceSummary | undefined = sourceForType(sources, "google_mail");
-  if (networkStatus?.gmail_connected) {
-    const gmailCount: number =
-      networkStatus.gmail_matched_count || gmailSource?.contacts_resolved || 0;
-    parts.push(
-      gmailCount > 0
-        ? `Gmail (${gmailCount.toLocaleString()} matched)`
-        : "Gmail connected",
-    );
-  }
-
-  if (orgEnrichmentStatus !== undefined) {
-    if (orgEnrichmentStatus.state === "running" && orgEnrichmentStatus.orgs_total > 0) {
-      parts.push(
-        `Company enrichment (${orgEnrichmentStatus.orgs_enriched.toLocaleString()} of ${orgEnrichmentStatus.orgs_total.toLocaleString()})`,
-      );
-    } else if (
-      orgEnrichmentStatus.orgs_total > 0 &&
-      orgEnrichmentStatus.orgs_enriched >= orgEnrichmentStatus.orgs_total
-    ) {
-      parts.push(
-        `Companies enriched (${orgEnrichmentStatus.orgs_enriched.toLocaleString()})`,
-      );
-    } else if (orgEnrichmentStatus.orgs_enriched > 0) {
-      parts.push(
-        `Companies partially enriched (${orgEnrichmentStatus.orgs_enriched.toLocaleString()} of ${orgEnrichmentStatus.orgs_total.toLocaleString()})`,
-      );
-    }
-  }
-
-  if (parts.length === 0) {
-    return "No data sources connected yet.";
-  }
-
-  return parts.join(" · ");
 }
 
 function getStepImportStatus(
@@ -305,6 +293,8 @@ function getStepImportStatus(
       };
     }
     case "org_enrichment":
+    case "target_companies":
+    case "job_scrapers":
       return null;
     default:
       return null;
@@ -371,7 +361,23 @@ function StepActionArea({
   );
 }
 
-export default function SourcesPage() {
+function FutureSectionCard({ title, description }: FutureSection) {
+  return (
+    <Card className="opacity-75">
+      <CardHeader className="flex flex-row items-start justify-between gap-4">
+        <div className="space-y-1">
+          <CardTitle className="text-base">{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
+        </div>
+        <Badge variant="secondary" className="shrink-0">
+          Coming soon
+        </Badge>
+      </CardHeader>
+    </Card>
+  );
+}
+
+export default function SetupPage() {
   const queryClient = useQueryClient();
   const popupRef = useRef<Window | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -391,6 +397,9 @@ export default function SourcesPage() {
     useState<boolean>(false);
   const [linkedinConnectionsProcessing, setLinkedinConnectionsProcessing] =
     useState<boolean>(false);
+  const [orgEnrichmentMessage, setOrgEnrichmentMessage] = useState<string | null>(
+    null,
+  );
   const [orgEnrichmentError, setOrgEnrichmentError] = useState<string | null>(null);
 
   const clearPollTimer = useCallback((): void => {
@@ -439,15 +448,13 @@ export default function SourcesPage() {
   const enrichOrgsMutation = useMutation({
     mutationFn: () => proxyPost<EnrichOrgsResult>("enrich-orgs"),
     onSuccess: async (result: EnrichOrgsResult) => {
-      if (!result.scheduled) {
-        setOrgEnrichmentError(result.message);
-      } else {
-        setOrgEnrichmentError(null);
-      }
+      setOrgEnrichmentError(null);
+      setOrgEnrichmentMessage(result.message);
       await queryClient.invalidateQueries({ queryKey: ["org-enrichment-status"] });
       await queryClient.invalidateQueries({ queryKey: ["organizations"] });
     },
     onError: (error: Error) => {
+      setOrgEnrichmentMessage(null);
       setOrgEnrichmentError(error.message);
     },
   });
@@ -699,25 +706,12 @@ export default function SourcesPage() {
   const orgEnrichmentStatus: OrgEnrichmentStatusResult | undefined =
     orgEnrichmentStatusQuery.data;
 
-  const connectedSourcesSummary: string = buildConnectedSourcesSummary(
-    sources,
-    networkStatus,
-    orgEnrichmentStatus,
-    sourcesQuery.isLoading || networkStatusQuery.isLoading,
-  );
-
   useEffect(() => {
     if (orgEnrichmentStatus?.state !== "complete") {
       return;
     }
     void queryClient.invalidateQueries({ queryKey: ["organizations"] });
   }, [orgEnrichmentStatus?.state, queryClient]);
-
-  useEffect(() => {
-    if (orgEnrichmentStatus?.state === "running") {
-      setOrgEnrichmentError(null);
-    }
-  }, [orgEnrichmentStatus?.state]);
 
   const renderStepRow = (step: SetupStep) => {
     const complete: boolean = stepComplete(step.id, sources, orgEnrichmentStatus);
@@ -808,7 +802,9 @@ export default function SourcesPage() {
       >
         <div className="flex gap-3">
           <div className="mt-0.5 shrink-0">
-            {complete ? (
+            {step.comingSoon ? (
+              <Circle className="size-5 text-muted-foreground/50" />
+            ) : complete ? (
               <CheckCircle2 className="size-5 text-green-600" />
             ) : inProgress ? (
               <Loader2 className="size-5 animate-spin text-muted-foreground" />
@@ -819,11 +815,13 @@ export default function SourcesPage() {
           <div className="space-y-1">
             <div className="flex flex-wrap items-center gap-2">
               <p className="font-medium">{step.title}</p>
-              {step.id === "phone" ? (
+              {step.comingSoon ? (
+                <Badge variant="secondary" className="text-xs">
+                  Coming soon
+                </Badge>
+              ) : step.id === "phone" ? (
                 <span className="text-xs text-muted-foreground">Required</span>
-              ) : step.id === "linkedin" ? (
-                <span className="text-xs text-muted-foreground">Recommended</span>
-              ) : step.id === "org_enrichment" ? (
+              ) : step.id === "linkedin" || step.id === "org_enrichment" ? (
                 <span className="text-xs text-muted-foreground">Recommended</span>
               ) : step.optional ? (
                 <span className="text-xs text-muted-foreground">Optional</span>
@@ -895,25 +893,37 @@ export default function SourcesPage() {
             orgEnrichmentStatus.error ? (
               <p className="text-xs text-destructive">{orgEnrichmentStatus.error}</p>
             ) : null}
-            {step.id === "org_enrichment" && orgEnrichmentError ? (
-              <p className="text-xs text-destructive">{orgEnrichmentError}</p>
-            ) : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2 sm:justify-end sm:pt-0.5">
-          {actionProps ? <StepActionArea {...actionProps} /> : null}
+          {step.id === "target_companies" ? (
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/target-companies">
+                View targets
+                <ArrowRight className="size-4" />
+              </Link>
+            </Button>
+          ) : step.comingSoon ? (
+            <Button variant="outline" size="sm" disabled>
+              Coming soon
+            </Button>
+          ) : actionProps ? (
+            <StepActionArea {...actionProps} />
+          ) : null}
         </div>
       </div>
     );
   };
 
+  const sectionOrder: readonly SetupSectionId[] = ["network", "job_search"];
+
   return (
     <div className="space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Manage your data sources
-        </h1>
-        <p className="text-muted-foreground">{connectedSourcesSummary}</p>
+        <h1 className="text-2xl font-semibold tracking-tight">Setup</h1>
+        <p className="text-muted-foreground">
+          Upload data, configure enrichment and monitoring.
+        </p>
       </div>
 
       {connectError ? (
@@ -926,63 +936,73 @@ export default function SourcesPage() {
           <AlertDescription>{connectMessage}</AlertDescription>
         </Alert>
       ) : null}
+      {orgEnrichmentError ? (
+        <Alert variant="destructive">
+          <AlertDescription>{orgEnrichmentError}</AlertDescription>
+        </Alert>
+      ) : null}
+      {orgEnrichmentMessage ? (
+        <Alert>
+          <AlertDescription>{orgEnrichmentMessage}</AlertDescription>
+        </Alert>
+      ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Phase 1 · Import your network</CardTitle>
-          <CardDescription>
-            Start with phone contacts. This defines who is in your network.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {setupSteps
-            .filter((step) => step.phase === "network")
-            .map((step) => renderStepRow(step))}
-        </CardContent>
-      </Card>
+      {sectionOrder.map((sectionId) => {
+        const meta = sectionMeta[sectionId];
+        const steps = setupSteps.filter((step) => step.section === sectionId);
+        return (
+          <Card key={sectionId}>
+            <CardHeader>
+              <CardTitle>{meta.title}</CardTitle>
+              <CardDescription>{meta.description}</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {steps.map((step) => renderStepRow(step))}
+            </CardContent>
+          </Card>
+        );
+      })}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Phase 2 · Enrich your network</CardTitle>
-          <CardDescription>
-            Add LinkedIn data to your phone contacts to identify strong
-            professional ties with current employers and titles.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {setupSteps
-            .filter((step) => step.phase === "enrich")
-            .map((step) => renderStepRow(step))}
-        </CardContent>
-      </Card>
+      {futureSections.map((section) => (
+        <FutureSectionCard key={section.id} {...section} />
+      ))}
 
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4">
+      <details className="group rounded-lg border">
+        <summary
+          className={cn(
+            "flex cursor-pointer list-none items-center justify-between gap-4 px-6 py-4",
+            "[&::-webkit-details-marker]:hidden",
+          )}
+        >
           <div>
-            <CardTitle>Raw imports</CardTitle>
-            <CardDescription>
-              {sourcesQuery.data?.message ?? "Loading sources…"}
-            </CardDescription>
+            <p className="font-medium">Raw imports</p>
+            <p className="text-sm text-muted-foreground">
+              {sourcesQuery.data?.message ?? "View and sync connected data sources"}
+            </p>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => {
-              void sourcesQuery.refetch();
-              void networkStatusQuery.refetch();
-            }}
-            disabled={
-              sourcesQuery.isFetching ||
-              networkStatusQuery.isFetching
-            }
-          >
-            <RefreshCw
-              className={`size-4 ${sourcesQuery.isFetching ? "animate-spin" : ""}`}
-            />
-            Refresh
-          </Button>
-        </CardHeader>
-        <CardContent>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={(event) => {
+                event.preventDefault();
+                void sourcesQuery.refetch();
+                void networkStatusQuery.refetch();
+              }}
+              disabled={
+                sourcesQuery.isFetching ||
+                networkStatusQuery.isFetching
+              }
+            >
+              <RefreshCw
+                className={`size-4 ${sourcesQuery.isFetching ? "animate-spin" : ""}`}
+              />
+              Refresh
+            </Button>
+            <ChevronDown className="size-4 text-muted-foreground transition-transform group-open:rotate-180" />
+          </div>
+        </summary>
+        <div className="border-t px-6 pb-6 pt-4">
           {sourcesQuery.isLoading ? (
             <div className="space-y-3">
               <Skeleton className="h-16 w-full" />
@@ -1034,8 +1054,8 @@ export default function SourcesPage() {
               ))}
             </ul>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </details>
 
       <PhoneContactsUploadDialog
         open={phoneDialogOpen}

@@ -19,21 +19,30 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import (
     CancelOrgEnrichmentResult,
+    CreateOrgListRequest,
+    CreateOrgListResult,
     DedupPersonsResult,
+    DeleteOrgListRequest,
+    DeleteOrgListResult,
     EnrichOrgsResult,
     EnrichPersonRequest,
     EnrichPersonResult,
     EnrichStrongTiesResult,
     GetOrgRequest,
     GetPersonRequest,
+    ListOrgListsResult,
     ListOrgsResult,
     ListPeopleRequest,
     ListPeopleResult,
     ListStrongTiesResult,
+    ModifyOrgListMembershipRequest,
+    ModifyOrgListMembershipResult,
     NetworkStatusResult,
     OrgDetailResult,
     OrgEnrichmentStatusResult,
     PersonDetailResult,
+    RenameOrgListRequest,
+    RenameOrgListResult,
     ScrapingDogEnrichmentStatusResult,
     StrongTieCompaniesResult,
     StrongTieCountResult,
@@ -620,6 +629,71 @@ async def api_cancel_org_enrichment(
     user_id: EffectiveUser,
 ) -> CancelOrgEnrichmentResult:
     return await actions.cancel_org_enrichment(ctx, user_id)
+
+
+@router.post("/list-org-lists", response_model=ListOrgListsResult)
+async def api_list_org_lists(ctx: Ctx, user_id: EffectiveUser) -> ListOrgListsResult:
+    return await actions.list_org_lists(ctx, user_id)
+
+
+@router.post("/create-org-list", response_model=CreateOrgListResult)
+async def api_create_org_list(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: CreateOrgListRequest,
+) -> CreateOrgListResult:
+    try:
+        return await actions.create_org_list(ctx, user_id, body=body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/rename-org-list", response_model=RenameOrgListResult)
+async def api_rename_org_list(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: RenameOrgListRequest,
+) -> RenameOrgListResult:
+    try:
+        return await actions.rename_org_list(ctx, user_id, body=body)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/delete-org-list", response_model=DeleteOrgListResult)
+async def api_delete_org_list(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: DeleteOrgListRequest,
+) -> DeleteOrgListResult:
+    try:
+        return await actions.delete_org_list(ctx, user_id, body=body)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/add-orgs-to-list", response_model=ModifyOrgListMembershipResult)
+async def api_add_orgs_to_list(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: ModifyOrgListMembershipRequest,
+) -> ModifyOrgListMembershipResult:
+    try:
+        return await actions.add_orgs_to_list(ctx, user_id, body=body)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/remove-orgs-from-list", response_model=ModifyOrgListMembershipResult)
+async def api_remove_orgs_from_list(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: ModifyOrgListMembershipRequest,
+) -> ModifyOrgListMembershipResult:
+    try:
+        return await actions.remove_orgs_from_list(ctx, user_id, body=body)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.post("/dedup-persons", response_model=DedupPersonsResult)

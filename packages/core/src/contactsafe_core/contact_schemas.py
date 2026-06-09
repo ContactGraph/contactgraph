@@ -264,3 +264,56 @@ class UpdateOrgRequest(BaseModel):
     linkedin_url: str | None = None
     careers_url: str | None = None
     categories: list[str] | None = None
+
+
+class OrgListSummary(BaseModel):
+    list_id: UUID
+    name: str
+    org_count: int = 0
+    org_ids: list[UUID] = Field(default_factory=list)
+
+
+class ListOrgListsResult(BaseModel):
+    lists: list[OrgListSummary] = Field(default_factory=list)
+    message: str
+
+
+class CreateOrgListRequest(BaseModel):
+    name: str
+
+
+class CreateOrgListResult(BaseModel):
+    list_id: UUID
+    name: str
+    message: str
+
+
+class RenameOrgListRequest(BaseModel):
+    list_id: str
+    name: str
+
+
+class RenameOrgListResult(BaseModel):
+    list_id: UUID
+    name: str
+    message: str
+
+
+class DeleteOrgListRequest(BaseModel):
+    list_id: str
+
+
+class DeleteOrgListResult(BaseModel):
+    deleted: bool
+    message: str
+
+
+class ModifyOrgListMembershipRequest(BaseModel):
+    list_id: str
+    org_ids: list[str]
+
+
+class ModifyOrgListMembershipResult(BaseModel):
+    list_id: UUID
+    affected_count: int
+    message: str

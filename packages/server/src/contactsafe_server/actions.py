@@ -14,17 +14,26 @@ from datetime import UTC, datetime
 
 from contactsafe_core.contact_schemas import (
     CancelOrgEnrichmentResult,
+    CreateOrgListRequest,
+    CreateOrgListResult,
     DedupPersonsResult,
+    DeleteOrgListRequest,
+    DeleteOrgListResult,
     EnrichOrgsResult,
     EnrichPersonResult,
     EnrichStrongTiesResult,
+    ListOrgListsResult,
     ListOrgsResult,
     ListPeopleResult,
     ListStrongTiesResult,
+    ModifyOrgListMembershipRequest,
+    ModifyOrgListMembershipResult,
     NetworkStatusResult,
     OrgDetailResult,
     OrgEnrichmentStatusResult,
     PersonDetailResult,
+    RenameOrgListRequest,
+    RenameOrgListResult,
     ScrapingDogEnrichmentStatusResult,
     StrongTieCompaniesResult,
     StrongTieCountResult,
@@ -79,6 +88,7 @@ from contactsafe_server.deps import (
     build_source_service,
 )
 from contactsafe_server.services.contacts_service import ContactsService
+from contactsafe_server.services.org_list_service import OrgListService
 from contactsafe_server.services.strong_tie_api_service import StrongTieApiService
 from contactsafe_server.services.graph_summary_service import GraphSummaryService
 from contactsafe_server.services.network_query_service import NetworkQueryService
@@ -1359,5 +1369,109 @@ async def dedup_persons(
     async with ctx.session_factory() as db:
         service: PersonDedupService = PersonDedupService(db)
         result: DedupPersonsResult = await service.dedup_for_user(user_id)
+        await db.commit()
+        return result
+
+
+async def list_org_lists(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> ListOrgListsResult:
+    if user_id is None:
+        return ListOrgListsResult(lists=[], message="Authentication required.")
+    async with ctx.session_factory() as db:
+        service: OrgListService = OrgListService(db)
+        return await service.list_org_lists(user_id)
+
+
+async def create_org_list(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: CreateOrgListRequest,
+) -> CreateOrgListResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        service: OrgListService = OrgListService(db)
+        result: CreateOrgListResult = await service.create_org_list(
+            user_id,
+            name=body.name,
+        )
+        await db.commit()
+        return result
+
+
+async def rename_org_list(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: RenameOrgListRequest,
+) -> RenameOrgListResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        service: OrgListService = OrgListService(db)
+        result: RenameOrgListResult = await service.rename_org_list(
+            user_id,
+            list_id=UUID(body.list_id),
+            name=body.name,
+        )
+        await db.commit()
+        return result
+
+
+async def delete_org_list(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: DeleteOrgListRequest,
+) -> DeleteOrgListResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        service: OrgListService = OrgListService(db)
+        result: DeleteOrgListResult = await service.delete_org_list(
+            user_id,
+            list_id=UUID(body.list_id),
+        )
+        await db.commit()
+        return result
+
+
+async def add_orgs_to_list(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: ModifyOrgListMembershipRequest,
+) -> ModifyOrgListMembershipResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        service: OrgListService = OrgListService(db)
+        result: ModifyOrgListMembershipResult = await service.add_orgs_to_list(
+            user_id,
+            list_id=UUID(body.list_id),
+            org_ids=[UUID(org_id) for org_id in body.org_ids],
+        )
+        await db.commit()
+        return result
+
+
+async def remove_orgs_from_list(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: ModifyOrgListMembershipRequest,
+) -> ModifyOrgListMembershipResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        service: OrgListService = OrgListService(db)
+        result: ModifyOrgListMembershipResult = await service.remove_orgs_from_list(
+            user_id,
+            list_id=UUID(body.list_id),
+            org_ids=[UUID(org_id) for org_id in body.org_ids],
+        )
         await db.commit()
         return result

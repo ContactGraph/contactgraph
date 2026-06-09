@@ -95,7 +95,7 @@ export default function PhoneContactsUploadPage({
   useEffect(() => {
     if (source?.sync_state === "complete") {
       const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
-        router.push("/sources");
+        router.push("/setup");
       }, 2500);
       return () => {
         clearTimeout(timer);
@@ -151,7 +151,7 @@ export default function PhoneContactsUploadPage({
         <Alert>
           <AlertDescription>
             Import complete ({source.contacts_resolved} contacts). Returning to
-            sources…
+            setup…
           </AlertDescription>
         </Alert>
       ) : null}
@@ -244,8 +244,8 @@ export default function PhoneContactsUploadPage({
               </>
             )}
           </div>
-          <Button variant="outline" onClick={() => router.push("/sources")}>
-            Back to sources
+          <Button variant="outline" onClick={() => router.push("/setup")}>
+            Back to setup
           </Button>
         </CardContent>
       </Card>

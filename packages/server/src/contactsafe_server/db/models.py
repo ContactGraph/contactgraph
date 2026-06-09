@@ -572,3 +572,45 @@ class ContactPrivacyLabelRow(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     person_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False)
     label: Mapped[str] = mapped_column(String(32), nullable=False, default="standard")
+
+
+# ---------------------------------------------------------------------------
+# User-scoped organization lists
+# ---------------------------------------------------------------------------
+
+
+class OrgList(Base):
+    __tablename__ = "org_lists"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_org_list_user_name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    memberships: Mapped[list["OrgListMembership"]] = relationship(
+        back_populates="org_list",
+        cascade="all, delete-orphan",
+    )
+
+
+class OrgListMembership(Base):
+    __tablename__ = "org_list_memberships"
+
+    org_list_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("org_lists.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("orgs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    org_list: Mapped["OrgList"] = relationship(back_populates="memberships")
+    org: Mapped["Org"] = relationship()

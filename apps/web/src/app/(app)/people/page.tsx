@@ -354,7 +354,7 @@ export default function PeoplePage() {
           <CompactTableShell
             table={table}
             columnCount={columns.length}
-            emptyMessage="No phone contacts in your network yet. Import them from Sources."
+            emptyMessage="No phone contacts in your network yet. Import them from Setup."
             minWidth="44rem"
             onRowClick={(person: PersonListItem) =>
               setSelectedPersonId(person.person_id)
