@@ -40,6 +40,7 @@ import {
 } from "@/components/ui/sheet";
 import type { ListOrgsResult, OrgDetailResult, OrgListItem } from "@/lib/api-types";
 import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
+import { formatCompanySize } from "@/lib/company-size";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { formatIndustryTags } from "@/lib/industry-tags";
 import { proxyPost } from "@/lib/proxy-client";
@@ -185,6 +186,25 @@ export default function OrganizationsPage() {
         meta: { width: "w-[4.5rem]" },
       },
       {
+        id: "size",
+        accessorFn: (row: OrgListItem) =>
+          formatCompanySize(row.company_size_band, row.employee_count),
+        header: "Size",
+        cell: ({ row }) => (
+          <CompactCell
+            value={formatCompanySize(
+              row.original.company_size_band,
+              row.original.employee_count,
+            )}
+            title={formatCompanySize(
+              row.original.company_size_band,
+              row.original.employee_count,
+            )}
+          />
+        ),
+        meta: { width: "w-[7rem]" },
+      },
+      {
         id: "categories",
         accessorFn: (row: OrgListItem) => formatIndustryTags(row.categories),
         header: "Categories",
@@ -293,12 +313,13 @@ export default function OrganizationsPage() {
       .getSortedRowModel()
       .rows.map((row) => row.original);
     const csv: string = buildCsv(
-      ["Organization", "Description", "Website", "Jobs", "Categories", "Contacts"],
+      ["Organization", "Description", "Website", "Jobs", "Size", "Categories", "Contacts"],
       rows.map((org: OrgListItem) => [
         org.name,
         org.description ?? "",
         org.primary_domain ?? "",
         org.careers_url ?? "",
+        formatCompanySize(org.company_size_band, org.employee_count),
         formatIndustryTags(org.categories),
         org.contact_count.toString(),
       ]),

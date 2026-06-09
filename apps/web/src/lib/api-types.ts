@@ -448,6 +448,8 @@ export interface OrgListItem {
   careers_url: string | null;
   linkedin_url: string | null;
   categories: string[];
+  employee_count: number | null;
+  company_size_band: string | null;
   contact_count: number;
 }
 
@@ -472,6 +474,8 @@ export interface OrgDetailResult {
   careers_url: string | null;
   linkedin_url: string | null;
   categories: string[];
+  employee_count: number | null;
+  company_size_band: string | null;
   attributes: Record<string, unknown>;
   aliases: string[];
   people: OrgPersonSummary[];

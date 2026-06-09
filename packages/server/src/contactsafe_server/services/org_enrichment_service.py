@@ -30,11 +30,14 @@ from contactsafe_server.db.models import (
 )
 from contactsafe_server.services.contacts_service import PHONE_RELATIONSHIP
 from contactsafe_server.services.exa_client import ExaClient
+from contactsafe_server.services.org_company_size import (
+    ParsedCompanySize,
+    headcount_to_linkedin_band,
+)
 from contactsafe_server.services.org_industry_taxonomy import (
     build_company_summary_query,
     exa_company_summary_schema,
     infer_industry_tags_from_text,
-    normalize_industry_tags,
     parse_structured_company_summary,
 )
 from contactsafe_server.services.strong_tie_matcher import LINKEDIN_CONNECTIONS_RELATIONSHIP
@@ -270,6 +273,10 @@ class OrgEnrichmentService:
             org.linkedin_url = parsed.linkedin_url
         if parsed.categories:
             org.categories = parsed.categories
+        if parsed.employee_count is not None:
+            org.employee_count = parsed.employee_count
+        if parsed.company_size_band is not None:
+            org.company_size_band = parsed.company_size_band
 
         attributes: dict[str, object] = dict(org.attributes or {})
         attributes["exa_enriched_at"] = datetime.now(tz=UTC).isoformat()
@@ -390,6 +397,8 @@ class ParsedOrgEnrichment:
     careers_url: str | None
     linkedin_url: str | None
     categories: list[str]
+    employee_count: int | None
+    company_size_band: str | None
 
 
 def parse_org_enrichment_hits(
@@ -403,12 +412,15 @@ def parse_org_enrichment_hits(
     primary_domain: str | None = _pick_primary_domain(company_hits, company_name)
     description: str | None = _pick_description(company_hits, company_name)
     categories: list[str] = _pick_industry_tags(company_hits, company_name, description)
+    company_size: ParsedCompanySize = _pick_company_size(company_hits)
     return ParsedOrgEnrichment(
         primary_domain=primary_domain,
         description=description,
         careers_url=careers_url,
         linkedin_url=linkedin_url,
         categories=categories,
+        employee_count=company_size.employee_count,
+        company_size_band=company_size.company_size_band,
     )
 
 
@@ -563,13 +575,10 @@ def _pick_industry_tags(
     company_name: str,
     description: str | None,
 ) -> list[str]:
-    collected: list[str] = []
     for hit in hits:
         structured = parse_structured_company_summary(hit.summary)
-        if structured is not None:
-            collected.extend(structured.industries)
-    if collected:
-        return normalize_industry_tags(collected)
+        if structured is not None and structured.industries:
+            return list(structured.industries)
 
     fallback_texts: list[str] = [company_name]
     if description:
@@ -579,6 +588,26 @@ def _pick_industry_tags(
             fallback_texts.append(hit.text)
         fallback_texts.extend(hit.highlights)
     return infer_industry_tags_from_text(*fallback_texts)
+
+
+def _pick_company_size(hits: list[WebSearchHit]) -> ParsedCompanySize:
+    for hit in hits:
+        if hit.employee_count is not None and hit.employee_count > 0:
+            band: str | None = headcount_to_linkedin_band(hit.employee_count)
+            return ParsedCompanySize(
+                employee_count=hit.employee_count,
+                company_size_band=band,
+            )
+
+    for hit in hits:
+        structured = parse_structured_company_summary(hit.summary)
+        if structured is not None and structured.company_size_band is not None:
+            return ParsedCompanySize(
+                employee_count=None,
+                company_size_band=structured.company_size_band,
+            )
+
+    return ParsedCompanySize(employee_count=None, company_size_band=None)
 
 
 def _domain_from_url(url: str) -> str | None:

@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import type { OrgDetailResult, UpdateOrgRequest } from "@/lib/api-types";
+import { formatCompanySize } from "@/lib/company-size";
 import { isRecordFormDirty } from "@/lib/detail-form-dirty";
 import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { proxyPost } from "@/lib/proxy-client";
@@ -201,7 +202,15 @@ export const OrgDetailPanel = forwardRef<
         </div>
       </form>
 
-      <dl className="grid gap-4">
+      <dl className="grid gap-4 sm:grid-cols-2">
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Size
+          </dt>
+          <dd className="mt-1 text-sm">
+            {formatCompanySize(org.company_size_band, org.employee_count)}
+          </dd>
+        </div>
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             Contacts

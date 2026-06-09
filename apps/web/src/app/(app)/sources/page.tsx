@@ -391,9 +391,6 @@ export default function SourcesPage() {
     useState<boolean>(false);
   const [linkedinConnectionsProcessing, setLinkedinConnectionsProcessing] =
     useState<boolean>(false);
-  const [orgEnrichmentMessage, setOrgEnrichmentMessage] = useState<string | null>(
-    null,
-  );
   const [orgEnrichmentError, setOrgEnrichmentError] = useState<string | null>(null);
 
   const clearPollTimer = useCallback((): void => {
@@ -442,13 +439,15 @@ export default function SourcesPage() {
   const enrichOrgsMutation = useMutation({
     mutationFn: () => proxyPost<EnrichOrgsResult>("enrich-orgs"),
     onSuccess: async (result: EnrichOrgsResult) => {
-      setOrgEnrichmentError(null);
-      setOrgEnrichmentMessage(result.message);
+      if (!result.scheduled) {
+        setOrgEnrichmentError(result.message);
+      } else {
+        setOrgEnrichmentError(null);
+      }
       await queryClient.invalidateQueries({ queryKey: ["org-enrichment-status"] });
       await queryClient.invalidateQueries({ queryKey: ["organizations"] });
     },
     onError: (error: Error) => {
-      setOrgEnrichmentMessage(null);
       setOrgEnrichmentError(error.message);
     },
   });
@@ -714,6 +713,12 @@ export default function SourcesPage() {
     void queryClient.invalidateQueries({ queryKey: ["organizations"] });
   }, [orgEnrichmentStatus?.state, queryClient]);
 
+  useEffect(() => {
+    if (orgEnrichmentStatus?.state === "running") {
+      setOrgEnrichmentError(null);
+    }
+  }, [orgEnrichmentStatus?.state]);
+
   const renderStepRow = (step: SetupStep) => {
     const complete: boolean = stepComplete(step.id, sources, orgEnrichmentStatus);
     const inProgress: boolean =
@@ -890,6 +895,9 @@ export default function SourcesPage() {
             orgEnrichmentStatus.error ? (
               <p className="text-xs text-destructive">{orgEnrichmentStatus.error}</p>
             ) : null}
+            {step.id === "org_enrichment" && orgEnrichmentError ? (
+              <p className="text-xs text-destructive">{orgEnrichmentError}</p>
+            ) : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2 sm:justify-end sm:pt-0.5">
@@ -916,16 +924,6 @@ export default function SourcesPage() {
       {connectMessage ? (
         <Alert>
           <AlertDescription>{connectMessage}</AlertDescription>
-        </Alert>
-      ) : null}
-      {orgEnrichmentError ? (
-        <Alert variant="destructive">
-          <AlertDescription>{orgEnrichmentError}</AlertDescription>
-        </Alert>
-      ) : null}
-      {orgEnrichmentMessage ? (
-        <Alert>
-          <AlertDescription>{orgEnrichmentMessage}</AlertDescription>
         </Alert>
       ) : null}
 

@@ -7,6 +7,11 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
+from contactsafe_server.services.org_company_size import (
+    LINKEDIN_SIZE_BAND_VALUES,
+    normalize_linkedin_size_band,
+)
+
 # NAICS 2022 sector codes (2-digit) stored as naics:{code}.
 # Friendly labels are for UI display only.
 NAICS_SECTOR_LABELS: Final[dict[str, str]] = {
@@ -46,19 +51,33 @@ ORG_INDUSTRY_TAG_LABELS: Final[dict[str, str]] = {
 
 ORG_INDUSTRY_TAG_VALUES: Final[tuple[str, ...]] = tuple(ORG_INDUSTRY_TAG_LABELS.keys())
 
+MAX_ORG_INDUSTRY_TAGS: Final[int] = 1
+
+_EXTENSION_INDUSTRY_TAGS: Final[frozenset[str]] = frozenset(EXTENSION_INDUSTRY_LABELS.keys())
+
 _INVESTOR_CATEGORY_TAGS: Final[frozenset[str]] = frozenset(
     {"vc", "investor", "venture_capital", "naics:52"},
 )
 
 _KEYWORD_INDUSTRY_PATTERNS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("venture_capital", ("venture capital", " vc ", "private equity", "seed fund")),
-    ("legal", (" law firm", "attorney", " legal ", " LLP", " L.L.P.")),
-    ("nonprofit", ("nonprofit", "non-profit", "501(c)", "charitable", "foundation")),
+    ("legal", (" law firm", "attorneys at law", "attorney", " llp", " l.l.p.")),
+    (
+        "nonprofit",
+        (
+            "nonprofit",
+            "non-profit",
+            "not-for-profit",
+            "501(c)(3)",
+            "501(c)",
+            "charitable organization",
+        ),
+    ),
     ("naics:62", ("hospital", "healthcare", "health care", "medical center", "clinic")),
-    ("naics:51", ("software", "saas", "technology", " cloud ", " ai ")),
+    ("naics:51", ("software", "saas", "technology company", " cloud ", " ai platform")),
     ("naics:52", ("bank", "insurance", " fintech", "financial services")),
     ("naics:61", ("university", "school district", " college", "education")),
-    ("naics:92", ("government", " municipal", " federal agency", " state agency")),
+    ("naics:92", ("government agency", " municipal", " federal agency", " state agency")),
 )
 
 
@@ -66,6 +85,7 @@ _KEYWORD_INDUSTRY_PATTERNS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
 class StructuredCompanySummary:
     description: str | None
     industries: tuple[str, ...]
+    company_size_band: str | None = None
 
 
 def industry_tag_label(tag: str) -> str:
@@ -73,7 +93,11 @@ def industry_tag_label(tag: str) -> str:
     return ORG_INDUSTRY_TAG_LABELS.get(normalized, tag)
 
 
-def normalize_industry_tags(raw_tags: list[str]) -> list[str]:
+def normalize_industry_tags(
+    raw_tags: list[str],
+    *,
+    max_tags: int = MAX_ORG_INDUSTRY_TAGS,
+) -> list[str]:
     seen: set[str] = set()
     normalized: list[str] = []
     for raw in raw_tags:
@@ -82,9 +106,22 @@ def normalize_industry_tags(raw_tags: list[str]) -> list[str]:
             continue
         seen.add(tag)
         normalized.append(tag)
-        if len(normalized) >= 3:
+        if len(normalized) >= max_tags:
             break
     return normalized
+
+
+def select_primary_industry_tag(raw_tags: list[str]) -> list[str]:
+    """Return zero or one tag, preferring NAICS sectors over extension tags."""
+    candidates: list[str] = normalize_industry_tags(raw_tags, max_tags=10)
+    if not candidates:
+        return []
+
+    naics_tags: list[str] = [tag for tag in candidates if tag.startswith("naics:")]
+    if naics_tags:
+        return [naics_tags[0]]
+
+    return [candidates[0]]
 
 
 def is_investor_industry_tag(tag: str) -> bool:
@@ -105,15 +142,24 @@ def exa_company_summary_schema() -> dict[str, object]:
             "industries": {
                 "type": "array",
                 "description": (
-                    "Up to 3 industry sector tags from the allowed enum. "
-                    "Prefer NAICS sector codes (naics:51) and add extension tags "
-                    "like nonprofit or venture_capital when they clearly apply."
+                    "Exactly one primary industry sector tag from the allowed enum. "
+                    "Use NAICS sector codes (naics:51) for most for-profit companies. "
+                    "Use nonprofit only for registered nonprofits—not for companies that "
+                    "donate, have a foundation, or use a .org domain."
                 ),
                 "items": {
                     "type": "string",
                     "enum": list(ORG_INDUSTRY_TAG_VALUES),
                 },
-                "maxItems": 3,
+                "minItems": 1,
+                "maxItems": 1,
+            },
+            "company_size_band": {
+                "type": "string",
+                "description": (
+                    "LinkedIn-style employee count range based on estimated headcount."
+                ),
+                "enum": list(LINKEDIN_SIZE_BAND_VALUES),
             },
         },
         "required": ["description", "industries"],
@@ -123,8 +169,10 @@ def exa_company_summary_schema() -> dict[str, object]:
 
 def build_company_summary_query(company_name: str) -> str:
     return (
-        f"Describe what {company_name} does and classify the company into "
-        "industry sectors using only the allowed tag values."
+        f"Describe what {company_name} does, choose exactly one primary industry "
+        "sector tag, and estimate its LinkedIn employee count range if possible. "
+        "For for-profit companies, return a NAICS sector such as naics:51. "
+        "Only use nonprofit for registered nonprofits."
     )
 
 
@@ -151,9 +199,16 @@ def parse_structured_company_summary(raw: str) -> StructuredCompanySummary | Non
         for item in industries_raw:
             if isinstance(item, str):
                 industries.append(item)
+
+    company_size_band: str | None = None
+    size_band_raw: object = data.get("company_size_band")
+    if isinstance(size_band_raw, str):
+        company_size_band = normalize_linkedin_size_band(size_band_raw)
+
     return StructuredCompanySummary(
         description=description,
-        industries=tuple(normalize_industry_tags(industries)),
+        industries=tuple(select_primary_industry_tag(industries)),
+        company_size_band=company_size_band,
     )
 
 
@@ -164,7 +219,7 @@ def infer_industry_tags_from_text(*texts: str) -> list[str]:
     for tag, patterns in _KEYWORD_INDUSTRY_PATTERNS:
         if any(pattern in blob for pattern in patterns):
             matched.append(tag)
-    return normalize_industry_tags(matched)
+    return select_primary_industry_tag(matched)
 
 
 def _normalize_single_tag(raw: str) -> str | None:
