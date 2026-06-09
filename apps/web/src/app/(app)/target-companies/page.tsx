@@ -90,7 +90,7 @@ export default function TargetCompaniesPage() {
             {(strongTieCompaniesQuery.data?.companies.length ?? 0) === 0 ? (
               <p className="text-sm text-muted-foreground">
                 No employer data yet. Import phone contacts, upload LinkedIn
-                connections, and run LinkedIn enrichment from Sources.
+                connections, and run LinkedIn enrichment from Setup.
               </p>
             ) : (
               strongTieCompaniesQuery.data?.companies.map((company) => (

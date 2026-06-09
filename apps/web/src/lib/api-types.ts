@@ -507,6 +507,59 @@ export interface UpdateOrgRequest {
   categories?: string[];
 }
 
+export interface OrgListSummary {
+  list_id: string;
+  name: string;
+  org_count: number;
+  org_ids: string[];
+}
+
+export interface ListOrgListsResult {
+  lists: OrgListSummary[];
+  message: string;
+}
+
+export interface CreateOrgListRequest {
+  name: string;
+}
+
+export interface CreateOrgListResult {
+  list_id: string;
+  name: string;
+  message: string;
+}
+
+export interface RenameOrgListRequest {
+  list_id: string;
+  name: string;
+}
+
+export interface RenameOrgListResult {
+  list_id: string;
+  name: string;
+  message: string;
+}
+
+export interface DeleteOrgListRequest {
+  list_id: string;
+}
+
+export interface DeleteOrgListResult {
+  deleted: boolean;
+  message: string;
+}
+
+export interface ModifyOrgListMembershipRequest {
+  list_id: string;
+  org_ids: string[];
+}
+
+export interface ModifyOrgListMembershipResult {
+  list_id: string;
+  affected_count: number;
+  message: string;
+}
+
 export type OrgEnrichmentState = "pending" | "running" | "complete" | "failed";
 
 export interface EnrichOrgsResult {

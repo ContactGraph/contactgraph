@@ -261,7 +261,7 @@ class Settings(BaseSettings):
         return (self.web_base_url or self.base_url).rstrip("/")
 
     def upload_url_for_source(self, source_id: object) -> str:
-        return f"{self.effective_web_base_url}/sources/upload/{source_id}"
+        return f"{self.effective_web_base_url}/setup/upload/{source_id}"
 
     @property
     def upload_max_file_size_bytes(self) -> int:

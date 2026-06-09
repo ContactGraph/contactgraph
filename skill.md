@@ -209,7 +209,7 @@ After Google sync completes (or when a user asks about contacts not found in ema
 Call `connect_source` with `source_type="phone_contacts_upload"` (requires Bearer token). The response includes `upload_url` and `upload_instructions` to relay to the user.
 
 Upload options:
-- **Web UI:** send the user to `upload_url` (e.g. `https://www.contactgraph.ai/sources/upload/{source_id}`)
+- **Web UI:** send the user to `upload_url` (e.g. `https://www.contactgraph.ai/setup/upload/{source_id}`)
 - **API:** `POST /api/upload-contacts` with multipart form (`file`, `source_id`) or `POST /api/upload-source` with JSON (`source_type`, `filename`, `content`)
 
 ## Privacy
