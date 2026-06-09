@@ -270,7 +270,7 @@ class JobDiscoveryService:
             found, new_count, source, error = await self._discover_jobs_for_org(org)
 
             if source == "theirstack":
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(7.0)
 
             scrape_run = JobScrapeRun(
                 org_id=org.id,
