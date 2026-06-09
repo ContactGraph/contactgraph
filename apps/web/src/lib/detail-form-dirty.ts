@@ -1,4 +1,4 @@
-export function isRecordFormDirty<T extends Record<string, string>>(
+export function isRecordFormDirty<T extends { [K in keyof T]: string }>(
   form: T,
   baseline: T,
 ): boolean {
