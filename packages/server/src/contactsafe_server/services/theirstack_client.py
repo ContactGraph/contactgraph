@@ -68,8 +68,12 @@ class TheirStackClient:
             description: str | None = None
             if job.get("description"):
                 description = _snippet(str(job["description"]))
-            salary_min: int | None = _parse_int(job.get("min_salary_usd"))
-            salary_max: int | None = _parse_int(job.get("max_salary_usd"))
+            salary_min: int | None = _parse_int(
+                job.get("min_annual_salary_usd", job.get("min_salary_usd")),
+            )
+            salary_max: int | None = _parse_int(
+                job.get("max_annual_salary_usd", job.get("max_salary_usd")),
+            )
             remote_status: str | None = None
             if job.get("remote") is True:
                 remote_status = "remote"

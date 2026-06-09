@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import select
 
 from contactsafe_server.db.connection import get_session_factory
-from contactsafe_server.db.models import User
+from contactsafe_server.db.models import JobDiscoveryRun, User
 
 logger: logging.Logger = logging.getLogger(__name__)
 
