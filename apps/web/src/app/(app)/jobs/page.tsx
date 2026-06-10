@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, ExternalLink, Loader2 } from "lucide-react";
 import Link from "next/link";
 
+import { JobSetupCards } from "@/components/setup/job-setup-cards";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,6 +19,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import type { ListOrgJobsResult, OrgJobItem } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
+import { useOnboardingPhase } from "@/lib/use-onboarding-phase";
 
 function formatSalary(min: number | null, max: number | null): string | null {
   if (min === null && max === null) {
@@ -39,12 +41,16 @@ function hasRelevanceData(data: ListOrgJobsResult | undefined): boolean {
   );
 }
 
-export default function JobsPage() {
+function JobsListings() {
   const [showAll, setShowAll] = useState<boolean>(false);
 
   const jobsQuery = useQuery({
     queryKey: ["org-jobs"],
     queryFn: () => proxyPost<ListOrgJobsResult>("list-org-jobs"),
+    refetchInterval: (query) => {
+      const data = query.state.data;
+      return data !== undefined && data.total_jobs === 0 ? 5000 : false;
+    },
   });
 
   const data: ListOrgJobsResult | undefined = jobsQuery.data;
@@ -65,10 +71,9 @@ export default function JobsPage() {
     (acc, c) => acc + c.jobs.length,
     0,
   );
-  const totalHidden: number = (data?.total_jobs ?? 0) - totalShown;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4 p-6">
+    <div className="mx-auto max-w-4xl space-y-4">
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">Open jobs</h1>
@@ -83,7 +88,7 @@ export default function JobsPage() {
             <div className="inline-flex items-center rounded-md border text-xs">
               <button
                 type="button"
-                className={`px-3 py-1.5 rounded-l-md transition-colors ${
+                className={`rounded-l-md px-3 py-1.5 transition-colors ${
                   !showAll
                     ? "bg-primary text-primary-foreground"
                     : "hover:bg-muted"
@@ -94,7 +99,7 @@ export default function JobsPage() {
               </button>
               <button
                 type="button"
-                className={`px-3 py-1.5 rounded-r-md border-l transition-colors ${
+                className={`rounded-r-md border-l px-3 py-1.5 transition-colors ${
                   showAll
                     ? "bg-primary text-primary-foreground"
                     : "hover:bg-muted"
@@ -105,9 +110,6 @@ export default function JobsPage() {
               </button>
             </div>
           ) : null}
-          <Button variant="outline" size="sm" className="h-8 text-xs" asChild>
-            <Link href="/setup">Settings</Link>
-          </Button>
         </div>
       </div>
 
@@ -122,7 +124,7 @@ export default function JobsPage() {
 
       {filteredCompanies.length === 0 && !loading ? (
         <p className="text-sm text-muted-foreground">
-          No jobs yet. Select target companies in Setup and run job discovery.
+          No jobs yet. Job discovery runs automatically after setup completes.
         </p>
       ) : (
         filteredCompanies.map((company) => (
@@ -133,7 +135,7 @@ export default function JobsPage() {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <Link
-                      href={`/organizations?org=${encodeURIComponent(company.org_id)}`}
+                      href={`/graph?tab=organizations&org=${encodeURIComponent(company.org_id)}`}
                       className="font-medium text-primary hover:underline"
                       onClick={(e) => e.stopPropagation()}
                     >
@@ -169,11 +171,7 @@ export default function JobsPage() {
                         <div>
                           <CardTitle className="text-base">{job.title}</CardTitle>
                           <CardDescription>
-                            {[
-                              job.location,
-                              job.department,
-                              job.remote_status,
-                            ]
+                            {[job.location, job.department, job.remote_status]
                               .filter(Boolean)
                               .join(" · ")}
                           </CardDescription>
@@ -213,4 +211,40 @@ export default function JobsPage() {
       )}
     </div>
   );
+}
+
+export default function JobsPage() {
+  const onboarding = useOnboardingPhase();
+
+  if (onboarding.isLoading) {
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-10 w-48" />
+        <Skeleton className="h-32 w-full" />
+      </div>
+    );
+  }
+
+  if (!onboarding.graphReady) {
+    return (
+      <div className="space-y-4">
+        <Alert>
+          <AlertDescription>
+            Complete graph setup first — import phone contacts and LinkedIn
+            connections on{" "}
+            <Link href="/graph" className="font-medium underline">
+              My Graph
+            </Link>
+            .
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
+  if (onboarding.phase === "job-setup") {
+    return <JobSetupCards />;
+  }
+
+  return <JobsListings />;
 }

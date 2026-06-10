@@ -29,6 +29,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import type {
+  DeleteUserAccountResult,
   DeleteUserExperienceRequest,
   ListSourcesResult,
   SaveUserExperienceRequest,
@@ -96,6 +97,8 @@ export default function ProfilePage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [profileSaved, setProfileSaved] = useState<boolean>(false);
   const [awaitingSync, setAwaitingSync] = useState<boolean>(false);
+  const [deleteAccountDialogOpen, setDeleteAccountDialogOpen] =
+    useState<boolean>(false);
 
   const [profileName, setProfileName] = useState<string>("");
   const [profileLocation, setProfileLocation] = useState<string>("");
@@ -224,6 +227,24 @@ export default function ProfilePage() {
       await queryClient.invalidateQueries({ queryKey: ["user-profile"] });
     },
   });
+
+  const deleteAccountMutation = useMutation({
+    mutationFn: () => proxyPost<DeleteUserAccountResult>("delete-user-account"),
+    onSuccess: async (result: DeleteUserAccountResult) => {
+      if (!result.deleted) {
+        return;
+      }
+      await fetch("/api/auth/logout", { method: "POST" });
+      router.push("/");
+      router.refresh();
+    },
+  });
+
+  const handleSignOut = useCallback(async (): Promise<void> => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/");
+    router.refresh();
+  }, [router]);
 
   const uploadMutation = useMutation({
     mutationFn: (payload: {
@@ -561,22 +582,34 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
 
-      {/* Sign out */}
-      <div className="flex justify-end">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground"
-          onClick={async () => {
-            await fetch("/api/auth/logout", { method: "POST" });
-            router.push("/");
-            router.refresh();
-          }}
-        >
-          <LogOut className="size-4" />
-          Sign out
-        </Button>
-      </div>
+      {/* Account */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Account</CardTitle>
+          <CardDescription>
+            Sign out or permanently delete your account and all imported data.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-3">
+          <Button variant="outline" size="sm" onClick={() => void handleSignOut()}>
+            <LogOut className="size-4" />
+            Sign out
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setDeleteAccountDialogOpen(true)}
+            disabled={deleteAccountMutation.isPending}
+          >
+            {deleteAccountMutation.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Trash2 className="size-4" />
+            )}
+            Delete my account
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* Experience dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -665,6 +698,42 @@ export default function ProfilePage() {
                 <Loader2 className="size-4 animate-spin" />
               ) : null}
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteAccountDialogOpen} onOpenChange={setDeleteAccountDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete your account?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This permanently deletes your account, imports, lists, job preferences,
+            and network observations. This cannot be undone.
+          </p>
+          {deleteAccountMutation.error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{deleteAccountMutation.error.message}</AlertDescription>
+            </Alert>
+          ) : null}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteAccountDialogOpen(false)}
+              disabled={deleteAccountMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteAccountMutation.isPending}
+              onClick={() => deleteAccountMutation.mutate()}
+            >
+              {deleteAccountMutation.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : null}
+              Delete my account
             </Button>
           </DialogFooter>
         </DialogContent>

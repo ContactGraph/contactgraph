@@ -64,6 +64,7 @@ from contactsafe_core.schemas import (
     ConnectSourceRequest,
     ConnectSourceResult,
     DeleteUserExperienceRequest,
+    DeleteUserAccountResult,
     DescribeGraphResult,
     EditTrustedUsersRequest,
     EditTrustedUsersResult,
@@ -401,6 +402,14 @@ async def api_delete_user_experience(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/delete-user-account", response_model=DeleteUserAccountResult)
+async def api_delete_user_account(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> DeleteUserAccountResult:
+    return await actions.delete_user_account(ctx, user_id)
 
 
 @router.post("/upload-source", response_model=UploadSourceResult)

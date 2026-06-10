@@ -183,6 +183,11 @@ export interface DeleteUserExperienceRequest {
   id: string;
 }
 
+export interface DeleteUserAccountResult {
+  deleted: boolean;
+  message: string;
+}
+
 export interface PersonMatch {
   person_id: string;
   name: string;

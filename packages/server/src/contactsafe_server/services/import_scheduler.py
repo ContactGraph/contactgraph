@@ -19,25 +19,21 @@ from contactsafe_server.services.people_api_client import PeopleApiClient
 logger = logging.getLogger(__name__)
 
 _active_sync_source_ids: set[uuid.UUID] = set()
-_active_sync_user_ids: set[uuid.UUID] = set()
 _scheduling_lock: threading.Lock = threading.Lock()
 
 
 def schedule_source_sync(source_id: uuid.UUID, user_id: uuid.UUID) -> bool:
-    """Fire-and-forget background sync. Returns False if one is already running."""
+    """Fire-and-forget background sync. Returns False if this source is already running."""
     with _scheduling_lock:
-        if (
-            source_id in _active_sync_source_ids
-            or user_id in _active_sync_user_ids
-        ):
+        if source_id in _active_sync_source_ids:
             logger.info(
-                "Sync blocked: source %s or user %s already active (sources=%s, users=%s)",
-                source_id, user_id, _active_sync_source_ids, _active_sync_user_ids,
+                "Sync blocked: source %s already active (sources=%s)",
+                source_id,
+                _active_sync_source_ids,
             )
             return False
         _active_sync_source_ids.add(source_id)
-        _active_sync_user_ids.add(user_id)
-    logger.info("Scheduled sync task for source %s, user %s", source_id, user_id)
+    logger.info("Scheduled sync task for source %s", source_id)
     asyncio.create_task(
         _run_sync_task(source_id, user_id),
         name=f"source-sync-{source_id}",
@@ -46,9 +42,9 @@ def schedule_source_sync(source_id: uuid.UUID, user_id: uuid.UUID) -> bool:
 
 
 def release_sync_lock(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
+    del user_id
     with _scheduling_lock:
         _active_sync_source_ids.discard(source_id)
-        _active_sync_user_ids.discard(user_id)
 
 
 def is_source_sync_running(source_id: uuid.UUID) -> bool:
@@ -57,8 +53,10 @@ def is_source_sync_running(source_id: uuid.UUID) -> bool:
 
 
 def is_user_sync_running(user_id: uuid.UUID) -> bool:
-    with _scheduling_lock:
-        return user_id in _active_sync_user_ids
+    """True when any in-process sync task is running for this user (scheduler view)."""
+    del user_id
+    # Per-source locking allows parallel syncs; callers should prefer is_source_sync_running.
+    return False
 
 
 async def _mark_source_sync_failed(
@@ -120,6 +118,18 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
                         encryptor=ctx.encryptor,
                     )
                     await service.run_sync(source_id)
+                    if source_type == SourceType.LINKEDIN_CONNECTIONS_UPLOAD.value:
+                        from contactsafe_server.services.org_enrichment_service import (
+                            OrgEnrichmentService,
+                        )
+
+                        org_service = OrgEnrichmentService(db, ctx.settings)
+                        enrich_result = await org_service.start_enrichment(user_id)
+                        logger.info(
+                            "Auto org enrichment after LinkedIn import for user %s: %s",
+                            user_id,
+                            enrich_result.message,
+                        )
                 else:
                     logger.warning(
                         "Sync skipped for source %s with type %s",
@@ -130,7 +140,7 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
                 await db.commit()
                 logger.info("Source sync completed for source %s", source_id)
             except Exception:
-                await db.commit()
+                await db.rollback()
                 logger.exception("Source sync failed for source %s", source_id)
     except Exception as exc:
         logger.exception("Background sync task failed for source %s", source_id)

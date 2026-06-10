@@ -242,7 +242,7 @@ export const OrgDetailPanel = forwardRef<
             {org.people.map((person) => (
               <li key={person.person_id} className="px-3 py-2 text-sm">
                 <Link
-                  href={`/people?person=${encodeURIComponent(person.person_id)}`}
+                  href={`/graph?tab=people&person=${encodeURIComponent(person.person_id)}`}
                   className="font-medium text-primary hover:underline"
                 >
                   {person.display_name}

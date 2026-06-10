@@ -73,6 +73,7 @@ from contactsafe_core.schemas import (
     UploadSourceResult,
     UserExperience,
     UserProfileResult,
+    DeleteUserAccountResult,
     ViewTrustedUsersResult,
 )
 
@@ -692,6 +693,27 @@ async def delete_user_experience(
             google_profile_name=user.google_profile_name,
             experiences=experiences,
             message="Experience deleted.",
+        )
+
+
+async def delete_user_account(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> DeleteUserAccountResult:
+    if user_id is None:
+        return DeleteUserAccountResult(
+            deleted=False,
+            message="Authentication required. Provide a Bearer token.",
+        )
+    async with ctx.session_factory() as db:
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return DeleteUserAccountResult(deleted=False, message="User not found.")
+        await db.delete(user)
+        await db.commit()
+        return DeleteUserAccountResult(
+            deleted=True,
+            message="Your account and all associated data have been deleted.",
         )
 
 
