@@ -29,6 +29,7 @@ from contactsafe_server.db.models import (
     OrgList,
     OrgListMembership,
     User,
+    UserJobRelevance,
 )
 from contactsafe_server.services.ats_detection import apply_ats_detection_to_org
 from contactsafe_server.services.ats_job_clients import AtsJobClient
@@ -177,10 +178,11 @@ class JobDiscoveryService:
         user_id: uuid.UUID,
         *,
         active_only: bool = True,
+        relevant_only: bool = False,
     ) -> ListOrgJobsResult:
         org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
         if not org_ids:
-            return ListOrgJobsResult(companies=[], total_jobs=0, message="No monitored organizations.")
+            return ListOrgJobsResult(companies=[], total_jobs=0, total_relevant=0, message="No monitored organizations.")
 
         orgs_result = await self._db.execute(
             select(Org).where(Org.id.in_(org_ids)).order_by(Org.canonical_name.asc()),
@@ -194,51 +196,76 @@ class JobDiscoveryService:
         jobs_result = await self._db.execute(jobs_query)
         jobs: list[OrgJob] = list(jobs_result.scalars().all())
 
+        relevance_result = await self._db.execute(
+            select(UserJobRelevance).where(UserJobRelevance.user_id == user_id),
+        )
+        relevance_map: dict[uuid.UUID, UserJobRelevance] = {
+            r.job_id: r for r in relevance_result.scalars().all()
+        }
+
         jobs_by_org: dict[uuid.UUID, list[OrgJob]] = {}
         for job in jobs:
             jobs_by_org.setdefault(job.org_id, []).append(job)
 
         companies: list[OrgJobsByCompany] = []
         total_jobs: int = 0
+        total_relevant: int = 0
         for org in orgs:
             org_jobs: list[OrgJob] = jobs_by_org.get(org.id, [])
             if active_only and not org_jobs:
                 continue
-            total_jobs += len(org_jobs)
-            companies.append(
-                OrgJobsByCompany(
-                    org_id=org.id,
-                    org_name=org.canonical_name,
-                    primary_domain=org.primary_domain,
-                    jobs=[
-                        OrgJobItem(
-                            job_id=job.id,
-                            external_job_id=job.external_job_id,
-                            source=job.source,
-                            title=job.title,
-                            location=job.location,
-                            department=job.department,
-                            url=job.url,
-                            description_snippet=job.description_snippet,
-                            salary_min=job.salary_min,
-                            salary_max=job.salary_max,
-                            remote_status=job.remote_status,
-                            posted_at=job.posted_at,
-                            first_seen_at=job.first_seen_at,
-                            last_seen_at=job.last_seen_at,
-                            is_active=job.is_active,
-                        )
-                        for job in org_jobs
-                    ],
-                ),
-            )
+
+            job_items: list[OrgJobItem] = []
+            for job in org_jobs:
+                rel: UserJobRelevance | None = relevance_map.get(job.id)
+                is_relevant: bool | None = rel.is_relevant if rel else None
+                reason: str | None = rel.reason if rel and rel.is_relevant else None
+
+                if relevant_only and is_relevant is False:
+                    continue
+
+                if is_relevant is True:
+                    total_relevant += 1
+
+                job_items.append(
+                    OrgJobItem(
+                        job_id=job.id,
+                        external_job_id=job.external_job_id,
+                        source=job.source,
+                        title=job.title,
+                        location=job.location,
+                        department=job.department,
+                        url=job.url,
+                        description_snippet=job.description_snippet,
+                        salary_min=job.salary_min,
+                        salary_max=job.salary_max,
+                        remote_status=job.remote_status,
+                        posted_at=job.posted_at,
+                        first_seen_at=job.first_seen_at,
+                        last_seen_at=job.last_seen_at,
+                        is_active=job.is_active,
+                        is_relevant=is_relevant,
+                        relevance_reason=reason,
+                    )
+                )
+
+            if job_items:
+                total_jobs += len(job_items)
+                companies.append(
+                    OrgJobsByCompany(
+                        org_id=org.id,
+                        org_name=org.canonical_name,
+                        primary_domain=org.primary_domain,
+                        jobs=job_items,
+                    ),
+                )
 
         message: str = (
             f"Found {total_jobs} open job(s) across {len(companies)} company(ies)."
             if total_jobs > 0
             else "No open jobs found yet. Run job discovery from Setup."
         )
-        return ListOrgJobsResult(companies=companies, total_jobs=total_jobs, message=message)
+        return ListOrgJobsResult(companies=companies, total_jobs=total_jobs, total_relevant=total_relevant, message=message)
 
     async def run_discovery(self, user_id: uuid.UUID, run_id: uuid.UUID) -> None:
         run: JobDiscoveryRun | None = await self._db.get(JobDiscoveryRun, run_id)
@@ -297,6 +324,8 @@ class JobDiscoveryService:
         run.progress_message = None
         run.error = None
         await self._db.commit()
+
+        await self._classify_new_jobs(user_id)
 
     async def upsert_discovered_job(
         self,
@@ -422,6 +451,20 @@ class JobDiscoveryService:
         )
         for job in result.scalars().all():
             job.is_active = False
+
+    async def _classify_new_jobs(self, user_id: uuid.UUID) -> None:
+        """Run LLM classification on any unclassified jobs after discovery."""
+        try:
+            from contactsafe_server.services.job_relevance_service import (
+                JobRelevanceService,
+            )
+
+            svc = JobRelevanceService(self._db, self._settings)
+            count: int = await svc.classify_jobs_for_user(user_id)
+            if count > 0:
+                logger.info("Classified %d jobs for user %s", count, user_id)
+        except Exception:
+            logger.exception("Job classification failed for user %s", user_id)
 
     async def _list_monitored_org_ids(self, user_id: uuid.UUID) -> list[uuid.UUID]:
         user: User | None = await self._db.get(User, user_id)

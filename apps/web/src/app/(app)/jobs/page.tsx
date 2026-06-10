@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Briefcase, ExternalLink, Loader2 } from "lucide-react";
 import Link from "next/link";
@@ -15,7 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { ListOrgJobsResult } from "@/lib/api-types";
+import type { ListOrgJobsResult, OrgJobItem } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
 
 function formatSalary(min: number | null, max: number | null): string | null {
@@ -31,13 +32,40 @@ function formatSalary(min: number | null, max: number | null): string | null {
   return `Up to $${max!.toLocaleString()}`;
 }
 
+function hasRelevanceData(data: ListOrgJobsResult | undefined): boolean {
+  if (!data) return false;
+  return data.companies.some((c) =>
+    c.jobs.some((j) => j.is_relevant !== null),
+  );
+}
+
 export default function JobsPage() {
+  const [showAll, setShowAll] = useState<boolean>(false);
+
   const jobsQuery = useQuery({
     queryKey: ["org-jobs"],
     queryFn: () => proxyPost<ListOrgJobsResult>("list-org-jobs"),
   });
 
+  const data: ListOrgJobsResult | undefined = jobsQuery.data;
   const loading: boolean = jobsQuery.isLoading;
+  const hasRelevance: boolean = hasRelevanceData(data);
+
+  const filteredCompanies = (data?.companies ?? [])
+    .map((company) => {
+      const jobs: OrgJobItem[] =
+        !hasRelevance || showAll
+          ? company.jobs
+          : company.jobs.filter((j) => j.is_relevant !== false);
+      return { ...company, jobs };
+    })
+    .filter((company) => company.jobs.length > 0);
+
+  const totalShown: number = filteredCompanies.reduce(
+    (acc, c) => acc + c.jobs.length,
+    0,
+  );
+  const totalHidden: number = (data?.total_jobs ?? 0) - totalShown;
 
   return (
     <div className="mx-auto max-w-4xl space-y-8 p-6">
@@ -62,18 +90,40 @@ export default function JobsPage() {
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
       ) : null}
 
-      {jobsQuery.data?.message ? (
+      {data?.message ? (
         <Alert>
-          <AlertDescription>{jobsQuery.data.message}</AlertDescription>
+          <AlertDescription>{data.message}</AlertDescription>
         </Alert>
       ) : null}
 
-      {(jobsQuery.data?.companies.length ?? 0) === 0 ? (
+      {hasRelevance && !showAll && totalHidden > 0 ? (
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowAll(true)}
+          >
+            Show all {data?.total_jobs} jobs ({totalHidden} hidden)
+          </Button>
+        </div>
+      ) : hasRelevance && showAll ? (
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowAll(false)}
+          >
+            Show only relevant jobs
+          </Button>
+        </div>
+      ) : null}
+
+      {filteredCompanies.length === 0 && !loading ? (
         <p className="text-sm text-muted-foreground">
           No jobs yet. Select target companies in Setup and run job discovery.
         </p>
       ) : (
-        jobsQuery.data?.companies.map((company) => (
+        filteredCompanies.map((company) => (
           <section key={company.org_id} className="space-y-3">
             <h2 className="flex items-center gap-2 text-lg font-medium">
               <Briefcase className="h-5 w-5" />
@@ -110,7 +160,14 @@ export default function JobsPage() {
                             .join(" · ")}
                         </CardDescription>
                       </div>
-                      <Badge variant="secondary">{job.source}</Badge>
+                      <div className="flex items-center gap-1.5">
+                        {job.relevance_reason ? (
+                          <Badge variant="outline" className="text-xs font-normal">
+                            {job.relevance_reason}
+                          </Badge>
+                        ) : null}
+                        <Badge variant="secondary">{job.source}</Badge>
+                      </div>
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-2">

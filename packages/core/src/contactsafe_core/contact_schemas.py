@@ -364,6 +364,8 @@ class OrgJobItem(BaseModel):
     first_seen_at: datetime
     last_seen_at: datetime
     is_active: bool = True
+    is_relevant: bool | None = None
+    relevance_reason: str | None = None
 
 
 class OrgJobsByCompany(BaseModel):
@@ -376,4 +378,15 @@ class OrgJobsByCompany(BaseModel):
 class ListOrgJobsResult(BaseModel):
     companies: list[OrgJobsByCompany] = Field(default_factory=list)
     total_jobs: int = 0
+    total_relevant: int = 0
+    message: str
+
+
+class SetJobPreferencesRequest(BaseModel):
+    text: str
+
+
+class JobPreferencesResult(BaseModel):
+    text: str | None = None
+    classified_job_count: int = 0
     message: str

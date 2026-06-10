@@ -48,6 +48,7 @@ class User(Base):
         nullable=True,
     )
     job_monitor_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    job_preferences_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -686,3 +687,22 @@ class OrgListMembership(Base):
 
     org_list: Mapped["OrgList"] = relationship(back_populates="memberships")
     org: Mapped["Org"] = relationship()
+
+
+class UserJobRelevance(Base):
+    __tablename__ = "user_job_relevance"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("org_jobs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    is_relevant: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    classified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

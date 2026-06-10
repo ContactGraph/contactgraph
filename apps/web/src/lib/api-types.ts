@@ -672,6 +672,8 @@ export interface OrgJobItem {
   first_seen_at: string;
   last_seen_at: string;
   is_active: boolean;
+  is_relevant: boolean | null;
+  relevance_reason: string | null;
 }
 
 export interface OrgJobsByCompany {
@@ -684,5 +686,16 @@ export interface OrgJobsByCompany {
 export interface ListOrgJobsResult {
   companies: OrgJobsByCompany[];
   total_jobs: number;
+  total_relevant: number;
+  message: string;
+}
+
+export interface SetJobPreferencesRequest {
+  text: string;
+}
+
+export interface JobPreferencesResult {
+  text: string | null;
+  classified_job_count: number;
   message: string;
 }

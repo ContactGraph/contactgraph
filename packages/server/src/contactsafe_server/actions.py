@@ -39,6 +39,7 @@ from contactsafe_core.contact_schemas import (
     StrongTieCountResult,
     JobDiscoveryStatusResult,
     JobMonitorConfigResult,
+    JobPreferencesResult,
     ListOrgJobsResult,
     SetJobMonitorConfigRequest,
     StartJobDiscoveryResult,
@@ -1572,15 +1573,70 @@ async def cancel_job_discovery(
 async def list_org_jobs(
     ctx: AppContext,
     user_id: UUID | None,
+    *,
+    relevant_only: bool = False,
 ) -> ListOrgJobsResult:
     if user_id is None:
         return ListOrgJobsResult(
             companies=[],
             total_jobs=0,
+            total_relevant=0,
             message="Authentication required.",
         )
     async with ctx.session_factory() as db:
         from contactsafe_server.services.job_discovery_service import JobDiscoveryService
 
         service = JobDiscoveryService(db, ctx.settings)
-        return await service.list_jobs_for_user(user_id)
+        return await service.list_jobs_for_user(user_id, relevant_only=relevant_only)
+
+
+async def get_job_preferences(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> JobPreferencesResult:
+    if user_id is None:
+        return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.db.models import User, UserJobRelevance
+
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return JobPreferencesResult(text=None, classified_job_count=0, message="User not found.")
+        from sqlalchemy import func, select
+
+        count_result = await db.execute(
+            select(func.count()).select_from(UserJobRelevance).where(UserJobRelevance.user_id == user_id),
+        )
+        count: int = count_result.scalar() or 0
+        return JobPreferencesResult(
+            text=user.job_preferences_text,
+            classified_job_count=count,
+            message="OK",
+        )
+
+
+async def set_job_preferences(
+    ctx: AppContext,
+    user_id: UUID | None,
+    text: str,
+) -> JobPreferencesResult:
+    if user_id is None:
+        return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.db.models import User
+
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return JobPreferencesResult(text=None, classified_job_count=0, message="User not found.")
+        user.job_preferences_text = text.strip() or None
+        await db.commit()
+
+        from contactsafe_server.services.job_relevance_service import JobRelevanceService
+
+        svc = JobRelevanceService(db, ctx.settings)
+        count: int = await svc.reclassify_all(user_id)
+        return JobPreferencesResult(
+            text=user.job_preferences_text,
+            classified_job_count=count,
+            message=f"Preferences saved. Classified {count} job(s).",
+        )
