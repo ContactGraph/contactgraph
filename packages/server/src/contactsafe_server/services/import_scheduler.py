@@ -120,6 +120,18 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
                         encryptor=ctx.encryptor,
                     )
                     await service.run_sync(source_id)
+                    if source_type == SourceType.LINKEDIN_CONNECTIONS_UPLOAD.value:
+                        from contactsafe_server.services.org_enrichment_service import (
+                            OrgEnrichmentService,
+                        )
+
+                        org_service = OrgEnrichmentService(db, ctx.settings)
+                        enrich_result = await org_service.start_enrichment(user_id)
+                        logger.info(
+                            "Auto org enrichment after LinkedIn import for user %s: %s",
+                            user_id,
+                            enrich_result.message,
+                        )
                 else:
                     logger.warning(
                         "Sync skipped for source %s with type %s",

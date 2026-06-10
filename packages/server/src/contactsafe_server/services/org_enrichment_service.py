@@ -98,23 +98,30 @@ class OrgEnrichmentService:
                 message="Company enrichment is already running.",
             )
 
-        org_ids: list[uuid.UUID] = await self._list_user_org_ids(user_id)
-        if not org_ids:
+        unenriched_org_ids: list[uuid.UUID] = await self._list_unenriched_user_org_ids(
+            user_id
+        )
+        total_orgs: int = await self._count_user_orgs(user_id)
+        if total_orgs == 0:
             return EnrichOrgsResult(
                 scheduled=False,
                 state="complete",
                 message="No organizations to enrich yet.",
             )
+        if not unenriched_org_ids:
+            return EnrichOrgsResult(
+                scheduled=False,
+                state="complete",
+                message="All organizations are already enriched.",
+            )
 
-        enriched_count: int = await self._count_enriched_orgs(user_id)
-        total: int = len(org_ids)
         run = OrgEnrichmentRun(
             user_id=user_id,
             state="running",
             started_at=datetime.now(tz=UTC),
-            orgs_total=total,
-            orgs_enriched=enriched_count,
-            progress_message=self._progress_message(enriched_count, total),
+            orgs_total=len(unenriched_org_ids),
+            orgs_enriched=0,
+            progress_message=self._progress_message(0, len(unenriched_org_ids)),
         )
         self._db.add(run)
         await self._db.flush()
@@ -285,13 +292,29 @@ class OrgEnrichmentService:
         org.attributes = attributes
 
     async def _load_orgs_for_user(self, user_id: uuid.UUID) -> list[Org]:
-        org_ids: list[uuid.UUID] = await self._list_user_org_ids(user_id)
+        org_ids: list[uuid.UUID] = await self._list_unenriched_user_org_ids(user_id)
         if not org_ids:
             return []
         result = await self._db.execute(
             select(Org).where(Org.id.in_(org_ids)).order_by(Org.canonical_name.asc())
         )
         return list(result.scalars().all())
+
+    async def _list_unenriched_user_org_ids(self, user_id: uuid.UUID) -> list[uuid.UUID]:
+        result = await self._db.execute(
+            select(Org.id)
+            .join(Person, Person.current_org_id == Org.id)
+            .where(
+                *self._strong_tie_person_filter(user_id),
+                or_(
+                    Org.attributes.is_(None),
+                    ~Org.attributes.has_key("exa_enriched_at"),
+                ),
+            )
+            .group_by(Org.id)
+            .order_by(Org.canonical_name.asc())
+        )
+        return [row[0] for row in result.all()]
 
     async def _list_user_org_ids(self, user_id: uuid.UUID) -> list[uuid.UUID]:
         result = await self._db.execute(

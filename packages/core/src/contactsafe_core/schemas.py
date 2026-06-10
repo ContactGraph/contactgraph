@@ -403,6 +403,11 @@ class DeleteUserExperienceRequest(BaseModel):
     id: UUID
 
 
+class DeleteUserAccountResult(BaseModel):
+    deleted: bool
+    message: str = ""
+
+
 class QueryNetworkRequest(BaseModel):
     question: str
 

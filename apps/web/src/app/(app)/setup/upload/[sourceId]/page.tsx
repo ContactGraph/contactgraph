@@ -93,7 +93,7 @@ export default function PhoneContactsUploadPage({
   useEffect(() => {
     if (source?.sync_state === "complete") {
       const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
-        router.push("/setup");
+        router.push("/graph");
       }, 2500);
       return () => {
         clearTimeout(timer);
@@ -192,7 +192,7 @@ export default function PhoneContactsUploadPage({
             idleMessage="Drag and drop your contacts file here"
             idleHint="or click to choose a file"
           />
-          <Button variant="outline" onClick={() => router.push("/setup")}>
+          <Button variant="outline" onClick={() => router.push("/graph")}>
             Back to setup
           </Button>
         </CardContent>
