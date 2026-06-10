@@ -68,17 +68,47 @@ export default function JobsPage() {
   const totalHidden: number = (data?.total_jobs ?? 0) - totalShown;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-8 p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="mx-auto max-w-4xl space-y-4 p-6">
+      <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Open jobs</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Roles discovered at your monitored target companies.
+          <h1 className="text-xl font-semibold tracking-tight">Open jobs</h1>
+          <p className="text-xs text-muted-foreground">
+            {loading
+              ? "Loading…"
+              : `${totalShown} of ${data?.total_jobs ?? 0} shown`}
           </p>
         </div>
-        <Button variant="outline" size="sm" asChild>
-          <Link href="/setup">Job monitor settings</Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          {hasRelevance ? (
+            <div className="inline-flex items-center rounded-md border text-xs">
+              <button
+                type="button"
+                className={`px-3 py-1.5 rounded-l-md transition-colors ${
+                  !showAll
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted"
+                }`}
+                onClick={() => setShowAll(false)}
+              >
+                Relevant ({data?.total_relevant ?? 0})
+              </button>
+              <button
+                type="button"
+                className={`px-3 py-1.5 rounded-r-md border-l transition-colors ${
+                  showAll
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted"
+                }`}
+                onClick={() => setShowAll(true)}
+              >
+                All ({data?.total_jobs ?? 0})
+              </button>
+            </div>
+          ) : null}
+          <Button variant="outline" size="sm" className="h-8 text-xs" asChild>
+            <Link href="/setup">Settings</Link>
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -90,32 +120,10 @@ export default function JobsPage() {
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
       ) : null}
 
-      {data?.message ? (
+      {data?.message && !loading ? (
         <Alert>
           <AlertDescription>{data.message}</AlertDescription>
         </Alert>
-      ) : null}
-
-      {hasRelevance && !showAll && totalHidden > 0 ? (
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowAll(true)}
-          >
-            Show all {data?.total_jobs} jobs ({totalHidden} hidden)
-          </Button>
-        </div>
-      ) : hasRelevance && showAll ? (
-        <div className="flex items-center gap-2">
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowAll(false)}
-          >
-            Show only relevant jobs
-          </Button>
-        </div>
       ) : null}
 
       {filteredCompanies.length === 0 && !loading ? (
