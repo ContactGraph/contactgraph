@@ -15,6 +15,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,11 +39,13 @@ from contactsafe_core.contact_schemas import (
     ListStrongTiesResult,
     JobDiscoveryStatusResult,
     JobMonitorConfigResult,
+    JobPreferencesResult,
     ListOrgJobsResult,
     ModifyOrgListMembershipRequest,
     ModifyOrgListMembershipResult,
     NetworkStatusResult,
     SetJobMonitorConfigRequest,
+    SetJobPreferencesRequest,
     StartJobDiscoveryResult,
     OrgDetailResult,
     OrgEnrichmentStatusResult,
@@ -747,9 +750,35 @@ async def api_get_job_discovery_status(
     return await actions.get_job_discovery_status(ctx, user_id)
 
 
+class _ListOrgJobsBody(BaseModel):
+    relevant_only: bool = False
+
+
 @router.post("/list-org-jobs", response_model=ListOrgJobsResult)
-async def api_list_org_jobs(ctx: Ctx, user_id: EffectiveUser) -> ListOrgJobsResult:
-    return await actions.list_org_jobs(ctx, user_id)
+async def api_list_org_jobs(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: _ListOrgJobsBody = _ListOrgJobsBody(),
+) -> ListOrgJobsResult:
+    return await actions.list_org_jobs(ctx, user_id, relevant_only=body.relevant_only)
+
+
+@router.post("/get-job-preferences", response_model=JobPreferencesResult)
+async def api_get_job_preferences(ctx: Ctx, user_id: EffectiveUser) -> JobPreferencesResult:
+    return await actions.get_job_preferences(ctx, user_id)
+
+
+@router.post("/set-job-preferences", response_model=JobPreferencesResult)
+async def api_set_job_preferences(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: SetJobPreferencesRequest,
+) -> JobPreferencesResult:
+    return await actions.set_job_preferences(
+        ctx, user_id, body.text,
+        location_pref=body.location_pref,
+        location_city=body.location_city,
+    )
 
 
 @router.post("/webhooks/theirstack")

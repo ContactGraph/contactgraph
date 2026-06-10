@@ -70,15 +70,10 @@ def _freshness_anchor(
     last_genuine_interaction_at: datetime | None,
 ) -> datetime | None:
     source_kind: str = claim.contributor_source_kind
+    observed: datetime | None = claim.observed_at or _utc_now()
     if source_kind == "gmail_signature":
-        return last_genuine_interaction_at or claim.observed_at
-    if source_kind in {"linkedin_profile_upload", "linkedin_connections_upload"}:
-        return claim.observed_at
-    if source_kind in _WEB_SOURCE_KINDS:
-        return claim.observed_at
-    if source_kind in {"google_contacts", "phone_contacts_upload", "heuristic", "gmail_domain"}:
-        return claim.observed_at
-    return claim.observed_at
+        return last_genuine_interaction_at or observed
+    return observed
 
 
 def _is_fresh(

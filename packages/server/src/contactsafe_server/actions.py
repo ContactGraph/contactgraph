@@ -39,6 +39,7 @@ from contactsafe_core.contact_schemas import (
     StrongTieCountResult,
     JobDiscoveryStatusResult,
     JobMonitorConfigResult,
+    JobPreferencesResult,
     ListOrgJobsResult,
     SetJobMonitorConfigRequest,
     StartJobDiscoveryResult,
@@ -172,7 +173,7 @@ async def connect_source(
             resolved_uid: UUID = await sources.resolve_user_id(source_id=result.source_id)
             if user_id is not None and resolved_uid == user_id:
                 token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
-                    resolved_uid
+                    resolved_uid, email=result.email
                 )
                 result = result.model_copy(
                     update={
@@ -1077,14 +1078,15 @@ async def poll_connect(
                 message="Tokens already dispensed. Use refresh_token to get new access tokens via POST /oauth/token.",
             )
 
-        token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
-            session.user_id
-        )
-        session.token_dispensed_at = datetime.now(tz=UTC)
-        await db.commit()
-
         user: User | None = await db.get(User, session.user_id)
         email: str | None = user.email if user else None
+
+        token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
+            session.user_id, email=email
+        )
+
+        session.token_dispensed_at = datetime.now(tz=UTC)
+        await db.commit()
 
         return PollConnectResult(
             status="connected",
@@ -1572,15 +1574,78 @@ async def cancel_job_discovery(
 async def list_org_jobs(
     ctx: AppContext,
     user_id: UUID | None,
+    *,
+    relevant_only: bool = False,
 ) -> ListOrgJobsResult:
     if user_id is None:
         return ListOrgJobsResult(
             companies=[],
             total_jobs=0,
+            total_relevant=0,
             message="Authentication required.",
         )
     async with ctx.session_factory() as db:
         from contactsafe_server.services.job_discovery_service import JobDiscoveryService
 
         service = JobDiscoveryService(db, ctx.settings)
-        return await service.list_jobs_for_user(user_id)
+        return await service.list_jobs_for_user(user_id, relevant_only=relevant_only)
+
+
+async def get_job_preferences(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> JobPreferencesResult:
+    if user_id is None:
+        return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.db.models import User, UserJobRelevance
+
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return JobPreferencesResult(text=None, classified_job_count=0, message="User not found.")
+        from sqlalchemy import func, select
+
+        count_result = await db.execute(
+            select(func.count()).select_from(UserJobRelevance).where(UserJobRelevance.user_id == user_id),
+        )
+        count: int = count_result.scalar() or 0
+        return JobPreferencesResult(
+            text=user.job_preferences_text,
+            location_pref=user.job_location_pref,
+            location_city=user.job_location_city,
+            classified_job_count=count,
+            message="OK",
+        )
+
+
+async def set_job_preferences(
+    ctx: AppContext,
+    user_id: UUID | None,
+    text: str,
+    location_pref: str | None = None,
+    location_city: str | None = None,
+) -> JobPreferencesResult:
+    if user_id is None:
+        return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.db.models import User
+
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return JobPreferencesResult(text=None, classified_job_count=0, message="User not found.")
+        user.job_preferences_text = text.strip() or None
+        user.job_location_pref = location_pref
+        user.job_location_city = location_city.strip() if location_city else None
+        await db.commit()
+
+        from contactsafe_server.services.job_relevance_service import JobRelevanceService
+
+        svc = JobRelevanceService(db, ctx.settings)
+        count: int = await svc.reclassify_all(user_id)
+        return JobPreferencesResult(
+            text=user.job_preferences_text,
+            location_pref=user.job_location_pref,
+            location_city=user.job_location_city,
+            classified_job_count=count,
+            message=f"Preferences saved. Classified {count} job(s).",
+        )

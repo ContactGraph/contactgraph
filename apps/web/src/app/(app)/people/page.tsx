@@ -12,6 +12,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { Download, Search } from "lucide-react";
+import Link from "next/link";
 
 import {
   CompactCell,
@@ -44,7 +45,9 @@ export default function PeoplePage() {
   const [sorting, setSorting] = useState<SortingState>([
     { id: "name", desc: false },
   ]);
-  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
+  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(
+    searchParams.get("person") ?? null,
+  );
   const [isDetailDirty, setIsDetailDirty] = useState<boolean>(false);
   const [discardDialogOpen, setDiscardDialogOpen] = useState<boolean>(false);
   const [isClosingSave, setIsClosingSave] = useState<boolean>(false);
@@ -153,9 +156,19 @@ export default function PeoplePage() {
         id: "company",
         accessorFn: (row: PersonListItem) => row.org_name ?? "",
         header: ({ column }) => <CompactSortHeader column={column} label="Company" />,
-        cell: ({ row }) => (
-          <CompactCell value={row.original.org_name ?? "—"} />
-        ),
+        cell: ({ row }) => {
+          const orgName: string | null = row.original.org_name;
+          if (!orgName) return <CompactCell value="—" />;
+          return (
+            <Link
+              href={`/organizations?search=${encodeURIComponent(orgName)}`}
+              className="block truncate text-xs text-primary hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {orgName}
+            </Link>
+          );
+        },
         meta: { width: "w-[7rem]" },
       },
       {

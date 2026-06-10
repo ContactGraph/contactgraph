@@ -45,6 +45,7 @@ import type {
   EnrichOrgsResult,
   JobDiscoveryStatusResult,
   JobMonitorConfigResult,
+  JobPreferencesResult,
   ListOrgListsResult,
   SetJobMonitorConfigRequest,
   StartJobDiscoveryResult,
@@ -75,6 +76,7 @@ type SetupStepId =
   | "linkedin_profile"
   | "org_enrichment"
   | "target_companies"
+  | "job_preferences"
   | "job_scrapers";
 
 type SetupSectionId = "network" | "job_search";
@@ -129,6 +131,13 @@ const setupSteps: ReadonlyArray<SetupStep> = [
     title: "Select target companies",
     description:
       "Browse companies with strong ties and filter by industry, size, and more.",
+  },
+  {
+    id: "job_preferences",
+    section: "job_search",
+    title: "Describe your ideal roles",
+    description:
+      "Tell us what kinds of jobs you're looking for so we only show relevant results.",
   },
   {
     id: "job_scrapers",
@@ -202,6 +211,7 @@ function stepComplete(
   orgEnrichmentStatus: OrgEnrichmentStatusResult | undefined,
   orgLists: ReadonlyArray<OrgListSummary>,
   jobMonitorConfig: JobMonitorConfigResult | undefined,
+  jobPreferences: JobPreferencesResult | undefined,
 ): boolean {
   switch (stepId) {
     case "gmail": {
@@ -228,6 +238,8 @@ function stepComplete(
       );
     case "target_companies":
       return orgLists.some((list) => list.org_count > 0);
+    case "job_preferences":
+      return (jobPreferences?.text ?? "").trim().length > 0;
     case "job_scrapers":
       return jobMonitorConfig?.enabled === true;
     default:
@@ -423,6 +435,9 @@ export default function SetupPage() {
   const [selectedTargetListId, setSelectedTargetListId] = useState<string | null>(
     null,
   );
+  const [preferencesText, setPreferencesText] = useState<string>("");
+  const [locationPref, setLocationPref] = useState<string | null>(null);
+  const [locationCity, setLocationCity] = useState<string>("");
 
   const clearPollTimer = useCallback((): void => {
     if (pollTimerRef.current) {
@@ -483,6 +498,24 @@ export default function SetupPage() {
       proxyPost<JobDiscoveryStatusResult>("get-job-discovery-status"),
     refetchInterval: (query) =>
       query.state.data?.state === "running" ? 2000 : false,
+  });
+
+  const jobPreferencesQuery = useQuery({
+    queryKey: ["job-preferences"],
+    queryFn: () => proxyPost<JobPreferencesResult>("get-job-preferences"),
+  });
+
+  const setJobPreferencesMutation = useMutation({
+    mutationFn: (params: { text: string; location_pref: string | null; location_city: string | null }) =>
+      proxyPost<JobPreferencesResult>("set-job-preferences", params),
+    onSuccess: async (result: JobPreferencesResult) => {
+      toast.success(result.message);
+      await queryClient.invalidateQueries({ queryKey: ["job-preferences"] });
+      await queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
   });
 
   const createOrgListMutation = useMutation({
@@ -818,6 +851,21 @@ export default function SetupPage() {
   }, [jobMonitorConfig?.list_id, selectedTargetListId]);
 
   useEffect(() => {
+    const serverText: string | null = jobPreferencesQuery.data?.text ?? null;
+    if (serverText !== null && preferencesText === "") {
+      setPreferencesText(serverText);
+    }
+    const serverLocPref: string | null = jobPreferencesQuery.data?.location_pref ?? null;
+    if (serverLocPref !== null && locationPref === null) {
+      setLocationPref(serverLocPref);
+    }
+    const serverCity: string | null = jobPreferencesQuery.data?.location_city ?? null;
+    if (serverCity !== null && locationCity === "") {
+      setLocationCity(serverCity);
+    }
+  }, [jobPreferencesQuery.data?.text, jobPreferencesQuery.data?.location_pref, jobPreferencesQuery.data?.location_city, preferencesText, locationPref, locationCity]);
+
+  useEffect(() => {
     if (jobDiscoveryStatus?.state !== "complete") {
       return;
     }
@@ -831,6 +879,7 @@ export default function SetupPage() {
       orgEnrichmentStatus,
       orgLists,
       jobMonitorConfig,
+      jobPreferencesQuery.data,
     );
     const inProgress: boolean =
       step.id === "org_enrichment"
@@ -1095,6 +1144,66 @@ export default function SetupPage() {
                 </Button>
               ) : null}
             </>
+          ) : step.id === "job_preferences" ? (
+            <>
+              <div className="flex w-full flex-col gap-3">
+                <textarea
+                  className="min-h-[80px] w-full rounded-md border bg-background px-3 py-2 text-sm sm:w-80"
+                  placeholder="e.g. I'm a senior backend engineer interested in distributed systems, platform, and SRE roles. Python or Go preferred. Not interested in frontend or sales."
+                  value={preferencesText}
+                  onChange={(e) => setPreferencesText(e.target.value)}
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                    value={locationPref ?? ""}
+                    onChange={(e) => setLocationPref(e.target.value || null)}
+                  >
+                    <option value="">Location…</option>
+                    <option value="remote">Remote only</option>
+                    <option value="in_person">In-person</option>
+                    <option value="either">Remote or in-person</option>
+                  </select>
+                  {locationPref && locationPref !== "remote" ? (
+                    <input
+                      type="text"
+                      className="rounded-md border bg-background px-2 py-1.5 text-sm sm:w-48"
+                      placeholder="City (e.g. San Francisco)"
+                      value={locationCity}
+                      onChange={(e) => setLocationCity(e.target.value)}
+                    />
+                  ) : null}
+                </div>
+                <div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      setJobPreferencesMutation.isPending ||
+                      !preferencesText.trim()
+                    }
+                    onClick={() =>
+                      setJobPreferencesMutation.mutate({
+                        text: preferencesText,
+                        location_pref: locationPref,
+                        location_city: locationCity || null,
+                      })
+                    }
+                  >
+                    {setJobPreferencesMutation.isPending ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      "Save"
+                    )}
+                  </Button>
+                </div>
+              </div>
+              {jobPreferencesQuery.data?.classified_job_count ? (
+                <p className="text-xs text-muted-foreground">
+                  {jobPreferencesQuery.data.classified_job_count} job(s) classified
+                </p>
+              ) : null}
+            </>
           ) : step.id === "job_scrapers" ? (
             <>
               <Button
@@ -1164,7 +1273,9 @@ export default function SetupPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Setup</h1>
         <p className="text-muted-foreground">
-          Upload data, configure enrichment and monitoring.
+          Follow the steps below to get the most out of ContactGraph. Start by
+          importing your network, then configure job search tools to surface
+          relevant opportunities.
         </p>
       </div>
 

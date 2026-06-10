@@ -672,17 +672,35 @@ export interface OrgJobItem {
   first_seen_at: string;
   last_seen_at: string;
   is_active: boolean;
+  is_relevant: boolean | null;
+  relevance_reason: string | null;
 }
 
 export interface OrgJobsByCompany {
   org_id: string;
   org_name: string;
   primary_domain: string | null;
+  description: string | null;
   jobs: OrgJobItem[];
 }
 
 export interface ListOrgJobsResult {
   companies: OrgJobsByCompany[];
   total_jobs: number;
+  total_relevant: number;
+  message: string;
+}
+
+export interface SetJobPreferencesRequest {
+  text: string;
+  location_pref: string | null;
+  location_city: string | null;
+}
+
+export interface JobPreferencesResult {
+  text: string | null;
+  location_pref: string | null;
+  location_city: string | null;
+  classified_job_count: number;
   message: string;
 }

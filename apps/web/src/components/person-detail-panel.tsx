@@ -2,6 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Plus, Trash2 } from "lucide-react";
+import Link from "next/link";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -244,7 +245,17 @@ export const PersonDetailPanel = forwardRef<
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="person-org">Organization</Label>
+          <div className="flex items-center justify-between">
+            <Label htmlFor="person-org">Organization</Label>
+            {person.org_id ? (
+              <Link
+                href={`/organizations?org=${encodeURIComponent(person.org_id)}`}
+                className="text-xs text-primary hover:underline"
+              >
+                View org →
+              </Link>
+            ) : null}
+          </div>
           <Input
             id="person-org"
             value={form.org_name}

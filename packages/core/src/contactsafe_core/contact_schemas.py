@@ -364,16 +364,34 @@ class OrgJobItem(BaseModel):
     first_seen_at: datetime
     last_seen_at: datetime
     is_active: bool = True
+    is_relevant: bool | None = None
+    relevance_reason: str | None = None
 
 
 class OrgJobsByCompany(BaseModel):
     org_id: UUID
     org_name: str
     primary_domain: str | None = None
+    description: str | None = None
     jobs: list[OrgJobItem] = Field(default_factory=list)
 
 
 class ListOrgJobsResult(BaseModel):
     companies: list[OrgJobsByCompany] = Field(default_factory=list)
     total_jobs: int = 0
+    total_relevant: int = 0
+    message: str
+
+
+class SetJobPreferencesRequest(BaseModel):
+    text: str
+    location_pref: str | None = None
+    location_city: str | None = None
+
+
+class JobPreferencesResult(BaseModel):
+    text: str | None = None
+    location_pref: str | None = None
+    location_city: str | None = None
+    classified_job_count: int = 0
     message: str

@@ -235,6 +235,11 @@ class Settings(BaseSettings):
         default=None,
         description="HMAC signing secret for TheirStack webhook verification",
     )
+
+    admin_emails: list[str] = Field(
+        default_factory=list,
+        description="Email addresses that automatically receive contactsafe:admin scope on login",
+    )
     theirstack_base_url: str = Field(default="https://api.theirstack.com")
     theirstack_request_timeout_seconds: float = Field(default=30.0)
     theirstack_job_max_age_days: int = Field(

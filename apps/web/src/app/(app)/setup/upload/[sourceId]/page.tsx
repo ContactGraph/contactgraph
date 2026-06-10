@@ -1,9 +1,8 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Loader2, Upload } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -14,6 +13,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { FileDropZone } from "@/components/ui/file-drop-zone";
 import type { ListSourcesResult, SyncSourceResult } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
 
@@ -26,9 +26,7 @@ export default function PhoneContactsUploadPage({
 }: UploadPageProps): React.JSX.Element {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [sourceId, setSourceId] = useState<string>("");
-  const [dragActive, setDragActive] = useState<boolean>(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadMessage, setUploadMessage] = useState<string | null>(null);
 
@@ -105,8 +103,8 @@ export default function PhoneContactsUploadPage({
   }, [router, source?.sync_state]);
 
   const handleFile = useCallback(
-    (file: File | undefined): void => {
-      if (file === undefined || sourceId.length === 0) {
+    (file: File): void => {
+      if (sourceId.length === 0) {
         return;
       }
       setUploadError(null);
@@ -114,16 +112,6 @@ export default function PhoneContactsUploadPage({
       uploadMutation.mutate(file);
     },
     [sourceId, uploadMutation],
-  );
-
-  const onDrop = useCallback(
-    (event: React.DragEvent<HTMLDivElement>): void => {
-      event.preventDefault();
-      setDragActive(false);
-      const file: File | undefined = event.dataTransfer.files[0];
-      handleFile(file);
-    },
-    [handleFile],
   );
 
   return (
@@ -191,59 +179,19 @@ export default function PhoneContactsUploadPage({
           <CardDescription>Accepts .vcf, .vcard, or .csv files.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <input
-            ref={fileInputRef}
-            type="file"
+          <FileDropZone
             accept=".vcf,.vcard,.csv,text/vcard,text/csv"
-            className="hidden"
-            onChange={(event) => {
-              handleFile(event.target.files?.[0]);
-              event.target.value = "";
-            }}
+            onFileSelect={handleFile}
+            disabled={sourceId.length === 0}
+            busy={uploadMutation.isPending || source?.sync_state === "syncing"}
+            busyMessage={
+              source?.sync_state === "syncing"
+                ? `Importing… ${source.contacts_resolved} contacts so far`
+                : "Uploading…"
+            }
+            idleMessage="Drag and drop your contacts file here"
+            idleHint="or click to choose a file"
           />
-          <div
-            role="button"
-            tabIndex={0}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={() => {
-              setDragActive(false);
-            }}
-            onDrop={onDrop}
-            onClick={() => fileInputRef.current?.click()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                fileInputRef.current?.click();
-              }
-            }}
-            className={`flex min-h-40 cursor-pointer flex-col items-center justify-center gap-3 rounded-lg border border-dashed p-8 text-center transition-colors ${
-              dragActive ? "border-foreground bg-muted/50" : "border-muted-foreground/40"
-            }`}
-          >
-            {uploadMutation.isPending || source?.sync_state === "syncing" ? (
-              <>
-                <Loader2 className="size-8 animate-spin text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">
-                  {source?.sync_state === "syncing"
-                    ? `Importing… ${source.contacts_resolved} contacts so far`
-                    : "Uploading…"}
-                </p>
-              </>
-            ) : (
-              <>
-                <Upload className="size-8 text-muted-foreground" />
-                <p className="text-sm font-medium">
-                  Drag and drop your contacts file here
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  or click to choose a file
-                </p>
-              </>
-            )}
-          </div>
           <Button variant="outline" onClick={() => router.push("/setup")}>
             Back to setup
           </Button>

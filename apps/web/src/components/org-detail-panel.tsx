@@ -2,6 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
+import Link from "next/link";
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useState } from "react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -240,7 +241,12 @@ export const OrgDetailPanel = forwardRef<
           <ul className="divide-y rounded-md border">
             {org.people.map((person) => (
               <li key={person.person_id} className="px-3 py-2 text-sm">
-                <p className="font-medium">{person.display_name}</p>
+                <Link
+                  href={`/people?person=${encodeURIComponent(person.person_id)}`}
+                  className="font-medium text-primary hover:underline"
+                >
+                  {person.display_name}
+                </Link>
                 <p className="text-muted-foreground">
                   {[person.current_role, person.primary_email]
                     .filter(Boolean)

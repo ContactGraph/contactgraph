@@ -187,7 +187,13 @@ class AtsJobClient:
 
 
 def _snippet(text: str) -> str:
-    cleaned: str = " ".join(text.split())
+    import re
+
+    stripped: str = re.sub(r"<[^>]+>", " ", text)
+    stripped = stripped.replace("&lt;", "<").replace("&gt;", ">")
+    stripped = stripped.replace("&amp;", "&").replace("&quot;", '"')
+    stripped = stripped.replace("&#39;", "'").replace("&nbsp;", " ")
+    cleaned: str = " ".join(stripped.split())
     if len(cleaned) <= _DESCRIPTION_SNIPPET_MAX:
         return cleaned
     return cleaned[:_DESCRIPTION_SNIPPET_MAX - 1].rstrip() + "…"

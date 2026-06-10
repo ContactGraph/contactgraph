@@ -4,6 +4,7 @@
 Usage:
     # By email (looks up user in DB):
     python scripts/mint_admin_token.py shalomormsby@gmail.com
+    python scripts/mint_admin_token.py --email shalomormsby@gmail.com
 
     # By user UUID (no DB needed):
     python scripts/mint_admin_token.py --uuid 550e8400-e29b-41d4-a716-446655440000
@@ -43,6 +44,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Mint an admin JWT for a ContactGraph user")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("email", nargs="?", help="User email address (requires DB)")
+    group.add_argument("--email", dest="email_flag", help="User email address (requires DB)")
     group.add_argument("--uuid", help="User UUID (no DB lookup needed)")
     args = parser.parse_args()
 
@@ -52,7 +54,10 @@ def main() -> None:
     if args.uuid:
         user_id = uuid.UUID(args.uuid)
     else:
-        user_id = asyncio.run(_resolve_user_id_by_email(args.email, settings))
+        email: str | None = args.email_flag or args.email
+        if email is None:
+            parser.error("email address is required")
+        user_id = asyncio.run(_resolve_user_id_by_email(email, settings))
 
     scopes: list[str] = ["contactsafe:read", "contactsafe:write", "contactsafe:admin"]
     token: str = jwt_service.create_access_token(user_id, scopes)

@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -48,6 +48,9 @@ class User(Base):
         nullable=True,
     )
     job_monitor_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    job_preferences_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_location_pref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_location_city: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -270,7 +273,7 @@ class Person(Base):
     primary_email: Mapped[str | None] = mapped_column(Text, nullable=True)
     current_org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="SET NULL"), nullable=True)
     current_org_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    current_role: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_role: Mapped[str | None] = mapped_column("current_role", Text, nullable=True, quote=True)
     bio_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     social_profiles: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False, default=dict)
     inferred_categories: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
@@ -429,7 +432,7 @@ class EmploymentClaim(Base):
     contributor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contributor_source_kind: Mapped[str] = mapped_column(Text, nullable=False)
     contributor_source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), default=lambda: datetime.now(UTC), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
     evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
@@ -451,7 +454,7 @@ class RelationshipClaim(Base):
     observed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     contributor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contributor_source_kind: Mapped[str] = mapped_column(Text, nullable=False, default="gmail")
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), default=lambda: datetime.now(UTC), nullable=False)
     last_seen_together_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
@@ -469,7 +472,7 @@ class PersonAttributeClaim(Base):
     contributor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contributor_source_kind: Mapped[str] = mapped_column(Text, nullable=False)
     contributor_source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), default=lambda: datetime.now(UTC), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
     evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
@@ -489,7 +492,7 @@ class OrgAttributeClaim(Base):
     contributor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contributor_source_kind: Mapped[str] = mapped_column(Text, nullable=False)
     contributor_source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), default=lambda: datetime.now(UTC), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
     evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
@@ -686,3 +689,22 @@ class OrgListMembership(Base):
 
     org_list: Mapped["OrgList"] = relationship(back_populates="memberships")
     org: Mapped["Org"] = relationship()
+
+
+class UserJobRelevance(Base):
+    __tablename__ = "user_job_relevance"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("org_jobs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    is_relevant: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    classified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
