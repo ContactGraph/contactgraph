@@ -325,7 +325,7 @@ class TestConnectSourceTool:
         assert result.access_token == "access-tok"
         assert result.refresh_token == "refresh-tok"
         mock_sources.resolve_user_id.assert_called_once_with(source_id=source_id)
-        mock_oauth_server.mint_tokens_for_user.assert_called_once_with(user_id)
+        mock_oauth_server.mint_tokens_for_user.assert_called_once_with(user_id, email=None)
 
     @pytest.mark.asyncio
     @patch("contactsafe_server.actions.build_oauth_service")
