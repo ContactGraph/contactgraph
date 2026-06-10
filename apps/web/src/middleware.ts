@@ -37,22 +37,27 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
     return NextResponse.next();
   }
 
+  const readSession = await getIronSession<SessionData>(
+    request.cookies,
+    getSessionOptions(),
+  );
+
+  if (!readSession.isLoggedIn || !readSession.isAdmin) {
+    return NextResponse.redirect(buildCleanUrl(url), 303);
+  }
+
   const response: NextResponse = NextResponse.redirect(
     buildCleanUrl(url),
     303,
   );
 
-  const session = await getIronSession<SessionData>(
+  const writeSession = await getIronSession<SessionData>(
     response.cookies,
     getSessionOptions(),
   );
 
-  if (!session.isLoggedIn || !session.isAdmin) {
-    return response;
-  }
-
-  session.masqueradeAs = masqueradeTarget.trim();
-  await session.save();
+  Object.assign(writeSession, { ...readSession, masqueradeAs: masqueradeTarget.trim() });
+  await writeSession.save();
 
   return response;
 }

@@ -1,16 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Briefcase,
-  Loader2,
-  LogOut,
-  Pencil,
-  Plus,
-  Trash2,
-  Upload,
-  X,
-} from "lucide-react";
+import { Briefcase, Loader2, LogOut, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -31,6 +22,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FileDropZone } from "@/components/ui/file-drop-zone";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -99,7 +91,6 @@ const EMPTY_FORM: ExperienceFormState = {
 export default function ProfilePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [dialogOpen, setDialogOpen] = useState<boolean>(false);
   const [form, setForm] = useState<ExperienceFormState>(EMPTY_FORM);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -251,10 +242,7 @@ export default function ProfilePage() {
   });
 
   const handlePdfUpload = useCallback(
-    async (file: File | undefined): Promise<void> => {
-      if (file === undefined) {
-        return;
-      }
+    async (file: File): Promise<void> => {
       const buffer: ArrayBuffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       let binary = "";
@@ -306,38 +294,23 @@ export default function ProfilePage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Your Profile</h1>
-          <p className="text-muted-foreground">
-            Your professional background helps identify the right version of your
-            contacts during enrichment.
-          </p>
-        </div>
-        <div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,application/pdf"
-            className="hidden"
-            onChange={(event) => {
-              void handlePdfUpload(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-          <Button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploadMutation.isPending || awaitingSync}
-          >
-            {uploadMutation.isPending || awaitingSync ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Upload className="size-4" />
-            )}
-            {awaitingSync ? "Processing PDF…" : "Upload LinkedIn PDF"}
-          </Button>
-        </div>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Your Profile</h1>
+        <p className="text-muted-foreground">
+          Your professional background helps identify the right version of your
+          contacts during enrichment.
+        </p>
       </div>
+
+      <FileDropZone
+        accept=".pdf,application/pdf"
+        onFileSelect={(file: File) => void handlePdfUpload(file)}
+        disabled={uploadMutation.isPending || awaitingSync}
+        busy={uploadMutation.isPending || awaitingSync}
+        busyMessage={awaitingSync ? "Processing PDF…" : "Uploading…"}
+        idleMessage="Drag and drop your LinkedIn PDF here"
+        idleHint="or click to choose a file"
+      />
 
       {uploadError ? (
         <Alert variant="destructive">

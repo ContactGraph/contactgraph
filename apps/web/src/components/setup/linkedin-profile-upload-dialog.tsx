@@ -1,10 +1,6 @@
 "use client";
 
-import { Loader2, Upload } from "lucide-react";
-import { useCallback, useRef } from "react";
-
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -12,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FileDropZone } from "@/components/ui/file-drop-zone";
 
 interface LinkedInProfileUploadDialogProps {
   open: boolean;
@@ -32,18 +29,6 @@ export function LinkedInProfileUploadDialog({
   error,
   isComplete,
 }: LinkedInProfileUploadDialogProps): React.JSX.Element {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handlePdfUpload = useCallback(
-    (file: File | undefined): void => {
-      if (file === undefined) {
-        return;
-      }
-      onFileSelect(file);
-    },
-    [onFileSelect],
-  );
-
   const isBusy: boolean = isPending || isProcessing;
 
   return (
@@ -74,34 +59,23 @@ export function LinkedInProfileUploadDialog({
           <div className="space-y-2 text-sm text-muted-foreground">
             <p className="font-medium text-foreground">Export from LinkedIn</p>
             <p>1. Go to your LinkedIn profile.</p>
-            <p>2. Click &quot;More&quot; below your headline.</p>
+            <p>
+              2. Click the rightmost button under your name — it may say
+              &quot;Resources&quot; or &quot;…&quot; (three dots).
+            </p>
             <p>3. Select &quot;Save to PDF&quot; and download the file.</p>
             <p>4. Upload the PDF below.</p>
           </div>
 
-          <input
-            ref={fileInputRef}
-            type="file"
+          <FileDropZone
             accept=".pdf,application/pdf"
-            className="hidden"
-            onChange={(event) => {
-              handlePdfUpload(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-          <Button
-            variant="outline"
-            className="w-full"
-            onClick={() => fileInputRef.current?.click()}
+            onFileSelect={onFileSelect}
             disabled={isBusy}
-          >
-            {isBusy ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Upload className="size-4" />
-            )}
-            {isProcessing ? "Processing PDF…" : "Upload LinkedIn PDF"}
-          </Button>
+            busy={isBusy}
+            busyMessage={isProcessing ? "Processing PDF…" : "Uploading…"}
+            idleMessage="Drag and drop your LinkedIn PDF here"
+            idleHint="or click to choose a file"
+          />
         </div>
       </DialogContent>
     </Dialog>
