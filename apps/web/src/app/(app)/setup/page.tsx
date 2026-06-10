@@ -1164,7 +1164,9 @@ export default function SetupPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Setup</h1>
         <p className="text-muted-foreground">
-          Upload data, configure enrichment and monitoring.
+          Follow the steps below to get the most out of ContactGraph. Start by
+          importing your network, then configure job search tools to surface
+          relevant opportunities.
         </p>
       </div>
 

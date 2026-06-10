@@ -17,10 +17,10 @@ type NavLink =
   | { kind: "external"; href: string; label: string };
 
 const appLinks: readonly NavLink[] = [
+  { kind: "internal", href: "/setup", label: "Setup" },
   { kind: "internal", href: "/people", label: "People" },
   { kind: "internal", href: "/organizations", label: "Organizations" },
   { kind: "internal", href: "/jobs", label: "Jobs" },
-  { kind: "internal", href: "/setup", label: "Setup" },
   { kind: "internal", href: "/target-companies", label: "Targets" },
   { kind: "internal", href: "/trust", label: "Trust List" },
 ];
@@ -94,7 +94,7 @@ export function SiteHeader({ email }: { email: string | null }) {
       <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-4 sm:gap-6">
           <Link
-            href={email ? "/people" : "/"}
+            href={email ? "/setup" : "/"}
             className="text-sm font-semibold no-underline hover:underline"
           >
             ContactGraph

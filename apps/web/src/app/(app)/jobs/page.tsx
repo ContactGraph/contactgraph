@@ -77,7 +77,12 @@ export default function JobsPage() {
           <section key={company.org_id} className="space-y-3">
             <h2 className="flex items-center gap-2 text-lg font-medium">
               <Briefcase className="h-5 w-5" />
-              {company.org_name}
+              <Link
+                href={`/organizations?org=${encodeURIComponent(company.org_id)}`}
+                className="text-primary hover:underline"
+              >
+                {company.org_name}
+              </Link>
               {company.primary_domain ? (
                 <span className="text-sm font-normal text-muted-foreground">
                   {company.primary_domain}
