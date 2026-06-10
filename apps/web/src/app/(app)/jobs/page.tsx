@@ -146,7 +146,7 @@ export default function JobsPage() {
                     ) : null}
                   </div>
                   {company.description ? (
-                    <p className="truncate text-xs text-muted-foreground">
+                    <p className="line-clamp-2 text-xs text-muted-foreground">
                       {company.description}
                     </p>
                   ) : null}
