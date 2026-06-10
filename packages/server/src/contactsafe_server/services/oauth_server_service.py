@@ -309,6 +309,15 @@ class OAuthServerService:
         self,
         user_id: uuid.UUID,
         scopes: list[str] | None = None,
+        *,
+        email: str | None = None,
     ) -> TokenResponse:
         effective_scopes: list[str] = scopes if scopes else list(DEFAULT_MCP_SCOPES)
+        admin_scope: str = "contactsafe:admin"
+        if (
+            email is not None
+            and admin_scope not in effective_scopes
+            and email.lower() in (e.lower() for e in self._settings.admin_emails)
+        ):
+            effective_scopes = [*effective_scopes, admin_scope]
         return await self._mint_tokens(user_id, effective_scopes)

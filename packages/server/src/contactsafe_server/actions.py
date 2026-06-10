@@ -173,7 +173,7 @@ async def connect_source(
             resolved_uid: UUID = await sources.resolve_user_id(source_id=result.source_id)
             if user_id is not None and resolved_uid == user_id:
                 token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
-                    resolved_uid
+                    resolved_uid, email=result.email
                 )
                 result = result.model_copy(
                     update={
@@ -1078,14 +1078,15 @@ async def poll_connect(
                 message="Tokens already dispensed. Use refresh_token to get new access tokens via POST /oauth/token.",
             )
 
-        token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
-            session.user_id
-        )
-        session.token_dispensed_at = datetime.now(tz=UTC)
-        await db.commit()
-
         user: User | None = await db.get(User, session.user_id)
         email: str | None = user.email if user else None
+
+        token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
+            session.user_id, email=email
+        )
+
+        session.token_dispensed_at = datetime.now(tz=UTC)
+        await db.commit()
 
         return PollConnectResult(
             status="connected",

@@ -8,6 +8,8 @@ export interface SessionData {
   refreshToken?: string;
   email?: string;
   isLoggedIn: boolean;
+  isAdmin?: boolean;
+  masqueradeAs?: string;
 }
 
 export const defaultSession: SessionData = {
