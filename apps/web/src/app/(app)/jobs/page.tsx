@@ -120,12 +120,6 @@ export default function JobsPage() {
         <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
       ) : null}
 
-      {data?.message && !loading ? (
-        <Alert>
-          <AlertDescription>{data.message}</AlertDescription>
-        </Alert>
-      ) : null}
-
       {filteredCompanies.length === 0 && !loading ? (
         <p className="text-sm text-muted-foreground">
           No jobs yet. Select target companies in Setup and run job discovery.
