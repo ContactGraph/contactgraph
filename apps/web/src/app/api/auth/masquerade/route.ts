@@ -51,7 +51,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
 
   if (parsed.action === "stop") {
-    session.masqueradeAs = undefined;
+    delete (session as unknown as Record<string, unknown>).masqueradeAs;
     await session.save();
     return NextResponse.json({ ok: true, masqueradeAs: null });
   }

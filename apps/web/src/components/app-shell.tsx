@@ -1,9 +1,6 @@
 "use client";
 
-import { Suspense } from "react";
-
 import { MasqueradeBanner } from "@/components/masquerade-banner";
-import { MasqueradeUrlHandler } from "@/components/masquerade-url-handler";
 import { SiteHeader } from "@/components/site-header";
 
 export function AppShell({
@@ -17,9 +14,6 @@ export function AppShell({
 }) {
   return (
     <div className="min-h-full bg-background">
-      <Suspense fallback={null}>
-        <MasqueradeUrlHandler />
-      </Suspense>
       {masqueradeAs !== undefined ? (
         <MasqueradeBanner masqueradeAs={masqueradeAs} />
       ) : null}
