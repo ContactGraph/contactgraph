@@ -774,7 +774,11 @@ async def api_set_job_preferences(
     user_id: EffectiveUser,
     body: SetJobPreferencesRequest,
 ) -> JobPreferencesResult:
-    return await actions.set_job_preferences(ctx, user_id, body.text)
+    return await actions.set_job_preferences(
+        ctx, user_id, body.text,
+        location_pref=body.location_pref,
+        location_city=body.location_city,
+    )
 
 
 @router.post("/webhooks/theirstack")

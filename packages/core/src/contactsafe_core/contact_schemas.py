@@ -384,9 +384,13 @@ class ListOrgJobsResult(BaseModel):
 
 class SetJobPreferencesRequest(BaseModel):
     text: str
+    location_pref: str | None = None
+    location_city: str | None = None
 
 
 class JobPreferencesResult(BaseModel):
     text: str | None = None
+    location_pref: str | None = None
+    location_city: str | None = None
     classified_job_count: int = 0
     message: str

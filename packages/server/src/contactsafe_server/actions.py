@@ -1610,6 +1610,8 @@ async def get_job_preferences(
         count: int = count_result.scalar() or 0
         return JobPreferencesResult(
             text=user.job_preferences_text,
+            location_pref=user.job_location_pref,
+            location_city=user.job_location_city,
             classified_job_count=count,
             message="OK",
         )
@@ -1619,6 +1621,8 @@ async def set_job_preferences(
     ctx: AppContext,
     user_id: UUID | None,
     text: str,
+    location_pref: str | None = None,
+    location_city: str | None = None,
 ) -> JobPreferencesResult:
     if user_id is None:
         return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
@@ -1629,6 +1633,8 @@ async def set_job_preferences(
         if user is None:
             return JobPreferencesResult(text=None, classified_job_count=0, message="User not found.")
         user.job_preferences_text = text.strip() or None
+        user.job_location_pref = location_pref
+        user.job_location_city = location_city.strip() if location_city else None
         await db.commit()
 
         from contactsafe_server.services.job_relevance_service import JobRelevanceService
@@ -1637,6 +1643,8 @@ async def set_job_preferences(
         count: int = await svc.reclassify_all(user_id)
         return JobPreferencesResult(
             text=user.job_preferences_text,
+            location_pref=user.job_location_pref,
+            location_city=user.job_location_city,
             classified_job_count=count,
             message=f"Preferences saved. Classified {count} job(s).",
         )

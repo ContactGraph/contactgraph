@@ -61,7 +61,7 @@ class JobRelevanceService:
         if user is None or not user.job_preferences_text:
             return 0
 
-        preferences: str = user.job_preferences_text.strip()
+        preferences: str = self._build_preferences_prompt(user)
         if not preferences:
             return 0
 
@@ -76,6 +76,30 @@ class JobRelevanceService:
             total_classified += classified
 
         return total_classified
+
+    @staticmethod
+    def _build_preferences_prompt(user: User) -> str:
+        parts: list[str] = []
+        role_text: str = (user.job_preferences_text or "").strip()
+        if role_text:
+            parts.append(f"Role interests: {role_text}")
+
+        loc_pref: str | None = user.job_location_pref
+        loc_city: str | None = user.job_location_city
+        if loc_pref == "remote":
+            parts.append("Location: REMOTE ONLY. Reject any job that requires in-person attendance unless it is also listed as remote.")
+        elif loc_pref == "in_person" and loc_city:
+            parts.append(
+                f"Location: Must be in or near {loc_city}. Reject remote-only jobs and jobs in cities far from {loc_city}."
+            )
+        elif loc_pref == "either" and loc_city:
+            parts.append(
+                f"Location: Prefers remote OR in/near {loc_city}. Reject jobs that require in-person attendance far from {loc_city}."
+            )
+        elif loc_city:
+            parts.append(f"Location: Prefers jobs near {loc_city} or remote.")
+
+        return "\n".join(parts)
 
     async def _get_unclassified_jobs(self, user_id: uuid.UUID) -> list[OrgJob]:
         already_classified = (

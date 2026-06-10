@@ -692,10 +692,14 @@ export interface ListOrgJobsResult {
 
 export interface SetJobPreferencesRequest {
   text: string;
+  location_pref: string | null;
+  location_city: string | null;
 }
 
 export interface JobPreferencesResult {
   text: string | null;
+  location_pref: string | null;
+  location_city: string | null;
   classified_job_count: number;
   message: string;
 }

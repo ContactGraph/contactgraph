@@ -436,6 +436,8 @@ export default function SetupPage() {
     null,
   );
   const [preferencesText, setPreferencesText] = useState<string>("");
+  const [locationPref, setLocationPref] = useState<string | null>(null);
+  const [locationCity, setLocationCity] = useState<string>("");
 
   const clearPollTimer = useCallback((): void => {
     if (pollTimerRef.current) {
@@ -504,8 +506,8 @@ export default function SetupPage() {
   });
 
   const setJobPreferencesMutation = useMutation({
-    mutationFn: (text: string) =>
-      proxyPost<JobPreferencesResult>("set-job-preferences", { text }),
+    mutationFn: (params: { text: string; location_pref: string | null; location_city: string | null }) =>
+      proxyPost<JobPreferencesResult>("set-job-preferences", params),
     onSuccess: async (result: JobPreferencesResult) => {
       toast.success(result.message);
       await queryClient.invalidateQueries({ queryKey: ["job-preferences"] });
@@ -853,7 +855,15 @@ export default function SetupPage() {
     if (serverText !== null && preferencesText === "") {
       setPreferencesText(serverText);
     }
-  }, [jobPreferencesQuery.data?.text, preferencesText]);
+    const serverLocPref: string | null = jobPreferencesQuery.data?.location_pref ?? null;
+    if (serverLocPref !== null && locationPref === null) {
+      setLocationPref(serverLocPref);
+    }
+    const serverCity: string | null = jobPreferencesQuery.data?.location_city ?? null;
+    if (serverCity !== null && locationCity === "") {
+      setLocationCity(serverCity);
+    }
+  }, [jobPreferencesQuery.data?.text, jobPreferencesQuery.data?.location_pref, jobPreferencesQuery.data?.location_city, preferencesText, locationPref, locationCity]);
 
   useEffect(() => {
     if (jobDiscoveryStatus?.state !== "complete") {
@@ -1136,28 +1146,57 @@ export default function SetupPage() {
             </>
           ) : step.id === "job_preferences" ? (
             <>
-              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+              <div className="flex w-full flex-col gap-3">
                 <textarea
                   className="min-h-[80px] w-full rounded-md border bg-background px-3 py-2 text-sm sm:w-80"
                   placeholder="e.g. I'm a senior backend engineer interested in distributed systems, platform, and SRE roles. Python or Go preferred. Not interested in frontend or sales."
                   value={preferencesText}
                   onChange={(e) => setPreferencesText(e.target.value)}
                 />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={
-                    setJobPreferencesMutation.isPending ||
-                    preferencesText.trim() === (jobPreferencesQuery.data?.text ?? "")
-                  }
-                  onClick={() => setJobPreferencesMutation.mutate(preferencesText)}
-                >
-                  {setJobPreferencesMutation.isPending ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    "Save"
-                  )}
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                    value={locationPref ?? ""}
+                    onChange={(e) => setLocationPref(e.target.value || null)}
+                  >
+                    <option value="">Location…</option>
+                    <option value="remote">Remote only</option>
+                    <option value="in_person">In-person</option>
+                    <option value="either">Remote or in-person</option>
+                  </select>
+                  {locationPref && locationPref !== "remote" ? (
+                    <input
+                      type="text"
+                      className="rounded-md border bg-background px-2 py-1.5 text-sm sm:w-48"
+                      placeholder="City (e.g. San Francisco)"
+                      value={locationCity}
+                      onChange={(e) => setLocationCity(e.target.value)}
+                    />
+                  ) : null}
+                </div>
+                <div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      setJobPreferencesMutation.isPending ||
+                      !preferencesText.trim()
+                    }
+                    onClick={() =>
+                      setJobPreferencesMutation.mutate({
+                        text: preferencesText,
+                        location_pref: locationPref,
+                        location_city: locationCity || null,
+                      })
+                    }
+                  >
+                    {setJobPreferencesMutation.isPending ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      "Save"
+                    )}
+                  </Button>
+                </div>
               </div>
               {jobPreferencesQuery.data?.classified_job_count ? (
                 <p className="text-xs text-muted-foreground">
