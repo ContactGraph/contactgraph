@@ -126,72 +126,80 @@ export default function JobsPage() {
         </p>
       ) : (
         filteredCompanies.map((company) => (
-          <section key={company.org_id} className="space-y-3">
-            <h2 className="flex items-center gap-2 text-lg font-medium">
-              <Briefcase className="h-5 w-5" />
-              <Link
-                href={`/organizations?org=${encodeURIComponent(company.org_id)}`}
-                className="text-primary hover:underline"
-              >
-                {company.org_name}
-              </Link>
-              {company.primary_domain ? (
-                <span className="text-sm font-normal text-muted-foreground">
-                  {company.primary_domain}
-                </span>
-              ) : null}
-            </h2>
-            {company.jobs.map((job) => {
-              const salary: string | null = formatSalary(
-                job.salary_min,
-                job.salary_max,
-              );
-              return (
-                <Card key={job.job_id}>
-                  <CardHeader className="pb-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <CardTitle className="text-base">{job.title}</CardTitle>
-                        <CardDescription>
-                          {[
-                            job.location,
-                            job.department,
-                            job.remote_status,
-                          ]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </CardDescription>
+          <details key={company.org_id} className="group rounded-lg border">
+            <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
+              <div className="flex items-center gap-2">
+                <Briefcase className="h-4 w-4 text-muted-foreground" />
+                <Link
+                  href={`/organizations?org=${encodeURIComponent(company.org_id)}`}
+                  className="font-medium text-primary hover:underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {company.org_name}
+                </Link>
+                {company.primary_domain ? (
+                  <span className="text-xs text-muted-foreground">
+                    {company.primary_domain}
+                  </span>
+                ) : null}
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {company.jobs.length} job{company.jobs.length !== 1 ? "s" : ""}
+              </span>
+            </summary>
+            <div className="space-y-3 border-t px-4 pb-4 pt-3">
+              {company.jobs.map((job) => {
+                const salary: string | null = formatSalary(
+                  job.salary_min,
+                  job.salary_max,
+                );
+                return (
+                  <Card key={job.job_id}>
+                    <CardHeader className="pb-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <CardTitle className="text-base">{job.title}</CardTitle>
+                          <CardDescription>
+                            {[
+                              job.location,
+                              job.department,
+                              job.remote_status,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </CardDescription>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          {job.relevance_reason ? (
+                            <Badge variant="outline" className="text-xs font-normal">
+                              {job.relevance_reason}
+                            </Badge>
+                          ) : null}
+                          <Badge variant="secondary">{job.source}</Badge>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        {job.relevance_reason ? (
-                          <Badge variant="outline" className="text-xs font-normal">
-                            {job.relevance_reason}
-                          </Badge>
-                        ) : null}
-                        <Badge variant="secondary">{job.source}</Badge>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent className="space-y-2">
-                    {job.description_snippet ? (
-                      <p className="text-sm text-muted-foreground">
-                        {job.description_snippet}
-                      </p>
-                    ) : null}
-                    {salary ? (
-                      <p className="text-sm font-medium">{salary}</p>
-                    ) : null}
-                    <Button variant="link" className="h-auto p-0" asChild>
-                      <a href={job.url} target="_blank" rel="noopener noreferrer">
-                        View posting
-                        <ExternalLink className="ml-1 size-3.5" />
-                      </a>
-                    </Button>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </section>
+                    </CardHeader>
+                    <CardContent className="space-y-2">
+                      {job.description_snippet ? (
+                        <p className="text-sm text-muted-foreground">
+                          {job.description_snippet}
+                        </p>
+                      ) : null}
+                      {salary ? (
+                        <p className="text-sm font-medium">{salary}</p>
+                      ) : null}
+                      <Button variant="link" className="h-auto p-0" asChild>
+                        <a href={job.url} target="_blank" rel="noopener noreferrer">
+                          View posting
+                          <ExternalLink className="ml-1 size-3.5" />
+                        </a>
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </details>
         ))
       )}
     </div>
