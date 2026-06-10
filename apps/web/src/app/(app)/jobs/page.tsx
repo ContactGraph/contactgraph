@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Briefcase, ExternalLink, Loader2 } from "lucide-react";
+import { ChevronRight, ExternalLink, Loader2 } from "lucide-react";
 import Link from "next/link";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -129,7 +129,7 @@ export default function JobsPage() {
           <details key={company.org_id} className="group rounded-lg border">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
               <div className="flex items-center gap-2">
-                <Briefcase className="h-4 w-4 text-muted-foreground" />
+                <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90" />
                 <Link
                   href={`/organizations?org=${encodeURIComponent(company.org_id)}`}
                   className="font-medium text-primary hover:underline"
