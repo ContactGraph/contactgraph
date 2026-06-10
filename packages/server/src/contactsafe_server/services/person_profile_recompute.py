@@ -11,7 +11,7 @@ import re
 import uuid
 from datetime import datetime
 
-from sqlalchemy import bindparam, func, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.config import Settings, get_settings
@@ -280,7 +280,7 @@ class PersonProfileRecompute:
             .values(
                 current_org_id=current_org_id,
                 current_org_name=current_org_name,
-                current_role=bindparam("recomputed_current_role"),
+                current_role=current_role,
                 bio_summary=bio_summary,
                 social_profiles=social_profiles,
                 inferred_categories=categories,
@@ -288,5 +288,4 @@ class PersonProfileRecompute:
                 phone_numbers=phone_numbers,
                 location=location,
             ),
-            {"recomputed_current_role": current_role},
         )

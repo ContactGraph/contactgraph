@@ -273,7 +273,7 @@ class Person(Base):
     primary_email: Mapped[str | None] = mapped_column(Text, nullable=True)
     current_org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="SET NULL"), nullable=True)
     current_org_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    current_role: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_role: Mapped[str | None] = mapped_column("current_role", Text, nullable=True, quote=True)
     bio_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     social_profiles: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False, default=dict)
     inferred_categories: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
