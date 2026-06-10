@@ -680,6 +680,7 @@ export interface OrgJobsByCompany {
   org_id: string;
   org_name: string;
   primary_domain: string | null;
+  description: string | null;
   jobs: OrgJobItem[];
 }
 

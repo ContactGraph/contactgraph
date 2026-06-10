@@ -372,6 +372,7 @@ class OrgJobsByCompany(BaseModel):
     org_id: UUID
     org_name: str
     primary_domain: str | None = None
+    description: str | None = None
     jobs: list[OrgJobItem] = Field(default_factory=list)
 
 

@@ -256,6 +256,7 @@ class JobDiscoveryService:
                         org_id=org.id,
                         org_name=org.canonical_name,
                         primary_domain=org.primary_domain,
+                        description=org.description,
                         jobs=job_items,
                     ),
                 )

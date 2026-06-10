@@ -129,21 +129,30 @@ export default function JobsPage() {
           <details key={company.org_id} className="group rounded-lg border">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
               <div className="flex items-center gap-2">
-                <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-90" />
-                <Link
-                  href={`/organizations?org=${encodeURIComponent(company.org_id)}`}
-                  className="font-medium text-primary hover:underline"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {company.org_name}
-                </Link>
-                {company.primary_domain ? (
-                  <span className="text-xs text-muted-foreground">
-                    {company.primary_domain}
-                  </span>
-                ) : null}
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Link
+                      href={`/organizations?org=${encodeURIComponent(company.org_id)}`}
+                      className="font-medium text-primary hover:underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {company.org_name}
+                    </Link>
+                    {company.primary_domain ? (
+                      <span className="text-xs text-muted-foreground">
+                        {company.primary_domain}
+                      </span>
+                    ) : null}
+                  </div>
+                  {company.description ? (
+                    <p className="truncate text-xs text-muted-foreground">
+                      {company.description}
+                    </p>
+                  ) : null}
+                </div>
               </div>
-              <span className="text-xs text-muted-foreground">
+              <span className="shrink-0 text-xs text-muted-foreground">
                 {company.jobs.length} job{company.jobs.length !== 1 ? "s" : ""}
               </span>
             </summary>
