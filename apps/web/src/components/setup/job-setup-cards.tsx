@@ -3,9 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowRight,
-  CheckCircle2,
   ChevronDown,
-  Circle,
   ListPlus,
   Loader2,
   Plus,
@@ -15,6 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { LinkedInProfileUploadDialog } from "@/components/setup/linkedin-profile-upload-dialog";
+import { SetupStepStatusIcon } from "@/components/setup/setup-step-status-icon";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -334,11 +333,10 @@ export function JobSetupCards() {
         <CardHeader className="flex flex-row items-start justify-between gap-4">
           <div className="flex gap-3">
             <div className="mt-0.5 shrink-0">
-              {targetComplete ? (
-                <CheckCircle2 className="size-5 text-green-600" />
-              ) : (
-                <Circle className="size-5 text-muted-foreground" />
-              )}
+              <SetupStepStatusIcon
+                complete={targetComplete}
+                inProgress={false}
+              />
             </div>
             <div className="space-y-1">
               <CardTitle className="text-base">Select job prospects</CardTitle>
@@ -405,13 +403,10 @@ export function JobSetupCards() {
         <CardHeader className="flex flex-row items-start justify-between gap-4">
           <div className="flex gap-3">
             <div className="mt-0.5 shrink-0">
-              {profileComplete ? (
-                <CheckCircle2 className="size-5 text-green-600" />
-              ) : profileInProgress ? (
-                <Loader2 className="size-5 animate-spin text-muted-foreground" />
-              ) : (
-                <Circle className="size-5 text-muted-foreground" />
-              )}
+              <SetupStepStatusIcon
+                complete={profileComplete}
+                inProgress={profileInProgress}
+              />
             </div>
             <div className="space-y-1">
               <CardTitle className="text-base">Upload your LinkedIn profile</CardTitle>
@@ -455,11 +450,10 @@ export function JobSetupCards() {
         <CardHeader>
           <div className="flex gap-3">
             <div className="mt-0.5 shrink-0">
-              {preferencesComplete ? (
-                <CheckCircle2 className="size-5 text-green-600" />
-              ) : (
-                <Circle className="size-5 text-muted-foreground" />
-              )}
+              <SetupStepStatusIcon
+                complete={preferencesComplete}
+                inProgress={false}
+              />
             </div>
             <div className="space-y-1">
               <CardTitle className="text-base">Describe your ideal roles</CardTitle>

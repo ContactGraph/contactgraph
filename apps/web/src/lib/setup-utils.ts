@@ -120,4 +120,19 @@ export function isSourceStepInProgress(
   );
 }
 
+export function importTotalContacts(source: SourceSummary): number {
+  return Math.max(source.contacts_found, source.contacts_pending);
+}
+
+export function importProgressLabel(source: SourceSummary): string {
+  const total: number = importTotalContacts(source);
+  if (total <= 0) {
+    return "Importing…";
+  }
+  if (source.contacts_resolved <= 0) {
+    return `Processing ${total.toLocaleString()} contacts…`;
+  }
+  return `Imported ${source.contacts_resolved.toLocaleString()} of ${total.toLocaleString()}`;
+}
+
 export type SourcesQueryData = ListSourcesResult | undefined;

@@ -1,14 +1,13 @@
 "use client";
 
 import {
-  CheckCircle2,
-  Circle,
   Loader2,
   Plus,
 } from "lucide-react";
 
 import { LinkedInConnectionsUploadDialog } from "@/components/setup/linkedin-connections-upload-dialog";
 import { PhoneContactsUploadDialog } from "@/components/setup/phone-contacts-upload-dialog";
+import { SetupStepStatusIcon } from "@/components/setup/setup-step-status-icon";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -18,6 +17,7 @@ import {
 } from "@/components/ui/card";
 import { useGraphImport } from "@/lib/use-graph-import";
 import {
+  importProgressLabel,
   isLinkedInImportComplete,
   isPhoneImportComplete,
   isSourceStepInProgress,
@@ -51,13 +51,7 @@ function SetupCard({
       <CardHeader className="flex flex-row items-start justify-between gap-4">
         <div className="flex gap-3">
           <div className="mt-0.5 shrink-0">
-            {complete ? (
-              <CheckCircle2 className="size-5 text-green-600" />
-            ) : inProgress ? (
-              <Loader2 className="size-5 animate-spin text-muted-foreground" />
-            ) : (
-              <Circle className="size-5 text-muted-foreground" />
-            )}
+            <SetupStepStatusIcon complete={complete} inProgress={inProgress} />
           </div>
           <div className="space-y-1">
             <CardTitle className="text-base">{title}</CardTitle>
@@ -105,7 +99,9 @@ export function GraphSetupCards({ compact = false }: { compact?: boolean }) {
     setLinkedinConnectionsDialogOpen,
     phoneUploadError,
     connectionsUploadError,
-    uploadPending,
+    phoneUploadPending,
+    linkedinUploadPending,
+    phoneProcessing,
     linkedinConnectionsProcessing,
     handlePhoneFileUpload,
     handleLinkedInConnectionsFileUpload,
@@ -114,10 +110,8 @@ export function GraphSetupCards({ compact = false }: { compact?: boolean }) {
 
   const phoneComplete: boolean = isPhoneImportComplete(sources);
   const linkedinComplete: boolean = isLinkedInImportComplete(sources);
-  const phoneInProgress: boolean = isSourceStepInProgress(
-    "phone_contacts_upload",
-    sources,
-  );
+  const phoneInProgress: boolean =
+    isSourceStepInProgress("phone_contacts_upload", sources) || phoneProcessing;
   const linkedinInProgress: boolean =
     isSourceStepInProgress("linkedin_connections_upload", sources) ||
     linkedinConnectionsProcessing;
@@ -128,8 +122,8 @@ export function GraphSetupCards({ compact = false }: { compact?: boolean }) {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">My Graph</h1>
           <p className="text-muted-foreground">
-            Import your contacts to build your network graph. Start with phone
-            contacts, then add LinkedIn connections.
+            Import your contacts to build your network graph. You can upload
+            phone contacts and LinkedIn connections at the same time.
           </p>
         </div>
       ) : null}
@@ -147,15 +141,13 @@ export function GraphSetupCards({ compact = false }: { compact?: boolean }) {
           }
           primaryLabel="Upload"
           onPrimary={() => setPhoneDialogOpen(true)}
-          disabled={uploadPending}
+          disabled={phoneUploadPending || phoneInProgress}
           progressDetail={
             phoneSource &&
             (phoneSource.sync_state === "syncing" ||
               phoneSource.sync_state === "pending") ? (
               <p className="text-xs text-muted-foreground">
-                {phoneSource.contacts_pending > 0
-                  ? `Imported ${phoneSource.contacts_resolved.toLocaleString()} of ${phoneSource.contacts_pending.toLocaleString()}`
-                  : "Importing…"}
+                {importProgressLabel(phoneSource)}
                 {" · "}
                 <button
                   type="button"
@@ -164,6 +156,12 @@ export function GraphSetupCards({ compact = false }: { compact?: boolean }) {
                 >
                   Cancel
                 </button>
+              </p>
+            ) : phoneSource?.sync_state === "failed" ? (
+              <p className="text-xs text-destructive">
+                {phoneSource.sync_error ??
+                  phoneUploadError ??
+                  "Import failed — try uploading again"}
               </p>
             ) : phoneUploadError ? (
               <p className="text-xs text-destructive">{phoneUploadError}</p>
@@ -183,15 +181,13 @@ export function GraphSetupCards({ compact = false }: { compact?: boolean }) {
           }
           primaryLabel="Upload"
           onPrimary={() => setLinkedinConnectionsDialogOpen(true)}
-          disabled={uploadPending}
+          disabled={linkedinUploadPending || linkedinInProgress}
           progressDetail={
             linkedinConnectionsSource &&
             (linkedinConnectionsSource.sync_state === "syncing" ||
               linkedinConnectionsSource.sync_state === "pending") ? (
               <p className="text-xs text-muted-foreground">
-                {linkedinConnectionsSource.contacts_pending > 0
-                  ? `Imported ${linkedinConnectionsSource.contacts_resolved.toLocaleString()} of ${linkedinConnectionsSource.contacts_pending.toLocaleString()}`
-                  : "Importing…"}
+                {importProgressLabel(linkedinConnectionsSource)}
                 {" · "}
                 <button
                   type="button"
@@ -220,7 +216,7 @@ export function GraphSetupCards({ compact = false }: { compact?: boolean }) {
         open={phoneDialogOpen}
         onOpenChange={setPhoneDialogOpen}
         onFileSelect={handlePhoneFileUpload}
-        isPending={uploadPending}
+        isPending={phoneUploadPending}
         error={phoneUploadError}
         syncState={phoneSource?.sync_state}
         contactsResolved={phoneSource?.contacts_resolved}
@@ -230,7 +226,7 @@ export function GraphSetupCards({ compact = false }: { compact?: boolean }) {
         open={linkedinConnectionsDialogOpen}
         onOpenChange={setLinkedinConnectionsDialogOpen}
         onFileSelect={handleLinkedInConnectionsFileUpload}
-        isPending={uploadPending}
+        isPending={linkedinUploadPending}
         isProcessing={linkedinConnectionsProcessing}
         error={connectionsUploadError}
         syncState={linkedinConnectionsSource?.sync_state}
