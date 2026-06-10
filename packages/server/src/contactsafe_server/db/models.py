@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -432,7 +432,7 @@ class EmploymentClaim(Base):
     contributor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contributor_source_kind: Mapped[str] = mapped_column(Text, nullable=False)
     contributor_source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), default=lambda: datetime.now(UTC), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
     evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
@@ -454,7 +454,7 @@ class RelationshipClaim(Base):
     observed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     contributor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contributor_source_kind: Mapped[str] = mapped_column(Text, nullable=False, default="gmail")
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), default=lambda: datetime.now(UTC), nullable=False)
     last_seen_together_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
@@ -472,7 +472,7 @@ class PersonAttributeClaim(Base):
     contributor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contributor_source_kind: Mapped[str] = mapped_column(Text, nullable=False)
     contributor_source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), default=lambda: datetime.now(UTC), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
     evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
@@ -492,7 +492,7 @@ class OrgAttributeClaim(Base):
     contributor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contributor_source_kind: Mapped[str] = mapped_column(Text, nullable=False)
     contributor_source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), default=lambda: datetime.now(UTC), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
     evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
