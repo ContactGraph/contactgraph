@@ -104,7 +104,13 @@ function CompactLinkCell({
   );
 }
 
-export function OrganizationsView({ embedded = false }: { embedded?: boolean }) {
+export function OrganizationsView({
+  embedded = false,
+  viewingFilter = "mine",
+}: {
+  embedded?: boolean;
+  viewingFilter?: string;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
@@ -161,7 +167,8 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
 
   const orgsQuery = useQuery({
     queryKey: ["organizations"],
-    queryFn: () => proxyPost<ListOrgsResult>("list-orgs"),
+    queryFn: () =>
+      proxyPost<ListOrgsResult>("list-orgs", { include_shared: true }),
     staleTime: 0,
   });
 
@@ -357,8 +364,19 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     return [...bands].sort();
   }, [allOrgs]);
 
+
   const filteredOrgs: OrgListItem[] = useMemo(() => {
     let rows: OrgListItem[] = allOrgs;
+
+    // Filter by whose orgs we're viewing
+    if (viewingFilter === "mine") {
+      rows = rows.filter((org) => org.contact_count > 0);
+    } else if (viewingFilter !== "all") {
+      rows = rows.filter((org) =>
+        org.shared_from.includes(viewingFilter),
+      );
+    }
+
     if (selectedCategories.size > 0) {
       rows = rows.filter((org) =>
         org.categories.some((tag) => selectedCategories.has(tag)),
@@ -372,7 +390,7 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
       );
     }
     return rows;
-  }, [allOrgs, selectedCategories, selectedSizeBands]);
+  }, [allOrgs, viewingFilter, selectedCategories, selectedSizeBands]);
 
   const starAllRef = useRef<() => void>(() => {});
   const unstarAllRef = useRef<() => void>(() => {});
@@ -451,10 +469,35 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
         header: ({ column }) => (
           <CompactSortHeader column={column} label="Contacts" />
         ),
-        cell: ({ row }) => (
-          <CompactCell value={row.original.contact_count.toString()} />
-        ),
-        meta: { width: "w-[4.5rem]" },
+        cell: ({ row }) => {
+          const own: number = row.original.contact_count;
+          const shared: number = row.original.shared_contact_count;
+          if (shared > 0) {
+            return (
+              <span className="text-xs">
+                {own > 0 ? `${own} + ` : ""}
+                <span className="text-muted-foreground">{shared} shared</span>
+              </span>
+            );
+          }
+          return <CompactCell value={own.toString()} />;
+        },
+        meta: { width: "w-[5.5rem]" },
+      },
+      {
+        id: "shared_by",
+        accessorFn: (row: OrgListItem) => row.shared_from.join(", "),
+        header: "Shared by",
+        cell: ({ row }) => {
+          const sharers: string[] = row.original.shared_from;
+          if (sharers.length === 0) return <CompactCell value="—" />;
+          return (
+            <span className="text-xs text-muted-foreground">
+              {sharers.map((name) => `via ${name}`).join(", ")}
+            </span>
+          );
+        },
+        meta: { width: "w-[5.5rem]" },
       },
       {
         id: "star",
@@ -583,6 +626,7 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
         org.primary_domain,
         org.description,
         org.categories.map((tag) => formatIndustryTags([tag])).join(" "),
+        ...org.shared_from.map((name) => `via ${name}`),
       ]
         .filter(Boolean)
         .join(" ")
@@ -671,6 +715,7 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
       return next;
     });
   };
+
 
   const starMutationPending: boolean =
     starToggleMutation.isPending || bulkStarMutation.isPending;

@@ -33,6 +33,7 @@ from contactsafe_core.contact_schemas import (
     GetOrgRequest,
     GetPersonRequest,
     ListOrgListsResult,
+    ListOrgsRequest,
     ListOrgsResult,
     ListPeopleRequest,
     ListPeopleResult,
@@ -526,6 +527,7 @@ async def api_list_people(
         ctx,
         user_id,
         network_only=request.network_only,
+        include_shared=request.include_shared,
     )
 
 
@@ -602,8 +604,13 @@ async def api_enrich_person(
 
 
 @router.post("/list-orgs", response_model=ListOrgsResult)
-async def api_list_orgs(ctx: Ctx, user_id: EffectiveUser) -> ListOrgsResult:
-    return await actions.list_orgs(ctx, user_id)
+async def api_list_orgs(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: ListOrgsRequest | None = None,
+) -> ListOrgsResult:
+    request: ListOrgsRequest = body or ListOrgsRequest()
+    return await actions.list_orgs(ctx, user_id, include_shared=request.include_shared)
 
 
 @router.post("/get-org", response_model=OrgDetailResult)

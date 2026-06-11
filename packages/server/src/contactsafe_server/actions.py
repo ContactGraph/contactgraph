@@ -1125,6 +1125,7 @@ async def list_people(
     user_id: UUID | None,
     *,
     network_only: bool = True,
+    include_shared: bool = True,
 ) -> ListPeopleResult:
     if user_id is None:
         return ListPeopleResult(
@@ -1136,7 +1137,9 @@ async def list_people(
         )
     async with ctx.session_factory() as db:
         service: ContactsService = ContactsService(db)
-        return await service.list_people(user_id, network_only=network_only)
+        return await service.list_people(
+            user_id, network_only=network_only, include_shared=include_shared
+        )
 
 
 async def list_strong_ties(
@@ -1291,7 +1294,12 @@ async def enrich_person(
         return EnrichPersonResult(message="Enrichment complete.", queued=True)
 
 
-async def list_orgs(ctx: AppContext, user_id: UUID | None) -> ListOrgsResult:
+async def list_orgs(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    include_shared: bool = True,
+) -> ListOrgsResult:
     if user_id is None:
         return ListOrgsResult(
             orgs=[],
@@ -1300,7 +1308,7 @@ async def list_orgs(ctx: AppContext, user_id: UUID | None) -> ListOrgsResult:
         )
     async with ctx.session_factory() as db:
         service: ContactsService = ContactsService(db)
-        return await service.list_orgs(user_id)
+        return await service.list_orgs(user_id, include_shared=include_shared)
 
 
 async def get_org(
@@ -1680,14 +1688,21 @@ async def set_job_preferences(
         user.job_location_city = location_city.strip() if location_city else None
         await db.commit()
 
-        from contactsafe_server.services.job_relevance_service import JobRelevanceService
+    import asyncio
 
-        svc = JobRelevanceService(db, ctx.settings)
-        count: int = await svc.reclassify_all(user_id)
-        return JobPreferencesResult(
-            text=user.job_preferences_text,
-            location_pref=user.job_location_pref,
-            location_city=user.job_location_city,
-            classified_job_count=count,
-            message=f"Preferences saved. Classified {count} job(s).",
-        )
+    async def _reclassify_background() -> None:
+        async with ctx.session_factory() as bg_db:
+            from contactsafe_server.services.job_relevance_service import JobRelevanceService
+
+            svc = JobRelevanceService(bg_db, ctx.settings)
+            await svc.reclassify_all(user_id)
+
+    asyncio.ensure_future(_reclassify_background())
+
+    return JobPreferencesResult(
+        text=text.strip() or None,
+        location_pref=location_pref,
+        location_city=location_city.strip() if location_city else None,
+        classified_job_count=0,
+        message="Preferences saved. Re-classifying jobs in background…",
+    )

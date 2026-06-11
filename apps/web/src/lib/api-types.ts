@@ -321,6 +321,8 @@ export interface PersonListItem {
   is_strong_tie: boolean;
   linkedin_url: string | null;
   scrapingdog_enriched: boolean;
+  shared_from: string | null;
+  shared_from_user_id: string | null;
 }
 
 export interface EnrichPersonResult {
@@ -330,6 +332,11 @@ export interface EnrichPersonResult {
 
 export interface ListPeopleRequest {
   network_only?: boolean;
+  include_shared?: boolean;
+}
+
+export interface ListOrgsRequest {
+  include_shared?: boolean;
 }
 
 export interface ListPeopleResult {
@@ -457,6 +464,8 @@ export interface OrgListItem {
   employee_count: number | null;
   company_size_band: string | null;
   contact_count: number;
+  shared_from: string[];
+  shared_contact_count: number;
 }
 
 export interface ListOrgsResult {
@@ -470,6 +479,7 @@ export interface OrgPersonSummary {
   display_name: string;
   primary_email: string | null;
   current_role: string | null;
+  shared_from: string | null;
 }
 
 export interface OrgDetailResult {

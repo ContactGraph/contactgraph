@@ -76,6 +76,9 @@ class TrustListService:
         messages: list[str] = []
         not_on_platform: list[str] = []
 
+        referral_codes: list[str] = []
+        already_on_platform: list[str] = []
+
         if add:
             current_count: int = await self._active_membership_count(user_id)
             for email in add:
@@ -95,16 +98,22 @@ class TrustListService:
                         continue
                     await self._create_invite(user_id, normalized)
                     added.append(normalized)
+                    already_on_platform.append(normalized)
                     current_count += 1
                 elif target_user_id == user_id:
                     messages.append("You cannot add yourself to your trust list.")
                 else:
-                    await self._create_invite(user_id, normalized)
+                    invite: TrustListInvite = await self._create_invite(user_id, normalized)
+                    referral_codes.append(invite.referral_code)
                     not_on_platform.append(normalized)
                     added.append(normalized)
 
         if not_on_platform:
-            invite_copy = self._generate_invite_copy(not_on_platform)
+            invite_copy = self._generate_invite_copy_new_user(
+                referral_codes[0] if referral_codes else None
+            )
+        elif already_on_platform:
+            invite_copy = self._generate_invite_copy_existing_user()
 
         if remove:
             for target in remove:
@@ -429,10 +438,24 @@ class TrustListService:
             self._db.add(row)
         await self._db.flush()
 
-    def _generate_invite_copy(self, emails: list[str]) -> str:
-        join_url: str = f"{self._base_url}/join"
+    def _generate_invite_copy_new_user(self, referral_code: str | None) -> str:
+        """Invite copy for someone who doesn't have a ContactGraph account yet."""
+        if referral_code:
+            invite_url: str = f"{self._base_url}/join?ref={referral_code}"
+        else:
+            invite_url = f"{self._base_url}/join"
         return (
             f"I use ContactGraph to keep track of who I know professionally. "
             f"If you sign up, we can see each other's contacts (names and roles "
-            f"only — no emails shared without asking). Here's the link: {join_url}"
+            f"only — no emails shared without asking).\n\n"
+            f"Join here: {invite_url}"
+        )
+
+    def _generate_invite_copy_existing_user(self) -> str:
+        """Invite copy for someone who already has a ContactGraph account."""
+        sharing_url: str = f"{self._base_url}/sharing"
+        return (
+            f"I just invited you to share networks on ContactGraph! "
+            f"You should have a pending invite waiting for you.\n\n"
+            f"Accept it here: {sharing_url}"
         )

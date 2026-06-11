@@ -36,10 +36,13 @@ class PersonListItem(BaseModel):
     is_strong_tie: bool = False
     linkedin_url: str | None = None
     scrapingdog_enriched: bool = False
+    shared_from: str | None = None
+    shared_from_user_id: UUID | None = None
 
 
 class ListPeopleRequest(BaseModel):
     network_only: bool = True
+    include_shared: bool = True
 
 
 class ListPeopleResult(BaseModel):
@@ -162,6 +165,10 @@ class PersonDetailResult(BaseModel):
     message: str
 
 
+class ListOrgsRequest(BaseModel):
+    include_shared: bool = True
+
+
 class OrgListItem(BaseModel):
     org_id: UUID
     name: str
@@ -173,6 +180,8 @@ class OrgListItem(BaseModel):
     employee_count: int | None = None
     company_size_band: str | None = None
     contact_count: int = 0
+    shared_from: list[str] = Field(default_factory=list)
+    shared_contact_count: int = 0
 
 
 class ListOrgsResult(BaseModel):
@@ -186,6 +195,7 @@ class OrgPersonSummary(BaseModel):
     display_name: str
     primary_email: str | None = None
     current_role: str | None = None
+    shared_from: str | None = None
 
 
 class OrgDetailResult(BaseModel):

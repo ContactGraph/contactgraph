@@ -9,6 +9,7 @@ import {
   ExternalLink,
   Loader2,
   RefreshCw,
+  Settings2,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -16,6 +17,14 @@ import Link from "next/link";
 import { PersonDetailPanel } from "@/components/person-detail-panel";
 import { JobSetupCards } from "@/components/setup/job-setup-cards";
 import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -90,6 +99,8 @@ interface OrgTile {
   status: "scanning" | "done" | "no-jobs";
 }
 
+const CONTACTS_COLLAPSED_LIMIT: number = 3;
+
 function OrgContactsList({
   orgId,
   contactCount,
@@ -99,6 +110,7 @@ function OrgContactsList({
   contactCount: number;
   onSelectPerson: (personId: string) => void;
 }) {
+  const [expanded, setExpanded] = useState<boolean>(false);
   const orgDetailQuery = useQuery({
     queryKey: ["org-detail", orgId],
     queryFn: () => proxyPost<OrgDetailResult>("get-org", { org_id: orgId }),
@@ -122,11 +134,15 @@ function OrgContactsList({
 
   if (people.length === 0) return null;
 
+  const visiblePeople: readonly OrgPersonSummary[] =
+    expanded ? people : people.slice(0, CONTACTS_COLLAPSED_LIMIT);
+  const hiddenCount: number = people.length - visiblePeople.length;
+
   return (
     <div className="flex items-center gap-1 text-xs text-muted-foreground">
       <Users className="size-3 shrink-0" />
       <span className="flex flex-wrap items-center gap-x-0.5">
-        {people.map((person, idx) => (
+        {visiblePeople.map((person, idx) => (
           <span key={person.person_id}>
             {idx > 0 ? ", " : ""}
             <button
@@ -145,8 +161,37 @@ function OrgContactsList({
                 ({person.current_role})
               </span>
             ) : null}
+            {person.shared_from ? (
+              <span className="ml-0.5 inline-flex items-center rounded border px-1 py-0 text-[10px] text-muted-foreground">
+                via {person.shared_from}
+              </span>
+            ) : null}
           </span>
         ))}
+        {hiddenCount > 0 ? (
+          <button
+            type="button"
+            className="ml-0.5 text-primary underline-offset-2 hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(true);
+            }}
+          >
+            and {hiddenCount} other{hiddenCount !== 1 ? "s" : ""}
+          </button>
+        ) : null}
+        {expanded && people.length > CONTACTS_COLLAPSED_LIMIT ? (
+          <button
+            type="button"
+            className="ml-0.5 text-primary underline-offset-2 hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(false);
+            }}
+          >
+            Show less
+          </button>
+        ) : null}
       </span>
     </div>
   );
@@ -154,6 +199,7 @@ function OrgContactsList({
 
 function JobsListings() {
   const [showAll, setShowAll] = useState<boolean>(false);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [isDetailDirty, setIsDetailDirty] = useState<boolean>(false);
   const [discardDialogOpen, setDiscardDialogOpen] = useState<boolean>(false);
@@ -281,7 +327,8 @@ function JobsListings() {
         primary_domain:
           company?.primary_domain ?? orgInfo?.primary_domain ?? null,
         description: company?.description ?? orgInfo?.description ?? null,
-        contact_count: orgInfo?.contact_count ?? 0,
+        contact_count:
+          (orgInfo?.contact_count ?? 0) + (orgInfo?.shared_contact_count ?? 0),
         last_checked_at: lastCheckedMap.get(orgId) ?? null,
         jobs,
         allJobs,
@@ -378,10 +425,10 @@ function JobsListings() {
         </div>
         <div className="flex items-center gap-2">
           {hasRelevance ? (
-            <div className="inline-flex items-center rounded-md border text-xs">
+            <div className="inline-flex h-8 items-center overflow-hidden rounded-md border text-xs">
               <button
                 type="button"
-                className={`rounded-l-md px-3 py-1.5 transition-colors ${
+                className={`h-full px-3 transition-colors ${
                   !showAll
                     ? "bg-primary text-primary-foreground"
                     : "hover:bg-muted"
@@ -392,7 +439,7 @@ function JobsListings() {
               </button>
               <button
                 type="button"
-                className={`rounded-r-md border-l px-3 py-1.5 transition-colors ${
+                className={`h-full border-l px-3 transition-colors ${
                   showAll
                     ? "bg-primary text-primary-foreground"
                     : "hover:bg-muted"
@@ -416,6 +463,23 @@ function JobsListings() {
             )}
             Check all
           </Button>
+          <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Settings2 className="size-4" />
+                Jobs Settings
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Jobs Settings</DialogTitle>
+                <DialogDescription>
+                  Update your role preferences, location, and target companies.
+                </DialogDescription>
+              </DialogHeader>
+              <JobSetupCards compact />
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -529,7 +593,7 @@ function JobsListings() {
                 </div>
               </summary>
 
-              <div className="space-y-3 border-t px-4 pb-4 pt-3">
+              <div className="space-y-3 px-4 pb-4 pt-3">
                 <div className="flex items-center justify-between">
                   {tile.contact_count > 0 ? (
                     <OrgContactsList
@@ -546,6 +610,8 @@ function JobsListings() {
                     </span>
                   ) : null}
                 </div>
+
+                <div className="border-t" />
 
                 {tile.jobs.map((job) => {
                   const salary: string | null = formatSalary(

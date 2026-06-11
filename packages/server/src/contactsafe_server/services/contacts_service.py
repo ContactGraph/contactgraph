@@ -5,7 +5,7 @@ import uuid
 from collections import defaultdict
 from typing import Callable
 
-from sqlalchemy import delete, exists, func, select
+from sqlalchemy import delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -21,15 +21,22 @@ from contactsafe_core.contact_schemas import (
     UpdatePersonRequest,
     split_display_name,
 )
-from contactsafe_core.enums import IdentityKind
+from contactsafe_core.enums import (
+    ContactPrivacyLabel,
+    IdentityKind,
+    TrustListMembershipStatus,
+)
 from contactsafe_server.services.ats_detection import apply_ats_detection_to_org
 from contactsafe_server.db.models import (
+    ContactPrivacyLabelRow,
     EmploymentClaim,
     Org,
     Person,
     PersonAlias,
     PersonAttributeClaim,
     Source,
+    TrustListMembership,
+    User,
     UserPersonObservation,
 )
 
@@ -75,6 +82,7 @@ class ContactsService:
         user_id: uuid.UUID,
         *,
         network_only: bool = True,
+        include_shared: bool = True,
     ) -> ListPeopleResult:
         stmt = (
             select(Person, UserPersonObservation, Source)
@@ -112,14 +120,8 @@ class ContactsService:
         rows: list[tuple[Person, UserPersonObservation, Source | None]] = list(
             result.all()
         )
-        if not rows:
-            return ListPeopleResult(
-                people=[],
-                total=0,
-                strong_tie_count=0,
-                enriched_count=0,
-                message="No contacts in your network yet. Import phone contacts to get started.",
-            )
+
+        own_person_ids: set[uuid.UUID] = {person.id for person, _, _ in rows}
 
         person_ids: list[uuid.UUID] = [person.id for person, _, _ in rows]
         emails_by_person: dict[uuid.UUID, list[str]] = await self._load_emails_by_person(
@@ -174,8 +176,23 @@ class ContactsService:
                 )
             )
 
-        strong_tie_count: int = sum(1 for person in people if person.is_strong_tie)
-        enriched_count: int = sum(1 for person in people if person.scrapingdog_enriched)
+        if include_shared:
+            shared_people: list[PersonListItem] = await self._load_shared_people(
+                user_id, own_person_ids
+            )
+            people.extend(shared_people)
+
+        strong_tie_count: int = sum(1 for p in people if p.is_strong_tie)
+        enriched_count: int = sum(1 for p in people if p.scrapingdog_enriched)
+
+        if not people:
+            return ListPeopleResult(
+                people=[],
+                total=0,
+                strong_tie_count=0,
+                enriched_count=0,
+                message="No contacts in your network yet. Import phone contacts to get started.",
+            )
 
         return ListPeopleResult(
             people=people,
@@ -270,7 +287,12 @@ class ContactsService:
             message=f"Contact details for {person.canonical_name}.",
         )
 
-    async def list_orgs(self, user_id: uuid.UUID) -> ListOrgsResult:
+    async def list_orgs(
+        self,
+        user_id: uuid.UUID,
+        *,
+        include_shared: bool = True,
+    ) -> ListOrgsResult:
         result = await self._db.execute(
             select(
                 Org,
@@ -305,15 +327,10 @@ class ContactsService:
             .order_by(Org.canonical_name.asc())
         )
         rows: list[tuple[Org, int]] = [(org, int(count)) for org, count in result.all()]
-        if not rows:
-            return ListOrgsResult(
-                orgs=[],
-                total=0,
-                message="No organizations resolved yet.",
-            )
 
-        orgs: list[OrgListItem] = [
-            OrgListItem(
+        org_map: dict[uuid.UUID, OrgListItem] = {}
+        for org, count in rows:
+            org_map[org.id] = OrgListItem(
                 org_id=org.id,
                 name=org.canonical_name,
                 primary_domain=org.primary_domain,
@@ -325,8 +342,19 @@ class ContactsService:
                 company_size_band=org.company_size_band,
                 contact_count=count,
             )
-            for org, count in rows
-        ]
+
+        if include_shared:
+            await self._merge_shared_orgs(user_id, org_map)
+
+        orgs: list[OrgListItem] = sorted(org_map.values(), key=lambda o: o.name.lower())
+
+        if not orgs:
+            return ListOrgsResult(
+                orgs=[],
+                total=0,
+                message="No organizations resolved yet.",
+            )
+
         return ListOrgsResult(
             orgs=orgs,
             total=len(orgs),
@@ -337,6 +365,8 @@ class ContactsService:
         self,
         user_id: uuid.UUID,
         org_id: uuid.UUID,
+        *,
+        include_shared: bool = True,
     ) -> OrgDetailResult | None:
         org: Org | None = await self._db.get(
             Org,
@@ -357,7 +387,25 @@ class ContactsService:
             .order_by(Person.canonical_name.asc())
         )
         people_rows: list[Person] = list(people_result.scalars().all())
-        if not people_rows:
+        own_person_ids: set[uuid.UUID] = {p.id for p in people_rows}
+
+        people_summaries: list[OrgPersonSummary] = [
+            OrgPersonSummary(
+                person_id=person.id,
+                display_name=person.canonical_name,
+                primary_email=person.primary_email,
+                current_role=person.current_role,
+            )
+            for person in people_rows
+        ]
+
+        if include_shared:
+            shared_summaries: list[OrgPersonSummary] = await self._load_shared_org_people(
+                user_id, org_id, own_person_ids
+            )
+            people_summaries.extend(shared_summaries)
+
+        if not people_summaries:
             return None
 
         alias_values: list[str] = [alias.value for alias in org.aliases]
@@ -374,16 +422,8 @@ class ContactsService:
             company_size_band=org.company_size_band,
             attributes=dict(org.attributes or {}),
             aliases=alias_values,
-            people=[
-                OrgPersonSummary(
-                    person_id=person.id,
-                    display_name=person.canonical_name,
-                    primary_email=person.primary_email,
-                    current_role=person.current_role,
-                )
-                for person in people_rows
-            ],
-            contact_count=len(people_rows),
+            people=people_summaries,
+            contact_count=len(people_summaries),
             message=f"Organization details for {org.canonical_name}.",
         )
 
@@ -611,6 +651,274 @@ class ContactsService:
 
         await self._db.flush()
         return await self.get_org(user_id, org.id)
+
+    # ------------------------------------------------------------------
+    # Shared network helpers
+    # ------------------------------------------------------------------
+
+    async def _get_trust_member_ids(self, user_id: uuid.UUID) -> list[uuid.UUID]:
+        """Return user_ids of all active trust list members for a given user."""
+        stmt = select(TrustListMembership).where(
+            TrustListMembership.status == TrustListMembershipStatus.ACTIVE,
+            or_(
+                TrustListMembership.user_a_id == user_id,
+                TrustListMembership.user_b_id == user_id,
+            ),
+        )
+        result = await self._db.execute(stmt)
+        memberships: list[TrustListMembership] = list(result.scalars().all())
+        member_ids: list[uuid.UUID] = []
+        for m in memberships:
+            other: uuid.UUID = m.user_b_id if m.user_a_id == user_id else m.user_a_id
+            member_ids.append(other)
+        return member_ids
+
+    async def _get_private_person_ids(self, user_id: uuid.UUID) -> set[uuid.UUID]:
+        """Return person_ids that this user has marked private."""
+        stmt = select(ContactPrivacyLabelRow.person_id).where(
+            ContactPrivacyLabelRow.user_id == user_id,
+            ContactPrivacyLabelRow.label == ContactPrivacyLabel.PRIVATE,
+        )
+        result = await self._db.execute(stmt)
+        return set(result.scalars().all())
+
+    @staticmethod
+    def _mask_last_name(full_name: str) -> tuple[str, str, str]:
+        """Return (first_name, masked_last, masked_display_name) with last initial only."""
+        first, last = split_display_name(full_name)
+        masked_last: str = f"{last[0]}." if last else ""
+        masked_display: str = f"{first} {masked_last}".strip() if first else full_name
+        return first, masked_last, masked_display
+
+    async def _load_shared_people(
+        self,
+        user_id: uuid.UUID,
+        own_person_ids: set[uuid.UUID],
+    ) -> list[PersonListItem]:
+        """Load contacts from trusted users' networks, with privacy masking."""
+        member_ids: list[uuid.UUID] = await self._get_trust_member_ids(user_id)
+        if not member_ids:
+            return []
+
+        member_names: dict[uuid.UUID, str] = {}
+        for mid in member_ids:
+            user_row: User | None = await self._db.get(User, mid)
+            if user_row is not None:
+                member_names[mid] = (
+                    user_row.display_name or user_row.google_profile_name or user_row.email
+                )
+
+        shared_people: list[PersonListItem] = []
+        seen_person_ids: set[uuid.UUID] = set(own_person_ids)
+
+        for member_id in member_ids:
+            private_ids: set[uuid.UUID] = await self._get_private_person_ids(member_id)
+            sharer_name: str = member_names.get(member_id, "Someone")
+
+            stmt = (
+                select(Person, UserPersonObservation)
+                .join(
+                    UserPersonObservation,
+                    (UserPersonObservation.person_id == Person.id)
+                    & (UserPersonObservation.user_id == member_id),
+                )
+                .where(
+                    UserPersonObservation.relationship_types.any(PHONE_RELATIONSHIP),
+                    exists(
+                        select(UserPersonObservation.person_id).where(
+                            UserPersonObservation.user_id == member_id,
+                            UserPersonObservation.person_id == Person.id,
+                            UserPersonObservation.relationship_types.any(
+                                LINKEDIN_CONNECTIONS_RELATIONSHIP,
+                            ),
+                        ).correlate(Person)
+                    ),
+                    exists(
+                        select(PersonAlias.person_id).where(
+                            PersonAlias.person_id == Person.id,
+                            PersonAlias.kind == "linkedin_url",
+                        ).correlate(Person)
+                    ),
+                )
+                .order_by(Person.canonical_name.asc())
+            )
+            result = await self._db.execute(stmt)
+            rows: list[tuple[Person, UserPersonObservation]] = list(result.all())
+
+            for person, _obs in rows:
+                if person.id in seen_person_ids:
+                    continue
+                if person.id in private_ids:
+                    continue
+                seen_person_ids.add(person.id)
+
+                first, masked_last, masked_display = self._mask_last_name(
+                    person.canonical_name
+                )
+                shared_people.append(
+                    PersonListItem(
+                        person_id=person.id,
+                        first_name=first,
+                        last_name=masked_last,
+                        display_name=masked_display,
+                        primary_email=None,
+                        phone=None,
+                        org_name=person.current_org_name,
+                        current_role=person.current_role,
+                        emails=[],
+                        sources=[],
+                        first_contact_at=None,
+                        last_contact_at=None,
+                        tie_strength_score=0.0,
+                        is_human=True,
+                        is_broadcast=False,
+                        is_automated=False,
+                        is_strong_tie=False,
+                        linkedin_url=None,
+                        scrapingdog_enriched=False,
+                        shared_from=sharer_name,
+                        shared_from_user_id=member_id,
+                    )
+                )
+
+        return shared_people
+
+    async def _merge_shared_orgs(
+        self,
+        user_id: uuid.UUID,
+        org_map: dict[uuid.UUID, OrgListItem],
+    ) -> None:
+        """Merge organizations from trusted users' networks into org_map."""
+        member_ids: list[uuid.UUID] = await self._get_trust_member_ids(user_id)
+        if not member_ids:
+            return
+
+        member_names: dict[uuid.UUID, str] = {}
+        for mid in member_ids:
+            user_row: User | None = await self._db.get(User, mid)
+            if user_row is not None:
+                member_names[mid] = (
+                    user_row.display_name or user_row.google_profile_name or user_row.email
+                )
+
+        for member_id in member_ids:
+            private_ids: set[uuid.UUID] = await self._get_private_person_ids(member_id)
+            sharer_name: str = member_names.get(member_id, "Someone")
+
+            stmt = (
+                select(
+                    Org,
+                    func.count(Person.id.distinct()).label("contact_count"),
+                )
+                .join(Person, Person.current_org_id == Org.id)
+                .where(
+                    ~Person.id.in_(private_ids) if private_ids else True,
+                    exists(
+                        select(UserPersonObservation.person_id).where(
+                            UserPersonObservation.user_id == member_id,
+                            UserPersonObservation.person_id == Person.id,
+                            UserPersonObservation.relationship_types.any(PHONE_RELATIONSHIP),
+                        ).correlate(Person)
+                    ),
+                    exists(
+                        select(UserPersonObservation.person_id).where(
+                            UserPersonObservation.user_id == member_id,
+                            UserPersonObservation.person_id == Person.id,
+                            UserPersonObservation.relationship_types.any(
+                                LINKEDIN_CONNECTIONS_RELATIONSHIP,
+                            ),
+                        ).correlate(Person)
+                    ),
+                    exists(
+                        select(PersonAlias.person_id).where(
+                            PersonAlias.person_id == Person.id,
+                            PersonAlias.kind == "linkedin_url",
+                        ).correlate(Person)
+                    ),
+                )
+                .group_by(Org.id)
+            )
+            result = await self._db.execute(stmt)
+            rows: list[tuple[Org, int]] = [(org, int(c)) for org, c in result.all()]
+
+            for org, count in rows:
+                if org.id in org_map:
+                    existing: OrgListItem = org_map[org.id]
+                    if sharer_name not in existing.shared_from:
+                        existing.shared_from.append(sharer_name)
+                    existing.shared_contact_count += count
+                else:
+                    org_map[org.id] = OrgListItem(
+                        org_id=org.id,
+                        name=org.canonical_name,
+                        primary_domain=org.primary_domain,
+                        description=org.description,
+                        careers_url=org.careers_url,
+                        linkedin_url=org.linkedin_url,
+                        categories=list(org.categories or []),
+                        employee_count=org.employee_count,
+                        company_size_band=org.company_size_band,
+                        contact_count=0,
+                        shared_from=[sharer_name],
+                        shared_contact_count=count,
+                    )
+
+    async def _load_shared_org_people(
+        self,
+        user_id: uuid.UUID,
+        org_id: uuid.UUID,
+        own_person_ids: set[uuid.UUID],
+    ) -> list[OrgPersonSummary]:
+        """Load contacts at an org from trusted users' networks."""
+        member_ids: list[uuid.UUID] = await self._get_trust_member_ids(user_id)
+        if not member_ids:
+            return []
+
+        member_names: dict[uuid.UUID, str] = {}
+        for mid in member_ids:
+            user_row: User | None = await self._db.get(User, mid)
+            if user_row is not None:
+                member_names[mid] = (
+                    user_row.display_name or user_row.google_profile_name or user_row.email
+                )
+
+        shared_summaries: list[OrgPersonSummary] = []
+        seen_ids: set[uuid.UUID] = set(own_person_ids)
+
+        for member_id in member_ids:
+            private_ids: set[uuid.UUID] = await self._get_private_person_ids(member_id)
+            sharer_name: str = member_names.get(member_id, "Someone")
+
+            people_result = await self._db.execute(
+                select(Person)
+                .join(
+                    UserPersonObservation,
+                    (UserPersonObservation.person_id == Person.id)
+                    & (UserPersonObservation.user_id == member_id),
+                )
+                .where(Person.current_org_id == org_id)
+                .order_by(Person.canonical_name.asc())
+            )
+            for person in people_result.scalars().all():
+                if person.id in seen_ids or person.id in private_ids:
+                    continue
+                seen_ids.add(person.id)
+                _, masked_last, masked_display = self._mask_last_name(person.canonical_name)
+                shared_summaries.append(
+                    OrgPersonSummary(
+                        person_id=person.id,
+                        display_name=masked_display,
+                        primary_email=None,
+                        current_role=person.current_role,
+                        shared_from=sharer_name,
+                    )
+                )
+
+        return shared_summaries
+
+    # ------------------------------------------------------------------
+    # Existing private helpers
+    # ------------------------------------------------------------------
 
     async def _get_observed_person(
         self,
