@@ -18,7 +18,7 @@ Your messaging and calendar apps already know who you actually talk to, where pe
 
 4. **Truth beats profiles.** Self-reported titles are stale. Relationship strength from real correspondence is current. We build from signal, not vanity.
 
-5. **Privacy first, sharing by choice.** Your graph is private until you decide otherwise. Cross-user queries — when we ship them — will require explicit consent, query by query.
+5. **Privacy first, sharing by choice.** Your graph is private until you decide otherwise. Sharing with trusted friends requires an explicit invite and consent on both sides — only names and roles are shared, never emails or phone numbers.
 
 6. **Open ecosystem.** MCP means any agent can use ContactGraph: Claude, ChatGPT, Gemini, OpenClaw, whatever comes next. No lock-in.
 
@@ -34,7 +34,3 @@ We're not trying to be a better LinkedIn. We're making the destination network s
 - We will never train general-purpose AI models on your data without explicit opt-in.
 - We will never commercialize your data without your permission.
 - You can export your graph and leave anytime.
-
----
-
-*ContactGraph is in private preview. The graph is opening soon.*

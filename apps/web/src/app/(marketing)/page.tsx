@@ -1,27 +1,30 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
-import { MarketingMain } from "./components/marketing-prose";
+import { Button } from "@/components/ui/button";
+import { MarketingMain, MarketingProse } from "./components/marketing-prose";
 
 const API_BASE = "https://api.contactgraph.ai";
 const GITHUB_REPO_URL = "https://github.com/ContactGraph/contactgraph";
 
+const PAGE_TITLE = "ContactGraph — You already know the right people.";
+const PAGE_DESCRIPTION =
+  "Upload your phone contacts and LinkedIn connections. ContactGraph enriches your network and finds warm paths to companies — including open roles for job search.";
+
 export const metadata: Metadata = {
-  title: "ContactGraph — Turn your contacts into a superpower.",
-  description:
-    "A free, open-source contact graph built from your email, contacts, and calendar — searchable by AI, owned by you.",
+  title: PAGE_TITLE,
+  description: PAGE_DESCRIPTION,
   openGraph: {
-    title: "ContactGraph — Turn your contacts into a superpower.",
-    description:
-      "A free, open-source contact graph built from your email, contacts, and calendar — searchable by AI, owned by you.",
+    title: PAGE_TITLE,
+    description: PAGE_DESCRIPTION,
     type: "website",
     siteName: "ContactGraph",
     locale: "en_US",
   },
   twitter: {
     card: "summary",
-    title: "ContactGraph — Turn your contacts into a superpower.",
-    description:
-      "A free, open-source contact graph built from your email, contacts, and calendar — searchable by AI, owned by you.",
+    title: PAGE_TITLE,
+    description: PAGE_DESCRIPTION,
   },
 };
 
@@ -30,34 +33,36 @@ export default function HomePage() {
 
   return (
     <MarketingMain>
-      <h1 className="mb-5 max-w-prose text-sm font-semibold leading-relaxed">
-        Turn your contacts into a superpower.
-      </h1>
-      <div className="max-w-prose space-y-4 text-sm leading-relaxed">
+      <MarketingProse>
+        <h1>You already know the right people. ContactGraph helps you find them.</h1>
         <p>
-          Find the people you and your trusted friends already know.
-          ContactGraph normalizes, enriches, and indexes your email, contacts,
-          and calendar into a private graph you can search by name, company,
-          role, or industry — things that are nearly impossible to dig out of
-          your inbox directly.
+          You have hundreds of professional contacts scattered across your phone,
+          LinkedIn, and email — but when you need a warm intro or a connection at a
+          specific company, you can&rsquo;t search any of it.
         </p>
         <p>
-          Think of it as an agent-friendly alternative to LinkedIn for
-          &ldquo;who do I know?&rdquo; questions — except you own the data, always.
-          Download or delete it anytime.
+          Upload your phone contacts and LinkedIn connections. ContactGraph enriches
+          them with current employer, role, and industry data, then shows you exactly
+          who you know at any company — and what open roles they have.
         </p>
+
+        <h2>Supercharge your job search</h2>
         <p>
-          <strong>Agent-first.</strong> No human UI yet — ask your AI assistant
-          to set it up. Works with Claude, ChatGPT, and Gemini (via{" "}
-          <a href={mcpPath} className="no-underline hover:underline">
-            MCP
-          </a>
-          ) and with OpenClaw and similar terminal agents (via{" "}
-          <a href={`${API_BASE}/skill.md`} className="no-underline hover:underline">
-            skill.md
-          </a>
-          ).
+          ContactGraph finds open roles at companies where you already have warm
+          connections — no cold applications. Share your graph with trusted friends
+          and discover second-degree intros too.
         </p>
+
+        <p>
+          <strong>How it works</strong>
+        </p>
+        <ol>
+          <li>Upload phone contacts (.vcf) and LinkedIn connections (.csv)</li>
+          <li>We enrich your network with web data — employer, role, industry</li>
+          <li>Search by company, role, industry, or name</li>
+          <li>Share your graph with trusted friends for second-degree intros</li>
+        </ol>
+
         <p>
           <strong>Free</strong> for personal use.{" "}
           <strong>
@@ -65,11 +70,27 @@ export default function HomePage() {
               Open source
             </a>
           </strong>
-          {" "}— contributions welcome. We intend to structure ContactGraph as a
-          nonprofit so the graph is held in public trust. Social graphs should
-          belong to everyone.
+          {" "}— your data stays yours. Export or delete anytime.
         </p>
-      </div>
+
+        <p>
+          <Button asChild size="sm">
+            <Link href="/login">Get started</Link>
+          </Button>
+        </p>
+
+        <p>
+          Also works as an MCP server for Claude, ChatGPT, and Gemini (via{" "}
+          <a href={mcpPath} className="no-underline hover:underline">
+            MCP
+          </a>
+          ) and terminal agents (via{" "}
+          <a href={`${API_BASE}/skill.md`} className="no-underline hover:underline">
+            skill.md
+          </a>
+          ).
+        </p>
+      </MarketingProse>
     </MarketingMain>
   );
 }

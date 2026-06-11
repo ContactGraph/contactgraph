@@ -264,6 +264,7 @@ export interface TrustListInviteSummary {
   invitee_email: string;
   status: TrustListInviteStatus;
   created_at: string;
+  invite_copy: string | null;
 }
 
 export interface PendingInboundInvite {
