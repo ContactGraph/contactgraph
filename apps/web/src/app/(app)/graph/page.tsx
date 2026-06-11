@@ -92,13 +92,13 @@ export default function GraphPage() {
       </div>
 
       <div className="flex items-center gap-3">
-        <div className="inline-flex items-center rounded-md border text-sm">
+        <div className="inline-flex items-center rounded-md border text-sm h-8 overflow-hidden">
           <Button
             type="button"
             variant="ghost"
             size="sm"
             className={cn(
-              "rounded-r-none",
+              "rounded-none border-0 h-full",
               activeTab === "people" && "bg-muted font-medium",
             )}
             onClick={() => setActiveTab("people")}
@@ -110,7 +110,7 @@ export default function GraphPage() {
             variant="ghost"
             size="sm"
             className={cn(
-              "rounded-l-none border-l",
+              "rounded-none border-0 border-l h-full",
               activeTab === "organizations" && "bg-muted font-medium",
             )}
             onClick={() => setActiveTab("organizations")}
