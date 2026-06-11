@@ -13,7 +13,6 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
-import ReactMarkdown from "react-markdown";
 
 import { PersonDetailPanel } from "@/components/person-detail-panel";
 import { JobSetupCards } from "@/components/setup/job-setup-cards";
@@ -85,6 +84,23 @@ function hasRelevanceData(data: ListOrgJobsResult | undefined): boolean {
   return data.companies.some((c) =>
     c.jobs.some((j) => j.is_relevant !== null),
   );
+}
+
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/#{1,6}\s+/g, "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/_(.+?)_/g, "$1")
+    .replace(/~~(.+?)~~/g, "$1")
+    .replace(/`(.+?)`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/^[-*+]\s+/gm, "• ")
+    .replace(/^\d+\.\s+/gm, "")
+    .replace(/\n{2,}/g, " ")
+    .replace(/\n/g, " ")
+    .trim();
 }
 
 interface OrgTile {
@@ -656,11 +672,9 @@ function JobsListings() {
                       </CardHeader>
                       <CardContent className="space-y-2">
                         {job.description_snippet ? (
-                          <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none text-muted-foreground">
-                            <ReactMarkdown>
-                              {job.description_snippet}
-                            </ReactMarkdown>
-                          </div>
+                          <p className="text-sm text-muted-foreground">
+                            {stripMarkdown(job.description_snippet)}
+                          </p>
                         ) : null}
                         {salary ? (
                           <p className="text-sm font-medium">{salary}</p>
