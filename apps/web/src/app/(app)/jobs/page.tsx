@@ -9,7 +9,7 @@ import {
   ExternalLink,
   Loader2,
   RefreshCw,
-  Settings2,
+  Settings,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -411,11 +411,11 @@ function JobsListings() {
   };
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4">
-      <div className="flex items-end justify-between gap-4">
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-semibold tracking-tight">Open jobs</h1>
-          <p className="text-xs text-muted-foreground">
+          <h1 className="text-2xl font-semibold tracking-tight">Open Jobs</h1>
+          <p className="text-sm text-muted-foreground">
             {loading
               ? "Loading…"
               : discoveryRunning
@@ -466,7 +466,7 @@ function JobsListings() {
           <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm">
-                <Settings2 className="size-4" />
+                <Settings className="size-4" />
                 Jobs Settings
               </Button>
             </DialogTrigger>
