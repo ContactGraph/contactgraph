@@ -593,7 +593,7 @@ function JobsListings() {
                 </div>
               </summary>
 
-              <div className="space-y-3 border-t px-4 pb-4 pt-3">
+              <div className="space-y-3 px-4 pb-4 pt-3">
                 <div className="flex items-center justify-between">
                   {tile.contact_count > 0 ? (
                     <OrgContactsList
@@ -610,6 +610,8 @@ function JobsListings() {
                     </span>
                   ) : null}
                 </div>
+
+                <div className="border-t" />
 
                 {tile.jobs.map((job) => {
                   const salary: string | null = formatSalary(
