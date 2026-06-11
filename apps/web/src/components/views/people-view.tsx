@@ -11,7 +11,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { Download, Search } from "lucide-react";
+import { Download } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -25,7 +25,7 @@ import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sheet,
@@ -338,44 +338,10 @@ export function PeopleView({
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {!embedded ? (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">People</h1>
-            <p className="text-xs text-muted-foreground">
-              {peopleQuery.isLoading
-                ? "Loading your network…"
-                : peopleQuery.data
-                  ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
-                  : "No network data available."}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="relative w-64">
-              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search people…"
-                className="h-8 pl-8 text-sm focus:w-80 transition-all duration-200"
-              />
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 shrink-0 text-xs"
-              onClick={handleDownloadCsv}
-              disabled={peopleQuery.isLoading || table.getRowModel().rows.length === 0}
-            >
-              <Download />
-              CSV
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">People</h1>
           <p className="text-xs text-muted-foreground">
             {peopleQuery.isLoading
               ? "Loading your network…"
@@ -383,58 +349,67 @@ export function PeopleView({
                 ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
                 : "No network data available."}
           </p>
-          <div className="flex items-center gap-2">
-            <div className="relative w-64">
-              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search people…"
-                className="h-8 pl-8 text-sm focus:w-80 transition-all duration-200"
-              />
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 shrink-0 text-xs"
-              onClick={handleDownloadCsv}
-              disabled={peopleQuery.isLoading || table.getRowModel().rows.length === 0}
-            >
-              <Download />
-              CSV
-            </Button>
-          </div>
         </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {peopleQuery.isLoading
+            ? "Loading your network…"
+            : peopleQuery.data
+              ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
+              : "No network data available."}
+        </p>
       )}
-
-      {viewingFilter === "mine" ? (
-        <div className="flex gap-1">
-          {([
-            ["phone_linkedin", "Phone + LinkedIn"],
-            ["phone_only", "Phone only"],
-            ["linkedin_only", "LinkedIn only"],
-            ["all", "All sources"],
-          ] as const).map(([value, label]) => (
-            <Button
-              key={value}
-              type="button"
-              variant={sourceFilter === value ? "default" : "outline"}
-              size="sm"
-              className="h-8 text-xs px-2.5"
-              onClick={() => setSourceFilter(value)}
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
-      ) : null}
 
       {peopleQuery.error ? (
         <Alert variant="destructive">
           <AlertDescription>{peopleQuery.error.message}</AlertDescription>
         </Alert>
       ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchInput
+          containerClassName="w-48"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search people…"
+        />
+
+        {viewingFilter === "mine" ? (
+          <>
+            {([
+              ["phone_linkedin", "Phone + LinkedIn"],
+              ["phone_only", "Phone only"],
+              ["linkedin_only", "LinkedIn only"],
+              ["all", "All sources"],
+            ] as const).map(([value, label]) => (
+              <Button
+                key={value}
+                type="button"
+                variant={sourceFilter === value ? "default" : "outline"}
+                size="sm"
+                className="h-8 text-xs px-2.5"
+                onClick={() => setSourceFilter(value)}
+              >
+                {label}
+              </Button>
+            ))}
+          </>
+        ) : null}
+
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={handleDownloadCsv}
+            disabled={peopleQuery.isLoading || table.getRowModel().rows.length === 0}
+          >
+            <Download className="size-3.5" />
+            CSV
+          </Button>
+        </div>
+      </div>
 
       <div className="overflow-hidden rounded-md border bg-card">
         {peopleQuery.isLoading ? (

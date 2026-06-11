@@ -18,13 +18,13 @@ import { PersonDetailPanel } from "@/components/person-detail-panel";
 import { JobSetupCards } from "@/components/setup/job-setup-cards";
 import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalTrigger,
+} from "@/components/ui/responsive-modal";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -412,18 +412,42 @@ function JobsListings() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Open Jobs</h1>
-          <p className="text-sm text-muted-foreground">
-            {loading
-              ? "Loading…"
-              : discoveryRunning
-                ? `Scanning ${orgTiles.length} companies…`
-                : `${totalShown} jobs across ${orgTiles.length} companies`}
-          </p>
+      <div className="space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold tracking-tight">Open Jobs</h1>
+            <p className="text-sm text-muted-foreground">
+              {loading
+                ? "Loading…"
+                : discoveryRunning
+                  ? `Scanning ${orgTiles.length} companies…`
+                  : `${totalShown} jobs across ${orgTiles.length} companies`}
+            </p>
+          </div>
+          <ResponsiveModal open={settingsOpen} onOpenChange={setSettingsOpen}>
+            <ResponsiveModalTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="size-8 shrink-0"
+                aria-label="Jobs Settings"
+              >
+                <Settings className="size-4" />
+              </Button>
+            </ResponsiveModalTrigger>
+            <ResponsiveModalContent>
+              <ResponsiveModalHeader>
+                <ResponsiveModalTitle>Jobs Settings</ResponsiveModalTitle>
+                <ResponsiveModalDescription>
+                  Update your role preferences, location, and target companies.
+                </ResponsiveModalDescription>
+              </ResponsiveModalHeader>
+              <JobSetupCards compact />
+            </ResponsiveModalContent>
+          </ResponsiveModal>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {hasRelevance ? (
             <div className="inline-flex h-8 items-center overflow-hidden rounded-md border text-xs">
               <button
@@ -463,23 +487,6 @@ function JobsListings() {
             )}
             Check all
           </Button>
-          <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Settings className="size-4" />
-                Jobs Settings
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Jobs Settings</DialogTitle>
-                <DialogDescription>
-                  Update your role preferences, location, and target companies.
-                </DialogDescription>
-              </DialogHeader>
-              <JobSetupCards compact />
-            </DialogContent>
-          </Dialog>
         </div>
       </div>
 

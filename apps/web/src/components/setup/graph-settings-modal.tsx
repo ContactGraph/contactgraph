@@ -6,13 +6,13 @@ import { Loader2, Merge, Settings } from "lucide-react";
 import { GraphSetupCards } from "@/components/setup/graph-setup-cards";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
+  ResponsiveModal,
+  ResponsiveModalContent,
+  ResponsiveModalDescription,
+  ResponsiveModalHeader,
+  ResponsiveModalTitle,
+  ResponsiveModalTrigger,
+} from "@/components/ui/responsive-modal";
 import type { DedupPersonsResult } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
 
@@ -45,20 +45,25 @@ export function GraphSettingsButton({
   }, []);
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
+    <ResponsiveModal open={open} onOpenChange={onOpenChange}>
+      <ResponsiveModalTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="size-8 shrink-0"
+          aria-label="Graph Settings"
+        >
           <Settings className="size-4" />
-          Graph Settings
         </Button>
-      </DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Graph Settings</DialogTitle>
-          <DialogDescription>
+      </ResponsiveModalTrigger>
+      <ResponsiveModalContent>
+        <ResponsiveModalHeader>
+          <ResponsiveModalTitle>Graph Settings</ResponsiveModalTitle>
+          <ResponsiveModalDescription>
             Re-upload contacts or add new imports to refresh your network.
-          </DialogDescription>
-        </DialogHeader>
+          </ResponsiveModalDescription>
+        </ResponsiveModalHeader>
         <GraphSetupCards compact />
 
         <div className="border-t pt-4">
@@ -89,7 +94,7 @@ export function GraphSettingsButton({
             <p className="mt-2 text-xs text-muted-foreground">{dedupResult}</p>
           ) : null}
         </div>
-      </DialogContent>
-    </Dialog>
+      </ResponsiveModalContent>
+    </ResponsiveModal>
   );
 }

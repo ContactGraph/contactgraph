@@ -66,7 +66,7 @@ export default function SharingPage() {
     <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">
-          Network Sharing
+          Graph Sharing
         </h1>
         <p className="text-muted-foreground">
           Share your professional network with trusted friends and colleagues.
