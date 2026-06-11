@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Bookmark,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -59,6 +60,7 @@ import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { proxyPost } from "@/lib/proxy-client";
 import { findJobProspectsList } from "@/lib/setup-utils";
 import { useOnboardingPhase } from "@/lib/use-onboarding-phase";
+import { useJobBookmarks } from "@/lib/use-job-bookmarks";
 
 function formatSalary(min: number | null, max: number | null): string | null {
   if (min === null && max === null) return null;
@@ -213,8 +215,10 @@ function OrgContactsList({
   );
 }
 
+type JobFilter = "bookmarked" | "relevant" | "all";
+
 function JobsListings() {
-  const [showAll, setShowAll] = useState<boolean>(false);
+  const [filter, setFilter] = useState<JobFilter>("relevant");
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [settingsDirty, setSettingsDirty] = useState<boolean>(false);
   const [settingsDiscardOpen, setSettingsDiscardOpen] =
@@ -231,6 +235,7 @@ function JobsListings() {
   );
   const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
   const queryClient = useQueryClient();
+  const { bookmarks, toggle: toggleBookmark, isBookmarked } = useJobBookmarks();
 
   const jobsQuery = useQuery({
     queryKey: ["org-jobs"],
@@ -317,14 +322,18 @@ function JobsListings() {
       { filtered: OrgJobItem[]; all: OrgJobItem[] }
     >();
     for (const company of data?.companies ?? []) {
-      const filtered: OrgJobItem[] =
-        !hasRelevance || showAll
-          ? company.jobs
-          : company.jobs.filter((j) => j.is_relevant !== false);
+      let filtered: OrgJobItem[];
+      if (filter === "bookmarked") {
+        filtered = company.jobs.filter((j) => bookmarks.has(j.job_id));
+      } else if (filter === "all" || !hasRelevance) {
+        filtered = company.jobs;
+      } else {
+        filtered = company.jobs.filter((j) => j.is_relevant !== false);
+      }
       map.set(company.org_id, { filtered, all: company.jobs });
     }
     return map;
-  }, [data?.companies, hasRelevance, showAll]);
+  }, [data?.companies, hasRelevance, filter, bookmarks]);
 
   const orgTiles: OrgTile[] = useMemo(() => {
     const tiles: OrgTile[] = [];
@@ -473,32 +482,45 @@ function JobsListings() {
           </ResponsiveModal>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {hasRelevance ? (
-            <div className="inline-flex h-8 items-center overflow-hidden rounded-md border text-xs">
+          <div className="inline-flex h-8 items-center overflow-hidden rounded-md border text-xs">
+            {bookmarks.size > 0 ? (
               <button
                 type="button"
                 className={`h-full px-3 transition-colors ${
-                  !showAll
+                  filter === "bookmarked"
                     ? "bg-primary text-primary-foreground"
                     : "hover:bg-muted"
                 }`}
-                onClick={() => setShowAll(false)}
+                onClick={() => setFilter("bookmarked")}
+              >
+                Bookmarked ({bookmarks.size})
+              </button>
+            ) : null}
+            {hasRelevance ? (
+              <button
+                type="button"
+                className={`h-full px-3 transition-colors ${bookmarks.size > 0 ? "border-l" : ""} ${
+                  filter === "relevant"
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted"
+                }`}
+                onClick={() => setFilter("relevant")}
               >
                 Relevant ({data?.total_relevant ?? 0})
               </button>
-              <button
-                type="button"
-                className={`h-full border-l px-3 transition-colors ${
-                  showAll
-                    ? "bg-primary text-primary-foreground"
-                    : "hover:bg-muted"
-                }`}
-                onClick={() => setShowAll(true)}
-              >
-                All ({data?.total_jobs ?? 0})
-              </button>
-            </div>
-          ) : null}
+            ) : null}
+            <button
+              type="button"
+              className={`h-full border-l px-3 transition-colors ${
+                filter === "all"
+                  ? "bg-primary text-primary-foreground"
+                  : "hover:bg-muted"
+              }`}
+              onClick={() => setFilter("all")}
+            >
+              All ({data?.total_jobs ?? 0})
+            </button>
+          </div>
           <Button
             variant="outline"
             size="sm"
@@ -668,6 +690,16 @@ function JobsListings() {
                                 .join(" · ")}
                             </CardDescription>
                           </div>
+                          <button
+                            type="button"
+                            className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                            onClick={() => toggleBookmark(job.job_id)}
+                            aria-label={isBookmarked(job.job_id) ? "Remove bookmark" : "Bookmark"}
+                          >
+                            <Bookmark
+                              className={`size-4 ${isBookmarked(job.job_id) ? "fill-current text-foreground" : ""}`}
+                            />
+                          </button>
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-2">
@@ -698,15 +730,15 @@ function JobsListings() {
                   );
                 })}
 
-                {hiddenCount > 0 && !showAll ? (
+                {hiddenCount > 0 && filter !== "all" ? (
                   <button
                     type="button"
                     className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => setShowAll(true)}
+                    onClick={() => setFilter("all")}
                   >
                     <ChevronDown className="size-3.5" />
                     Show all {tile.allJobs.length} jobs ({hiddenCount} hidden by
-                    relevance filter)
+                    filter)
                   </button>
                 ) : null}
 
