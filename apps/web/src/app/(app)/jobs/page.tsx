@@ -558,16 +558,18 @@ function JobsListings() {
             )}
             Check all
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={handleDownloadCsv}
-            disabled={loading || totalShown === 0}
-          >
-            <Download className="mr-1.5 size-3.5" />
-            CSV
-          </Button>
+          <div className="ml-auto">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadCsv}
+              disabled={loading || totalShown === 0}
+            >
+              <Download className="mr-1.5 size-3.5" />
+              CSV
+            </Button>
+          </div>
         </div>
       </div>
 
