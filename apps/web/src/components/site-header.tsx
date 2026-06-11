@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 
 import type { UserProfileResult } from "@/lib/api-types";
+import { useOnboardingPhase } from "@/lib/use-onboarding-phase";
 import { proxyPost } from "@/lib/proxy-client";
 import { cn } from "@/lib/utils";
 
@@ -15,15 +16,6 @@ const GITHUB_REPO_URL = "https://github.com/ContactGraph/contactgraph";
 type NavLink =
   | { kind: "internal"; href: string; label: string }
   | { kind: "external"; href: string; label: string };
-
-const appLinks: readonly NavLink[] = [
-  { kind: "internal", href: "/setup", label: "Setup" },
-  { kind: "internal", href: "/people", label: "People" },
-  { kind: "internal", href: "/organizations", label: "Organizations" },
-  { kind: "internal", href: "/jobs", label: "Jobs" },
-  { kind: "internal", href: "/target-companies", label: "Targets" },
-  { kind: "internal", href: "/trust", label: "Trust List" },
-];
 
 const marketingLinks: readonly NavLink[] = [
   { kind: "external", href: `${API_BASE}/skill.md`, label: "Skill" },
@@ -35,7 +27,7 @@ const marketingLinks: readonly NavLink[] = [
 export function SiteHeader({ email }: { email: string | null }) {
   const pathname: string = usePathname();
   const headerRef = useRef<HTMLElement>(null);
-  const links: readonly NavLink[] = email ? appLinks : marketingLinks;
+  const onboarding = useOnboardingPhase();
 
   const profileQuery = useQuery({
     queryKey: ["user-profile"],
@@ -44,11 +36,23 @@ export function SiteHeader({ email }: { email: string | null }) {
     staleTime: 5 * 60 * 1000,
   });
 
+  const appLinks: readonly NavLink[] = onboarding.showJobsTab
+    ? [
+        { kind: "internal", href: "/graph", label: "My Graph" },
+        { kind: "internal", href: "/jobs", label: "Jobs" },
+      ]
+    : [{ kind: "internal", href: "/graph", label: "My Graph" }];
+
+  const links: readonly NavLink[] = email ? appLinks : marketingLinks;
+
   const displayName: string =
     profileQuery.data?.display_name ??
     profileQuery.data?.google_profile_name ??
     email ??
     "";
+
+  const profilePicture: string | null =
+    profileQuery.data?.google_profile_picture ?? null;
 
   const initials: string = displayName
     .split(/[\s@.]+/)
@@ -94,8 +98,8 @@ export function SiteHeader({ email }: { email: string | null }) {
       <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-4 sm:gap-6">
           <Link
-            href={email ? "/setup" : "/"}
-            className="text-sm font-semibold no-underline hover:underline"
+            href={email ? "/graph" : "/"}
+            className="text-lg font-bold tracking-tight text-foreground no-underline hover:no-underline hover:opacity-80"
           >
             ContactGraph
           </Link>
@@ -129,14 +133,21 @@ export function SiteHeader({ email }: { email: string | null }) {
             <>
               <Link
                 href="/profile"
-                className="flex items-center gap-2 rounded-full no-underline hover:opacity-80"
+                className="flex items-center rounded-full no-underline hover:opacity-80"
+                title={displayName}
               >
-                <span className="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
-                  {initials}
-                </span>
-                <span className="hidden max-w-[160px] truncate text-sm font-medium text-foreground sm:inline">
-                  {displayName}
-                </span>
+                {profilePicture !== null ? (
+                  <img
+                    src={profilePicture}
+                    alt={displayName}
+                    className="size-7 rounded-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <span className="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+                    {initials}
+                  </span>
+                )}
               </Link>
             </>
           ) : (

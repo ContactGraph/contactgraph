@@ -73,6 +73,7 @@ from contactsafe_core.schemas import (
     UploadSourceResult,
     UserExperience,
     UserProfileResult,
+    DeleteUserAccountResult,
     ViewTrustedUsersResult,
 )
 
@@ -173,7 +174,7 @@ async def connect_source(
             resolved_uid: UUID = await sources.resolve_user_id(source_id=result.source_id)
             if user_id is not None and resolved_uid == user_id:
                 token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
-                    resolved_uid
+                    resolved_uid, email=result.email
                 )
                 result = result.model_copy(
                     update={
@@ -436,6 +437,7 @@ async def get_user_profile(
             headline=headline,
             location=user.location,
             google_profile_name=user.google_profile_name,
+            google_profile_picture=user.google_profile_picture,
             phone=person_fields.get("phone"),  # type: ignore[arg-type]
             linkedin_url=person_fields.get("linkedin_url"),  # type: ignore[arg-type]
             bio_summary=person_fields.get("bio_summary"),  # type: ignore[arg-type]
@@ -692,6 +694,27 @@ async def delete_user_experience(
             google_profile_name=user.google_profile_name,
             experiences=experiences,
             message="Experience deleted.",
+        )
+
+
+async def delete_user_account(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> DeleteUserAccountResult:
+    if user_id is None:
+        return DeleteUserAccountResult(
+            deleted=False,
+            message="Authentication required. Provide a Bearer token.",
+        )
+    async with ctx.session_factory() as db:
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return DeleteUserAccountResult(deleted=False, message="User not found.")
+        await db.delete(user)
+        await db.commit()
+        return DeleteUserAccountResult(
+            deleted=True,
+            message="Your account and all associated data have been deleted.",
         )
 
 
@@ -1078,14 +1101,15 @@ async def poll_connect(
                 message="Tokens already dispensed. Use refresh_token to get new access tokens via POST /oauth/token.",
             )
 
-        token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
-            session.user_id
-        )
-        session.token_dispensed_at = datetime.now(tz=UTC)
-        await db.commit()
-
         user: User | None = await db.get(User, session.user_id)
         email: str | None = user.email if user else None
+
+        token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
+            session.user_id, email=email
+        )
+
+        session.token_dispensed_at = datetime.now(tz=UTC)
+        await db.commit()
 
         return PollConnectResult(
             status="connected",
@@ -1533,6 +1557,25 @@ async def start_job_discovery(
 
         service = JobDiscoveryService(db, ctx.settings)
         return await service.start_discovery(user_id)
+
+
+async def start_single_org_job_discovery(
+    ctx: AppContext,
+    user_id: UUID | None,
+    org_id: UUID,
+) -> "StartSingleOrgDiscoveryResult":
+    from contactsafe_core.contact_schemas import StartSingleOrgDiscoveryResult
+
+    if user_id is None:
+        return StartSingleOrgDiscoveryResult(
+            scheduled=False,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        return await service.discover_single_org(user_id, org_id)
 
 
 async def get_job_discovery_status(

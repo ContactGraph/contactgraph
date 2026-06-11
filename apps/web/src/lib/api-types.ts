@@ -153,6 +153,7 @@ export interface UserProfileResult {
   headline: string | null;
   location: string | null;
   google_profile_name: string | null;
+  google_profile_picture: string | null;
   phone: string | null;
   linkedin_url: string | null;
   bio_summary: string | null;
@@ -181,6 +182,11 @@ export interface SaveUserExperienceRequest {
 
 export interface DeleteUserExperienceRequest {
   id: string;
+}
+
+export interface DeleteUserAccountResult {
+  deleted: boolean;
+  message: string;
 }
 
 export interface PersonMatch {
@@ -681,7 +687,15 @@ export interface OrgJobsByCompany {
   org_name: string;
   primary_domain: string | null;
   description: string | null;
+  last_checked_at: string | null;
   jobs: OrgJobItem[];
+}
+
+export interface StartSingleOrgDiscoveryResult {
+  scheduled: boolean;
+  jobs_found: number;
+  new_jobs: number;
+  message: string;
 }
 
 export interface ListOrgJobsResult {

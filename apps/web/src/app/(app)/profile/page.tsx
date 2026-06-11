@@ -1,16 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  Briefcase,
-  Loader2,
-  LogOut,
-  Pencil,
-  Plus,
-  Trash2,
-  Upload,
-  X,
-} from "lucide-react";
+import { Briefcase, Loader2, LogOut, Pencil, Plus, Trash2, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -31,12 +22,14 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FileDropZone } from "@/components/ui/file-drop-zone";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import type {
+  DeleteUserAccountResult,
   DeleteUserExperienceRequest,
   ListSourcesResult,
   SaveUserExperienceRequest,
@@ -99,12 +92,13 @@ const EMPTY_FORM: ExperienceFormState = {
 export default function ProfilePage() {
   const router = useRouter();
   const queryClient = useQueryClient();
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [dialogOpen, setDialogOpen] = useState<boolean>(false);
   const [form, setForm] = useState<ExperienceFormState>(EMPTY_FORM);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [profileSaved, setProfileSaved] = useState<boolean>(false);
   const [awaitingSync, setAwaitingSync] = useState<boolean>(false);
+  const [deleteAccountDialogOpen, setDeleteAccountDialogOpen] =
+    useState<boolean>(false);
 
   const [profileName, setProfileName] = useState<string>("");
   const [profileLocation, setProfileLocation] = useState<string>("");
@@ -234,6 +228,24 @@ export default function ProfilePage() {
     },
   });
 
+  const deleteAccountMutation = useMutation({
+    mutationFn: () => proxyPost<DeleteUserAccountResult>("delete-user-account"),
+    onSuccess: async (result: DeleteUserAccountResult) => {
+      if (!result.deleted) {
+        return;
+      }
+      await fetch("/api/auth/logout", { method: "POST" });
+      router.push("/");
+      router.refresh();
+    },
+  });
+
+  const handleSignOut = useCallback(async (): Promise<void> => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/");
+    router.refresh();
+  }, [router]);
+
   const uploadMutation = useMutation({
     mutationFn: (payload: {
       source_type: SourceType;
@@ -251,10 +263,7 @@ export default function ProfilePage() {
   });
 
   const handlePdfUpload = useCallback(
-    async (file: File | undefined): Promise<void> => {
-      if (file === undefined) {
-        return;
-      }
+    async (file: File): Promise<void> => {
       const buffer: ArrayBuffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       let binary = "";
@@ -306,38 +315,23 @@ export default function ProfilePage() {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Your Profile</h1>
-          <p className="text-muted-foreground">
-            Your professional background helps identify the right version of your
-            contacts during enrichment.
-          </p>
-        </div>
-        <div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,application/pdf"
-            className="hidden"
-            onChange={(event) => {
-              void handlePdfUpload(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-          <Button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploadMutation.isPending || awaitingSync}
-          >
-            {uploadMutation.isPending || awaitingSync ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              <Upload className="size-4" />
-            )}
-            {awaitingSync ? "Processing PDF…" : "Upload LinkedIn PDF"}
-          </Button>
-        </div>
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">Your Profile</h1>
+        <p className="text-muted-foreground">
+          Your professional background helps identify the right version of your
+          contacts during enrichment.
+        </p>
       </div>
+
+      <FileDropZone
+        accept=".pdf,application/pdf"
+        onFileSelect={(file: File) => void handlePdfUpload(file)}
+        disabled={uploadMutation.isPending || awaitingSync}
+        busy={uploadMutation.isPending || awaitingSync}
+        busyMessage={awaitingSync ? "Processing PDF…" : "Uploading…"}
+        idleMessage="Drag and drop your LinkedIn PDF here"
+        idleHint="or click to choose a file"
+      />
 
       {uploadError ? (
         <Alert variant="destructive">
@@ -588,22 +582,34 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
 
-      {/* Sign out */}
-      <div className="flex justify-end">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground"
-          onClick={async () => {
-            await fetch("/api/auth/logout", { method: "POST" });
-            router.push("/");
-            router.refresh();
-          }}
-        >
-          <LogOut className="size-4" />
-          Sign out
-        </Button>
-      </div>
+      {/* Account */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Account</CardTitle>
+          <CardDescription>
+            Sign out or permanently delete your account and all imported data.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-3">
+          <Button variant="outline" size="sm" onClick={() => void handleSignOut()}>
+            <LogOut className="size-4" />
+            Sign out
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setDeleteAccountDialogOpen(true)}
+            disabled={deleteAccountMutation.isPending}
+          >
+            {deleteAccountMutation.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Trash2 className="size-4" />
+            )}
+            Delete my account
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* Experience dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -692,6 +698,42 @@ export default function ProfilePage() {
                 <Loader2 className="size-4 animate-spin" />
               ) : null}
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={deleteAccountDialogOpen} onOpenChange={setDeleteAccountDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete your account?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            This permanently deletes your account, imports, lists, job preferences,
+            and network observations. This cannot be undone.
+          </p>
+          {deleteAccountMutation.error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{deleteAccountMutation.error.message}</AlertDescription>
+            </Alert>
+          ) : null}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteAccountDialogOpen(false)}
+              disabled={deleteAccountMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteAccountMutation.isPending}
+              onClick={() => deleteAccountMutation.mutate()}
+            >
+              {deleteAccountMutation.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : null}
+              Delete my account
             </Button>
           </DialogFooter>
         </DialogContent>

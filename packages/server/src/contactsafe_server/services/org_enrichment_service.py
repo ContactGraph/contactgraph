@@ -8,7 +8,7 @@ import re
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -98,23 +98,30 @@ class OrgEnrichmentService:
                 message="Company enrichment is already running.",
             )
 
-        org_ids: list[uuid.UUID] = await self._list_user_org_ids(user_id)
-        if not org_ids:
+        unenriched_org_ids: list[uuid.UUID] = await self._list_unenriched_user_org_ids(
+            user_id
+        )
+        total_orgs: int = await self._count_user_orgs(user_id)
+        if total_orgs == 0:
             return EnrichOrgsResult(
                 scheduled=False,
                 state="complete",
                 message="No organizations to enrich yet.",
             )
+        if not unenriched_org_ids:
+            return EnrichOrgsResult(
+                scheduled=False,
+                state="complete",
+                message="All organizations are already enriched.",
+            )
 
-        enriched_count: int = await self._count_enriched_orgs(user_id)
-        total: int = len(org_ids)
         run = OrgEnrichmentRun(
             user_id=user_id,
             state="running",
             started_at=datetime.now(tz=UTC),
-            orgs_total=total,
-            orgs_enriched=enriched_count,
-            progress_message=self._progress_message(enriched_count, total),
+            orgs_total=len(unenriched_org_ids),
+            orgs_enriched=0,
+            progress_message=self._progress_message(0, len(unenriched_org_ids)),
         )
         self._db.add(run)
         await self._db.flush()
@@ -137,12 +144,34 @@ class OrgEnrichmentService:
             message="Company enrichment started in the background.",
         )
 
+    _STALE_RUN_THRESHOLD: timedelta = timedelta(minutes=5)
+
+    async def _recover_stale_run(self, run: OrgEnrichmentRun) -> None:
+        """Mark a run as failed if the background task appears to have crashed."""
+        if run.state != "running":
+            return
+        stale_cutoff: datetime = datetime.now(tz=UTC) - self._STALE_RUN_THRESHOLD
+        if run.updated_at > stale_cutoff:
+            return
+        logger.warning(
+            "Recovering stale enrichment run %s (last updated %s)",
+            run.id,
+            run.updated_at.isoformat(),
+        )
+        run.state = "failed"
+        run.error = "Enrichment task stopped unexpectedly. You can retry."
+        run.completed_at = datetime.now(tz=UTC)
+        run.progress_message = None
+        await self._db.commit()
+
     async def get_status(self, user_id: uuid.UUID) -> OrgEnrichmentStatusResult:
         run: OrgEnrichmentRun | None = await self._latest_run(user_id)
         orgs_total: int = await self._count_user_orgs(user_id)
         orgs_enriched: int = await self._count_enriched_orgs(user_id)
 
         if run is not None:
+            if run.state == "running":
+                await self._recover_stale_run(run)
             state: OrgEnrichmentState = run.state  # type: ignore[assignment]
             return OrgEnrichmentStatusResult(
                 state=state,
@@ -285,13 +314,29 @@ class OrgEnrichmentService:
         org.attributes = attributes
 
     async def _load_orgs_for_user(self, user_id: uuid.UUID) -> list[Org]:
-        org_ids: list[uuid.UUID] = await self._list_user_org_ids(user_id)
+        org_ids: list[uuid.UUID] = await self._list_unenriched_user_org_ids(user_id)
         if not org_ids:
             return []
         result = await self._db.execute(
             select(Org).where(Org.id.in_(org_ids)).order_by(Org.canonical_name.asc())
         )
         return list(result.scalars().all())
+
+    async def _list_unenriched_user_org_ids(self, user_id: uuid.UUID) -> list[uuid.UUID]:
+        result = await self._db.execute(
+            select(Org.id)
+            .join(Person, Person.current_org_id == Org.id)
+            .where(
+                *self._strong_tie_person_filter(user_id),
+                or_(
+                    Org.attributes.is_(None),
+                    ~Org.attributes.has_key("exa_enriched_at"),
+                ),
+            )
+            .group_by(Org.id)
+            .order_by(Org.canonical_name.asc())
+        )
+        return [row[0] for row in result.all()]
 
     async def _list_user_org_ids(self, user_id: uuid.UUID) -> list[uuid.UUID]:
         result = await self._db.execute(
@@ -367,7 +412,10 @@ class OrgEnrichmentService:
 
     async def _has_running_run(self, user_id: uuid.UUID) -> bool:
         run: OrgEnrichmentRun | None = await self._latest_run(user_id)
-        return run is not None and run.state == "running"
+        if run is None or run.state != "running":
+            return False
+        await self._recover_stale_run(run)
+        return run.state == "running"
 
     @staticmethod
     def _progress_message(orgs_enriched: int, orgs_total: int) -> str:

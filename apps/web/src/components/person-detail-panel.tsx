@@ -249,7 +249,7 @@ export const PersonDetailPanel = forwardRef<
             <Label htmlFor="person-org">Organization</Label>
             {person.org_id ? (
               <Link
-                href={`/organizations?org=${encodeURIComponent(person.org_id)}`}
+                href={`/graph?tab=organizations&org=${encodeURIComponent(person.org_id)}`}
                 className="text-xs text-primary hover:underline"
               >
                 View org →

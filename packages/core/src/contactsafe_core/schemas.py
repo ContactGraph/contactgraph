@@ -373,6 +373,7 @@ class UserProfileResult(BaseModel):
     headline: str | None = None
     location: str | None = None
     google_profile_name: str | None = None
+    google_profile_picture: str | None = None
     phone: str | None = None
     linkedin_url: str | None = None
     bio_summary: str | None = None
@@ -401,6 +402,11 @@ class SaveUserExperienceRequest(BaseModel):
 
 class DeleteUserExperienceRequest(BaseModel):
     id: UUID
+
+
+class DeleteUserAccountResult(BaseModel):
+    deleted: bool
+    message: str = ""
 
 
 class QueryNetworkRequest(BaseModel):
