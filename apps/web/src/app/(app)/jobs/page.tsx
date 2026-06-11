@@ -13,6 +13,7 @@ import {
   Users,
 } from "lucide-react";
 import Link from "next/link";
+import ReactMarkdown from "react-markdown";
 
 import { PersonDetailPanel } from "@/components/person-detail-panel";
 import { JobSetupCards } from "@/components/setup/job-setup-cards";
@@ -666,9 +667,11 @@ function JobsListings() {
                       </CardHeader>
                       <CardContent className="space-y-2">
                         {job.description_snippet ? (
-                          <p className="text-sm text-muted-foreground">
-                            {job.description_snippet}
-                          </p>
+                          <div className="prose prose-sm prose-neutral dark:prose-invert max-w-none text-muted-foreground">
+                            <ReactMarkdown>
+                              {job.description_snippet}
+                            </ReactMarkdown>
+                          </div>
                         ) : null}
                         {salary ? (
                           <p className="text-sm font-medium">{salary}</p>
