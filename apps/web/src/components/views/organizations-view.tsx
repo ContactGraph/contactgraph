@@ -38,8 +38,6 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -106,7 +104,13 @@ function CompactLinkCell({
   );
 }
 
-export function OrganizationsView({ embedded = false }: { embedded?: boolean }) {
+export function OrganizationsView({
+  embedded = false,
+  viewingFilter = "mine",
+}: {
+  embedded?: boolean;
+  viewingFilter?: string;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const queryClient = useQueryClient();
@@ -126,7 +130,6 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
   const [selectedSizeBands, setSelectedSizeBands] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  const [viewingFilter, setViewingFilter] = useState<string>("mine");
   const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
 
   useEffect(() => {
@@ -361,15 +364,6 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     return [...bands].sort();
   }, [allOrgs]);
 
-  const availableSharers: string[] = useMemo(() => {
-    const sharers = new Set<string>();
-    for (const org of allOrgs) {
-      for (const name of org.shared_from) {
-        sharers.add(name);
-      }
-    }
-    return [...sharers].sort();
-  }, [allOrgs]);
 
   const filteredOrgs: OrgListItem[] = useMemo(() => {
     let rows: OrgListItem[] = allOrgs;
@@ -841,33 +835,6 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
-
-        {/* Viewing dropdown */}
-        {availableSharers.length > 0 ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="h-8 text-xs">
-                {viewingFilter === "all"
-                  ? "All contacts"
-                  : viewingFilter === "mine"
-                    ? "My contacts"
-                    : `${viewingFilter}'s contacts`}
-                <ChevronDown className="ml-1 size-3" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start">
-              <DropdownMenuRadioGroup value={viewingFilter} onValueChange={setViewingFilter}>
-                <DropdownMenuRadioItem value="mine">My contacts</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="all">All contacts</DropdownMenuRadioItem>
-                {availableSharers.map((name) => (
-                  <DropdownMenuRadioItem key={name} value={name}>
-                    {name}&rsquo;s contacts
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
 
         {hasActiveFilters && (
           <Button

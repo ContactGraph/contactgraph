@@ -11,7 +11,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { ChevronDown, Download, Search } from "lucide-react";
+import { Download, Search } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -25,13 +25,6 @@ import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -46,7 +39,13 @@ import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { proxyPost } from "@/lib/proxy-client";
 
-export function PeopleView({ embedded = false }: { embedded?: boolean }) {
+export function PeopleView({
+  embedded = false,
+  viewingFilter = "mine",
+}: {
+  embedded?: boolean;
+  viewingFilter?: string;
+}) {
   const searchParams = useSearchParams();
   const [search, setSearch] = useState<string>(searchParams.get("search") ?? "");
   const [sorting, setSorting] = useState<SortingState>([
@@ -61,7 +60,6 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
   const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
 
   const [sourceFilter, setSourceFilter] = useState<"all" | "phone_linkedin" | "phone_only" | "linkedin_only">("phone_linkedin");
-  const [viewingFilter, setViewingFilter] = useState<string>("mine");
 
   useEffect(() => {
     setIsDetailDirty(false);
@@ -233,16 +231,6 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
     [],
   );
 
-  const availableSharers: string[] = useMemo(() => {
-    const names = new Set<string>();
-    for (const p of peopleQuery.data?.people ?? []) {
-      if (p.shared_from) {
-        names.add(p.shared_from);
-      }
-    }
-    return [...names].sort();
-  }, [peopleQuery.data?.people]);
-
   const filteredPeople: PersonListItem[] = useMemo(() => {
     const all: PersonListItem[] = peopleQuery.data?.people ?? [];
 
@@ -412,55 +400,27 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
         </div>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        {/* Viewing dropdown */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-8 text-xs">
-              {viewingFilter === "all"
-                ? "All contacts"
-                : viewingFilter === "mine"
-                  ? "My contacts"
-                  : `${viewingFilter}'s contacts`}
-              <ChevronDown className="ml-1 size-3" />
+      {viewingFilter === "mine" ? (
+        <div className="flex gap-1">
+          {([
+            ["phone_linkedin", "Phone + LinkedIn"],
+            ["phone_only", "Phone only"],
+            ["linkedin_only", "LinkedIn only"],
+            ["all", "All sources"],
+          ] as const).map(([value, label]) => (
+            <Button
+              key={value}
+              type="button"
+              variant={sourceFilter === value ? "default" : "outline"}
+              size="sm"
+              className="h-8 text-xs px-2.5"
+              onClick={() => setSourceFilter(value)}
+            >
+              {label}
             </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuRadioGroup value={viewingFilter} onValueChange={setViewingFilter}>
-              <DropdownMenuRadioItem value="mine">My contacts</DropdownMenuRadioItem>
-              <DropdownMenuRadioItem value="all">All contacts</DropdownMenuRadioItem>
-              {availableSharers.map((name) => (
-                <DropdownMenuRadioItem key={name} value={name}>
-                  {name}&rsquo;s contacts
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Source filter buttons (only when viewing own contacts) */}
-        {viewingFilter === "mine" ? (
-          <div className="flex gap-1">
-            {([
-              ["phone_linkedin", "Phone + LinkedIn"],
-              ["phone_only", "Phone only"],
-              ["linkedin_only", "LinkedIn only"],
-              ["all", "All sources"],
-            ] as const).map(([value, label]) => (
-              <Button
-                key={value}
-                type="button"
-                variant={sourceFilter === value ? "default" : "outline"}
-                size="sm"
-                className="h-8 text-xs px-2.5"
-                onClick={() => setSourceFilter(value)}
-              >
-                {label}
-              </Button>
-            ))}
-          </div>
-        ) : null}
-      </div>
+          ))}
+        </div>
+      ) : null}
 
       {peopleQuery.error ? (
         <Alert variant="destructive">
