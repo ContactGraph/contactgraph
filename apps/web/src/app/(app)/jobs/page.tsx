@@ -27,7 +27,6 @@ import {
   ResponsiveModalTrigger,
 } from "@/components/ui/responsive-modal";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -652,16 +651,6 @@ function JobsListings() {
                                 .filter(Boolean)
                                 .join(" · ")}
                             </CardDescription>
-                          </div>
-                          <div className="flex items-center gap-1.5">
-                            {job.relevance_reason ? (
-                              <Badge
-                                variant="outline"
-                                className="text-xs font-normal"
-                              >
-                                {job.relevance_reason}
-                              </Badge>
-                            ) : null}
                           </div>
                         </div>
                       </CardHeader>
