@@ -545,20 +545,20 @@ function JobsListings() {
               All ({data?.total_jobs ?? 0})
             </button>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={discoveryRunning || checkAllMutation.isPending}
-            onClick={() => checkAllMutation.mutate()}
-          >
-            {discoveryRunning || checkAllMutation.isPending ? (
-              <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-1.5 size-3.5" />
-            )}
-            Check all
-          </Button>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={discoveryRunning || checkAllMutation.isPending}
+              onClick={() => checkAllMutation.mutate()}
+            >
+              {discoveryRunning || checkAllMutation.isPending ? (
+                <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1.5 size-3.5" />
+              )}
+              Check all
+            </Button>
             <Button
               type="button"
               variant="outline"
