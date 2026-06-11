@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, Loader2, Plus } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { LinkedInProfileUploadDialog } from "@/components/setup/linkedin-profile-upload-dialog";
@@ -43,7 +43,13 @@ import {
   sourceForType,
 } from "@/lib/setup-utils";
 
-export function JobSetupCards({ compact = false }: { compact?: boolean }) {
+export function JobSetupCards({
+  compact = false,
+  onDirtyChange,
+}: {
+  compact?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const queryClient = useQueryClient();
   const autoStartedRef = useRef<boolean>(false);
   const [linkedinProfileDialogOpen, setLinkedinProfileDialogOpen] =
@@ -236,6 +242,30 @@ export function JobSetupCards({ compact = false }: { compact?: boolean }) {
     locationPref,
     locationCity,
   ]);
+
+  const preferencesDirty: boolean = useMemo(() => {
+    const serverText: string = jobPreferencesQuery.data?.text ?? "";
+    const serverLocPref: string | null =
+      jobPreferencesQuery.data?.location_pref ?? null;
+    const serverCity: string = jobPreferencesQuery.data?.location_city ?? "";
+    if (!serverText && !preferencesText.trim()) return false;
+    return (
+      preferencesText !== serverText ||
+      locationPref !== serverLocPref ||
+      locationCity !== serverCity
+    );
+  }, [
+    preferencesText,
+    locationPref,
+    locationCity,
+    jobPreferencesQuery.data?.text,
+    jobPreferencesQuery.data?.location_pref,
+    jobPreferencesQuery.data?.location_city,
+  ]);
+
+  useEffect(() => {
+    onDirtyChange?.(preferencesDirty);
+  }, [preferencesDirty, onDirtyChange]);
 
   const handleLinkedInProfileUpload = useCallback(
     async (file: File): Promise<void> => {
@@ -455,7 +485,7 @@ export function JobSetupCards({ compact = false }: { compact?: boolean }) {
             ) : null}
           </div>
           <Button
-            variant="outline"
+            variant={preferencesDirty ? "default" : "outline"}
             size="sm"
             disabled={
               setJobPreferencesMutation.isPending || !preferencesText.trim()
@@ -473,6 +503,8 @@ export function JobSetupCards({ compact = false }: { compact?: boolean }) {
                 <Loader2 className="size-4 animate-spin" />
                 Saving…
               </>
+            ) : preferencesDirty ? (
+              "Save"
             ) : preferencesComplete ? (
               "Saved"
             ) : (

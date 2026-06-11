@@ -3,9 +3,11 @@
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Bookmark,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Download,
   ExternalLink,
   Loader2,
   RefreshCw,
@@ -26,7 +28,6 @@ import {
   ResponsiveModalTrigger,
 } from "@/components/ui/responsive-modal";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -60,6 +61,8 @@ import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { proxyPost } from "@/lib/proxy-client";
 import { findJobProspectsList } from "@/lib/setup-utils";
 import { useOnboardingPhase } from "@/lib/use-onboarding-phase";
+import { useJobBookmarks } from "@/lib/use-job-bookmarks";
+import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 
 function formatSalary(min: number | null, max: number | null): string | null {
   if (min === null && max === null) return null;
@@ -85,6 +88,23 @@ function hasRelevanceData(data: ListOrgJobsResult | undefined): boolean {
   return data.companies.some((c) =>
     c.jobs.some((j) => j.is_relevant !== null),
   );
+}
+
+function stripMarkdown(text: string): string {
+  return text
+    .replace(/#{1,6}\s+/g, "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/_(.+?)_/g, "$1")
+    .replace(/~~(.+?)~~/g, "$1")
+    .replace(/`(.+?)`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/^[-*+]\s+/gm, "• ")
+    .replace(/^\d+\.\s+/gm, "")
+    .replace(/\n{2,}/g, " ")
+    .replace(/\n/g, " ")
+    .trim();
 }
 
 interface OrgTile {
@@ -197,9 +217,14 @@ function OrgContactsList({
   );
 }
 
+type JobFilter = "bookmarked" | "relevant" | "all";
+
 function JobsListings() {
-  const [showAll, setShowAll] = useState<boolean>(false);
+  const [filter, setFilter] = useState<JobFilter>("relevant");
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [settingsDirty, setSettingsDirty] = useState<boolean>(false);
+  const [settingsDiscardOpen, setSettingsDiscardOpen] =
+    useState<boolean>(false);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [isDetailDirty, setIsDetailDirty] = useState<boolean>(false);
   const [discardDialogOpen, setDiscardDialogOpen] = useState<boolean>(false);
@@ -212,6 +237,7 @@ function JobsListings() {
   );
   const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
   const queryClient = useQueryClient();
+  const { bookmarks, toggle: toggleBookmark, isBookmarked } = useJobBookmarks();
 
   const jobsQuery = useQuery({
     queryKey: ["org-jobs"],
@@ -298,14 +324,18 @@ function JobsListings() {
       { filtered: OrgJobItem[]; all: OrgJobItem[] }
     >();
     for (const company of data?.companies ?? []) {
-      const filtered: OrgJobItem[] =
-        !hasRelevance || showAll
-          ? company.jobs
-          : company.jobs.filter((j) => j.is_relevant !== false);
+      let filtered: OrgJobItem[];
+      if (filter === "bookmarked") {
+        filtered = company.jobs.filter((j) => bookmarks.has(j.job_id));
+      } else if (filter === "all" || !hasRelevance) {
+        filtered = company.jobs;
+      } else {
+        filtered = company.jobs.filter((j) => j.is_relevant !== false);
+      }
       map.set(company.org_id, { filtered, all: company.jobs });
     }
     return map;
-  }, [data?.companies, hasRelevance, showAll]);
+  }, [data?.companies, hasRelevance, filter, bookmarks]);
 
   const orgTiles: OrgTile[] = useMemo(() => {
     const tiles: OrgTile[] = [];
@@ -391,6 +421,28 @@ function JobsListings() {
     setDiscardDialogOpen(false);
   };
 
+  const handleDownloadCsv = (): void => {
+    const allJobs: { company: string; job: OrgJobItem }[] = [];
+    for (const tile of orgTiles) {
+      for (const job of tile.jobs) {
+        allJobs.push({ company: tile.org_name, job });
+      }
+    }
+    const csv: string = buildCsv(
+      ["Company", "Title", "Location", "Department", "Remote", "Salary", "URL"],
+      allJobs.map(({ company, job }) => [
+        company,
+        job.title,
+        job.location ?? "",
+        job.department ?? "",
+        job.remote_status ?? "",
+        formatSalary(job.salary_min, job.salary_max) ?? "",
+        job.url,
+      ]),
+    );
+    downloadCsv(csvFilename("jobs"), csv);
+  };
+
   const handleDetailSheetOpenChange = (open: boolean): void => {
     if (open) return;
     if (isDetailDirty) {
@@ -424,7 +476,13 @@ function JobsListings() {
                   : `${totalShown} jobs across ${orgTiles.length} companies`}
             </p>
           </div>
-          <ResponsiveModal open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <ResponsiveModal open={settingsOpen} onOpenChange={(open: boolean) => {
+            if (!open && settingsDirty) {
+              setSettingsDiscardOpen(true);
+              return;
+            }
+            setSettingsOpen(open);
+          }}>
             <ResponsiveModalTrigger asChild>
               <Button
                 type="button"
@@ -443,50 +501,75 @@ function JobsListings() {
                   Update your role preferences, location, and target companies.
                 </ResponsiveModalDescription>
               </ResponsiveModalHeader>
-              <JobSetupCards compact />
+              <JobSetupCards compact onDirtyChange={setSettingsDirty} />
             </ResponsiveModalContent>
           </ResponsiveModal>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {hasRelevance ? (
-            <div className="inline-flex h-8 items-center overflow-hidden rounded-md border text-xs">
+          <div className="inline-flex h-8 items-center overflow-hidden rounded-md border text-xs">
+            {bookmarks.size > 0 ? (
               <button
                 type="button"
                 className={`h-full px-3 transition-colors ${
-                  !showAll
+                  filter === "bookmarked"
                     ? "bg-primary text-primary-foreground"
                     : "hover:bg-muted"
                 }`}
-                onClick={() => setShowAll(false)}
+                onClick={() => setFilter("bookmarked")}
+              >
+                Bookmarked ({bookmarks.size})
+              </button>
+            ) : null}
+            {hasRelevance ? (
+              <button
+                type="button"
+                className={`h-full px-3 transition-colors ${bookmarks.size > 0 ? "border-l" : ""} ${
+                  filter === "relevant"
+                    ? "bg-primary text-primary-foreground"
+                    : "hover:bg-muted"
+                }`}
+                onClick={() => setFilter("relevant")}
               >
                 Relevant ({data?.total_relevant ?? 0})
               </button>
-              <button
-                type="button"
-                className={`h-full border-l px-3 transition-colors ${
-                  showAll
-                    ? "bg-primary text-primary-foreground"
-                    : "hover:bg-muted"
-                }`}
-                onClick={() => setShowAll(true)}
-              >
-                All ({data?.total_jobs ?? 0})
-              </button>
-            </div>
-          ) : null}
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={discoveryRunning || checkAllMutation.isPending}
-            onClick={() => checkAllMutation.mutate()}
-          >
-            {discoveryRunning || checkAllMutation.isPending ? (
-              <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-1.5 size-3.5" />
-            )}
-            Check all
-          </Button>
+            ) : null}
+            <button
+              type="button"
+              className={`h-full border-l px-3 transition-colors ${
+                filter === "all"
+                  ? "bg-primary text-primary-foreground"
+                  : "hover:bg-muted"
+              }`}
+              onClick={() => setFilter("all")}
+            >
+              All ({data?.total_jobs ?? 0})
+            </button>
+          </div>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={discoveryRunning || checkAllMutation.isPending}
+              onClick={() => checkAllMutation.mutate()}
+            >
+              {discoveryRunning || checkAllMutation.isPending ? (
+                <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1.5 size-3.5" />
+              )}
+              Check all
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadCsv}
+              disabled={loading || totalShown === 0}
+            >
+              <Download className="mr-1.5 size-3.5" />
+              CSV
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -643,23 +726,22 @@ function JobsListings() {
                                 .join(" · ")}
                             </CardDescription>
                           </div>
-                          <div className="flex items-center gap-1.5">
-                            {job.relevance_reason ? (
-                              <Badge
-                                variant="outline"
-                                className="text-xs font-normal"
-                              >
-                                {job.relevance_reason}
-                              </Badge>
-                            ) : null}
-                            <Badge variant="secondary">{job.source}</Badge>
-                          </div>
+                          <button
+                            type="button"
+                            className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+                            onClick={() => toggleBookmark(job.job_id)}
+                            aria-label={isBookmarked(job.job_id) ? "Remove bookmark" : "Bookmark"}
+                          >
+                            <Bookmark
+                              className={`size-4 ${isBookmarked(job.job_id) ? "fill-current text-foreground" : ""}`}
+                            />
+                          </button>
                         </div>
                       </CardHeader>
                       <CardContent className="space-y-2">
                         {job.description_snippet ? (
                           <p className="text-sm text-muted-foreground">
-                            {job.description_snippet}
+                            {stripMarkdown(job.description_snippet)}
                           </p>
                         ) : null}
                         {salary ? (
@@ -684,15 +766,15 @@ function JobsListings() {
                   );
                 })}
 
-                {hiddenCount > 0 && !showAll ? (
+                {hiddenCount > 0 && filter !== "all" ? (
                   <button
                     type="button"
                     className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => setShowAll(true)}
+                    onClick={() => setFilter("all")}
                   >
                     <ChevronDown className="size-3.5" />
                     Show all {tile.allJobs.length} jobs ({hiddenCount} hidden by
-                    relevance filter)
+                    filter)
                   </button>
                 ) : null}
 
@@ -754,6 +836,19 @@ function JobsListings() {
         onSave={handleSaveAndClose}
         onDiscard={closeDetailPanel}
         isSaving={isClosingSave}
+      />
+
+      <UnsavedChangesDialog
+        open={settingsDiscardOpen}
+        onOpenChange={setSettingsDiscardOpen}
+        onSave={() => {
+          setSettingsDiscardOpen(false);
+        }}
+        onDiscard={() => {
+          setSettingsDiscardOpen(false);
+          setSettingsDirty(false);
+          setSettingsOpen(false);
+        }}
       />
     </div>
   );
