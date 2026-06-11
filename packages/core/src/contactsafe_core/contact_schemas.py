@@ -373,7 +373,19 @@ class OrgJobsByCompany(BaseModel):
     org_name: str
     primary_domain: str | None = None
     description: str | None = None
+    last_checked_at: datetime | None = None
     jobs: list[OrgJobItem] = Field(default_factory=list)
+
+
+class StartSingleOrgDiscoveryRequest(BaseModel):
+    org_id: UUID
+
+
+class StartSingleOrgDiscoveryResult(BaseModel):
+    scheduled: bool
+    jobs_found: int = 0
+    new_jobs: int = 0
+    message: str
 
 
 class ListOrgJobsResult(BaseModel):

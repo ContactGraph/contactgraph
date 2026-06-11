@@ -1,27 +1,22 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getCoreRowModel,
   getFilteredRowModel,
   getSortedRowModel,
   useReactTable,
   type ColumnDef,
-  type RowSelectionState,
   type SortingState,
 } from "@tanstack/react-table";
 import {
-  CheckSquare,
   ChevronDown,
   Download,
-  ListPlus,
-  ListX,
   MoreHorizontal,
   Pencil,
   Search,
-  Square,
-  Trash2,
+  Star,
   Users,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -37,13 +32,6 @@ import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -76,6 +64,11 @@ import { formatCompanySize } from "@/lib/company-size";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { formatIndustryTag, formatIndustryTags } from "@/lib/industry-tags";
 import { proxyPost } from "@/lib/proxy-client";
+import {
+  findJobProspectsList,
+  JOB_PROSPECTS_LIST_NAME,
+} from "@/lib/setup-utils";
+import { cn } from "@/lib/utils";
 
 function websiteUrl(domain: string | null): string | null {
   if (!domain) {
@@ -111,35 +104,6 @@ function CompactLinkCell({
   );
 }
 
-function SelectionCheckbox({
-  checked,
-  indeterminate,
-  onChange,
-}: {
-  checked: boolean;
-  indeterminate?: boolean;
-  onChange: (checked: boolean) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (inputRef.current) {
-      inputRef.current.indeterminate = indeterminate === true;
-    }
-  }, [indeterminate]);
-
-  return (
-    <input
-      ref={inputRef}
-      type="checkbox"
-      className="size-3.5 accent-primary"
-      checked={checked}
-      onChange={(event) => onChange(event.target.checked)}
-      onClick={(event) => event.stopPropagation()}
-    />
-  );
-}
-
 export function OrganizationsView({ embedded = false }: { embedded?: boolean }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -154,28 +118,17 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
   const [isDetailDirty, setIsDetailDirty] = useState<boolean>(false);
   const [discardDialogOpen, setDiscardDialogOpen] = useState<boolean>(false);
   const [isClosingSave, setIsClosingSave] = useState<boolean>(false);
-  const [selectMode, setSelectMode] = useState<boolean>(false);
-  const [rowSelection, setRowSelection] = useState<RowSelectionState>({});
   const [selectedCategories, setSelectedCategories] = useState<ReadonlySet<string>>(
     new Set(),
   );
   const [selectedSizeBands, setSelectedSizeBands] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  const [activeListId, setActiveListId] = useState<string | null>(null);
-  const [newListName, setNewListName] = useState<string>("");
   const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
-  const appliedListFromUrl = useRef<boolean>(false);
 
   useEffect(() => {
     setIsDetailDirty(false);
   }, [selectedOrgId]);
-
-  useEffect(() => {
-    if (!selectMode) {
-      setRowSelection({});
-    }
-  }, [selectMode]);
 
   const closeDetailPanel = (): void => {
     setSelectedOrgId(null);
@@ -217,27 +170,6 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     queryFn: () => proxyPost<ListOrgListsResult>("list-org-lists"),
   });
 
-  useEffect(() => {
-    if (appliedListFromUrl.current) {
-      return;
-    }
-    const listParam: string | null = searchParams.get("list");
-    if (listParam === null) {
-      appliedListFromUrl.current = true;
-      return;
-    }
-    if (orgListsQuery.isLoading) {
-      return;
-    }
-    const listExists: boolean = (orgListsQuery.data?.lists ?? []).some(
-      (list) => list.list_id === listParam,
-    );
-    if (listExists) {
-      setActiveListId(listParam);
-    }
-    appliedListFromUrl.current = true;
-  }, [searchParams, orgListsQuery.isLoading, orgListsQuery.data?.lists]);
-
   const detailQuery = useQuery({
     queryKey: ["organization", selectedOrgId],
     queryFn: () =>
@@ -251,72 +183,157 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     await queryClient.invalidateQueries({ queryKey: ["org-lists"] });
   };
 
-  const createListMutation = useMutation({
-    mutationFn: (name: string) =>
-      proxyPost<CreateOrgListResult>("create-org-list", { name }),
-    onSuccess: async (result: CreateOrgListResult) => {
-      toast.success(result.message);
-      setNewListName("");
-      await invalidateOrgLists();
-    },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
-  });
+  const ensureJobProspectsListId = useCallback(async (): Promise<string> => {
+    const existingList: OrgListSummary | undefined = findJobProspectsList(
+      orgListsQuery.data?.lists ?? [],
+    );
+    if (existingList !== undefined) {
+      return existingList.list_id;
+    }
+    const result: CreateOrgListResult = await proxyPost<CreateOrgListResult>(
+      "create-org-list",
+      { name: JOB_PROSPECTS_LIST_NAME },
+    );
+    await invalidateOrgLists();
+    return result.list_id;
+  }, [orgListsQuery.data?.lists, queryClient]);
 
-  const renameListMutation = useMutation({
-    mutationFn: ({ listId, name }: { listId: string; name: string }) =>
-      proxyPost("rename-org-list", { list_id: listId, name }),
-    onSuccess: async () => {
-      await invalidateOrgLists();
+  const applyOptimisticStarUpdate = useCallback(
+    (orgIds: string[], action: "star" | "unstar"): ListOrgListsResult | undefined => {
+      const previous: ListOrgListsResult | undefined =
+        queryClient.getQueryData<ListOrgListsResult>(["org-lists"]);
+      queryClient.setQueryData<ListOrgListsResult>(["org-lists"], (old) => {
+        if (old === undefined) {
+          return old;
+        }
+        return {
+          ...old,
+          lists: old.lists.map((list) => {
+            if (list.name !== JOB_PROSPECTS_LIST_NAME) {
+              return list;
+            }
+            const currentIds = new Set(list.org_ids);
+            if (action === "star") {
+              for (const id of orgIds) {
+                currentIds.add(id);
+              }
+            } else {
+              for (const id of orgIds) {
+                currentIds.delete(id);
+              }
+            }
+            return {
+              ...list,
+              org_ids: [...currentIds],
+              org_count: currentIds.size,
+            };
+          }),
+        };
+      });
+      return previous;
     },
-  });
+    [queryClient],
+  );
 
-  const deleteListMutation = useMutation({
-    mutationFn: (listId: string) =>
-      proxyPost("delete-org-list", { list_id: listId }),
-    onSuccess: async (_result, listId) => {
-      if (activeListId === listId) {
-        setActiveListId(null);
+  const starToggleMutation = useMutation({
+    mutationFn: async ({
+      orgId,
+      isStarred,
+    }: {
+      orgId: string;
+      isStarred: boolean;
+    }) => {
+      if (isStarred) {
+        const list: OrgListSummary | undefined = findJobProspectsList(
+          orgListsQuery.data?.lists ?? [],
+        );
+        if (list === undefined) {
+          return null;
+        }
+        return proxyPost<ModifyOrgListMembershipResult>("remove-orgs-from-list", {
+          list_id: list.list_id,
+          org_ids: [orgId],
+        });
       }
+      const listId: string = await ensureJobProspectsListId();
+      return proxyPost<ModifyOrgListMembershipResult>("add-orgs-to-list", {
+        list_id: listId,
+        org_ids: [orgId],
+      });
+    },
+    onMutate: async ({ orgId, isStarred }) => {
+      await queryClient.cancelQueries({ queryKey: ["org-lists"] });
+      const previous = applyOptimisticStarUpdate(
+        [orgId],
+        isStarred ? "unstar" : "star",
+      );
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous !== undefined) {
+        queryClient.setQueryData(["org-lists"], context.previous);
+      }
+      toast.error("Failed to update star");
+    },
+    onSettled: async () => {
       await invalidateOrgLists();
     },
   });
 
-  const addToListMutation = useMutation({
-    mutationFn: ({ listId, orgIds }: { listId: string; orgIds: string[] }) =>
-      proxyPost<ModifyOrgListMembershipResult>("add-orgs-to-list", {
+  const bulkStarMutation = useMutation({
+    mutationFn: async ({
+      orgIds,
+      action,
+    }: {
+      orgIds: string[];
+      action: "star" | "unstar";
+    }) => {
+      if (orgIds.length === 0) {
+        return null;
+      }
+      if (action === "unstar") {
+        const list: OrgListSummary | undefined = findJobProspectsList(
+          orgListsQuery.data?.lists ?? [],
+        );
+        if (list === undefined) {
+          return null;
+        }
+        return proxyPost<ModifyOrgListMembershipResult>("remove-orgs-from-list", {
+          list_id: list.list_id,
+          org_ids: orgIds,
+        });
+      }
+      const listId: string = await ensureJobProspectsListId();
+      return proxyPost<ModifyOrgListMembershipResult>("add-orgs-to-list", {
         list_id: listId,
         org_ids: orgIds,
-      }),
-    onSuccess: async (result: ModifyOrgListMembershipResult) => {
-      toast.success(result.message);
-      setRowSelection({});
+      });
+    },
+    onMutate: async ({ orgIds, action }) => {
+      await queryClient.cancelQueries({ queryKey: ["org-lists"] });
+      const previous = applyOptimisticStarUpdate(orgIds, action);
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous !== undefined) {
+        queryClient.setQueryData(["org-lists"], context.previous);
+      }
+      toast.error("Failed to update stars");
+    },
+    onSettled: async () => {
       await invalidateOrgLists();
-    },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
-  });
-
-  const removeFromListMutation = useMutation({
-    mutationFn: ({ listId, orgIds }: { listId: string; orgIds: string[] }) =>
-      proxyPost<ModifyOrgListMembershipResult>("remove-orgs-from-list", {
-        list_id: listId,
-        org_ids: orgIds,
-      }),
-    onSuccess: async (result: ModifyOrgListMembershipResult) => {
-      toast.success(result.message);
-      setRowSelection({});
-      await invalidateOrgLists();
-    },
-    onError: (error: Error) => {
-      toast.error(error.message);
     },
   });
 
   const allOrgs: OrgListItem[] = orgsQuery.data?.orgs ?? [];
   const orgLists: OrgListSummary[] = orgListsQuery.data?.lists ?? [];
+  const jobProspectsList: OrgListSummary | undefined =
+    findJobProspectsList(orgLists);
+  const starredOrgIds: ReadonlySet<string> = useMemo(
+    () => new Set(jobProspectsList?.org_ids ?? []),
+    [jobProspectsList?.org_ids],
+  );
+  const starredCount: number = jobProspectsList?.org_count ?? 0;
 
   const availableCategories: string[] = useMemo(() => {
     const tags = new Set<string>();
@@ -340,16 +357,6 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     return [...bands].sort();
   }, [allOrgs]);
 
-  const activeListOrgIds: ReadonlySet<string> = useMemo(() => {
-    if (activeListId === null) {
-      return new Set();
-    }
-    const activeList: OrgListSummary | undefined = orgLists.find(
-      (entry) => entry.list_id === activeListId,
-    );
-    return new Set(activeList?.org_ids ?? []);
-  }, [activeListId, orgLists]);
-
   const filteredOrgs: OrgListItem[] = useMemo(() => {
     let rows: OrgListItem[] = allOrgs;
     if (selectedCategories.size > 0) {
@@ -364,48 +371,14 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
           selectedSizeBands.has(org.company_size_band),
       );
     }
-    if (activeListId !== null) {
-      rows = rows.filter((org) => activeListOrgIds.has(org.org_id));
-    }
     return rows;
-  }, [
-    activeListId,
-    activeListOrgIds,
-    allOrgs,
-    selectedCategories,
-    selectedSizeBands,
-  ]);
+  }, [allOrgs, selectedCategories, selectedSizeBands]);
 
-  const selectedOrgIds: string[] = useMemo(
-    () => Object.keys(rowSelection).filter((orgId) => rowSelection[orgId]),
-    [rowSelection],
-  );
+  const starAllRef = useRef<() => void>(() => {});
+  const unstarAllRef = useRef<() => void>(() => {});
 
   const columns: ColumnDef<OrgListItem>[] = useMemo(() => {
     const baseColumns: ColumnDef<OrgListItem>[] = [];
-
-    if (selectMode) {
-      baseColumns.push({
-        id: "select",
-        header: ({ table }) => (
-          <SelectionCheckbox
-            checked={table.getIsAllPageRowsSelected()}
-            indeterminate={table.getIsSomePageRowsSelected()}
-            onChange={(checked) =>
-              table.toggleAllPageRowsSelected(checked)
-            }
-          />
-        ),
-        cell: ({ row }) => (
-          <SelectionCheckbox
-            checked={row.getIsSelected()}
-            onChange={(checked) => row.toggleSelected(checked)}
-          />
-        ),
-        enableSorting: false,
-        meta: { width: "w-[2rem]" },
-      });
-    }
 
     baseColumns.push(
       {
@@ -476,12 +449,70 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
       {
         accessorKey: "contact_count",
         header: ({ column }) => (
-          <CompactSortHeader column={column} label="#" />
+          <CompactSortHeader column={column} label="Contacts" />
         ),
         cell: ({ row }) => (
           <CompactCell value={row.original.contact_count.toString()} />
         ),
-        meta: { width: "w-[2.5rem]" },
+        meta: { width: "w-[4.5rem]" },
+      },
+      {
+        id: "star",
+        header: () => (
+          <div className="flex flex-col items-center gap-0.5">
+            <span className="text-[10px] font-medium leading-none">Job Prospect</span>
+            <span className="flex gap-1 text-[10px] leading-none text-muted-foreground">
+              Select
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-foreground"
+                onClick={() => starAllRef.current()}
+              >
+                All
+              </button>
+              <span className="opacity-50">|</span>
+              <button
+                type="button"
+                className="underline underline-offset-2 hover:text-foreground"
+                onClick={() => unstarAllRef.current()}
+              >
+                None
+              </button>
+            </span>
+          </div>
+        ),
+        cell: ({ row }) => {
+          const isStarred: boolean = starredOrgIds.has(row.original.org_id);
+          return (
+            <Button
+              variant="ghost"
+              size="icon"
+              className="size-6 shrink-0"
+              disabled={starToggleMutation.isPending}
+              onClick={(event) => {
+                event.stopPropagation();
+                starToggleMutation.mutate({
+                  orgId: row.original.org_id,
+                  isStarred,
+                });
+              }}
+              aria-label={
+                isStarred
+                  ? `Remove ${row.original.name} from job prospects`
+                  : `Add ${row.original.name} to job prospects`
+              }
+            >
+              <Star
+                className={cn(
+                  "size-3.5",
+                  isStarred && "fill-amber-400 text-amber-400",
+                )}
+              />
+            </Button>
+          );
+        },
+        enableSorting: false,
+        meta: { width: "w-[5rem]" },
       },
       {
         id: "actions",
@@ -532,16 +563,14 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     );
 
     return baseColumns;
-  }, [router, selectMode]);
+  }, [router, starredOrgIds, starToggleMutation]);
 
   const table = useReactTable({
     data: filteredOrgs,
     columns,
-    state: { sorting, globalFilter: search, rowSelection },
+    state: { sorting, globalFilter: search },
     onSortingChange: setSorting,
     onGlobalFilterChange: setSearch,
-    onRowSelectionChange: setRowSelection,
-    enableRowSelection: selectMode,
     getRowId: (row) => row.org_id,
     globalFilterFn: (row, _columnId, filterValue: string) => {
       const query: string = filterValue.trim().toLowerCase();
@@ -564,6 +593,29 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
   });
+
+  const getMatchingOrgIds = useCallback((): string[] => {
+    return table
+      .getFilteredRowModel()
+      .rows.map((row) => row.original.org_id);
+  }, [table]);
+
+  const handleStarAllMatching = useCallback((): void => {
+    const orgIdsToStar: string[] = getMatchingOrgIds().filter(
+      (orgId) => !starredOrgIds.has(orgId),
+    );
+    bulkStarMutation.mutate({ orgIds: orgIdsToStar, action: "star" });
+  }, [bulkStarMutation, getMatchingOrgIds, starredOrgIds]);
+
+  const handleUnstarAllMatching = useCallback((): void => {
+    const orgIdsToUnstar: string[] = getMatchingOrgIds().filter((orgId) =>
+      starredOrgIds.has(orgId),
+    );
+    bulkStarMutation.mutate({ orgIds: orgIdsToUnstar, action: "unstar" });
+  }, [bulkStarMutation, getMatchingOrgIds, starredOrgIds]);
+
+  starAllRef.current = handleStarAllMatching;
+  unstarAllRef.current = handleUnstarAllMatching;
 
   const selectedOrg: OrgListItem | undefined = allOrgs.find(
     (org: OrgListItem) => org.org_id === selectedOrgId,
@@ -620,96 +672,30 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     });
   };
 
-  const handleCreateList = (): void => {
-    const trimmed: string = newListName.trim();
-    if (!trimmed) {
-      return;
-    }
-    createListMutation.mutate(trimmed);
-  };
-
-  const handleRenameList = (list: OrgListSummary): void => {
-    const nextName: string | null = window.prompt(
-      "Rename list",
-      list.name,
-    );
-    if (nextName === null) {
-      return;
-    }
-    const trimmed: string = nextName.trim();
-    if (!trimmed || trimmed === list.name) {
-      return;
-    }
-    renameListMutation.mutate({ listId: list.list_id, name: trimmed });
-  };
-
-  const [listsDialogOpen, setListsDialogOpen] = useState<boolean>(false);
-
-  const listMutationPending: boolean =
-    createListMutation.isPending ||
-    addToListMutation.isPending ||
-    removeFromListMutation.isPending;
+  const starMutationPending: boolean =
+    starToggleMutation.isPending || bulkStarMutation.isPending;
 
   const hasActiveFilters: boolean =
     selectedCategories.size > 0 || selectedSizeBands.size > 0;
 
   return (
     <div className="space-y-2">
-      {/* Header: title + list selector dropdown */}
-      <div className="flex items-end justify-between gap-4">
-        {!embedded ? (
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">Organizations</h1>
-            <p className="text-xs text-muted-foreground">
-              {orgsQuery.isLoading
-                ? "Loading…"
-                : `${table.getFilteredRowModel().rows.length} of ${allOrgs.length} shown`}
-            </p>
-          </div>
-        ) : (
+      {!embedded ? (
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">Organizations</h1>
           <p className="text-xs text-muted-foreground">
             {orgsQuery.isLoading
               ? "Loading…"
               : `${table.getFilteredRowModel().rows.length} of ${allOrgs.length} shown`}
           </p>
-        )}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-8 text-xs">
-              {activeListId !== null
-                ? orgLists.find((entry) => entry.list_id === activeListId)?.name ?? "List"
-                : "All organizations"}
-              <ChevronDown className="size-3" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => setListsDialogOpen(true)}>
-              <Pencil className="mr-2 size-3.5" />
-              Manage lists…
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuCheckboxItem
-              checked={activeListId === null}
-              onCheckedChange={() => setActiveListId(null)}
-            >
-              All organizations
-            </DropdownMenuCheckboxItem>
-            {orgLists.map((list) => (
-              <DropdownMenuCheckboxItem
-                key={list.list_id}
-                checked={activeListId === list.list_id}
-                onCheckedChange={() =>
-                  setActiveListId(
-                    activeListId === list.list_id ? null : list.list_id,
-                  )
-                }
-              >
-                {list.name} ({list.org_count})
-              </DropdownMenuCheckboxItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {orgsQuery.isLoading
+            ? "Loading…"
+            : `${table.getFilteredRowModel().rows.length} of ${allOrgs.length} shown`}
+        </p>
+      )}
 
       {orgsQuery.error ? (
         <Alert variant="destructive">
@@ -819,77 +805,11 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
           </Button>
         )}
 
+        <span className="text-xs text-muted-foreground">
+          {starredCount} of {allOrgs.length} starred for jobs
+        </span>
+
         <div className="ml-auto flex items-center gap-2">
-          {/* Select mode toggle */}
-          <Button
-            variant={selectMode ? "default" : "outline"}
-            size="sm"
-            className="h-8 text-xs"
-            onClick={() => setSelectMode((current) => !current)}
-          >
-            {selectMode ? <CheckSquare className="size-3.5" /> : <Square className="size-3.5" />}
-            Select
-          </Button>
-
-          {/* Selection actions (inline when items selected) */}
-          {selectMode && selectedOrgIds.length > 0 ? (
-            <>
-              <span className="text-xs text-muted-foreground">
-                {selectedOrgIds.length} selected
-              </span>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    size="sm"
-                    className="h-8 text-xs"
-                    disabled={listMutationPending}
-                  >
-                    <ListPlus className="size-3.5" />
-                    Add to…
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {orgLists.length === 0 ? (
-                    <DropdownMenuItem disabled>
-                      No lists yet — create one first
-                    </DropdownMenuItem>
-                  ) : (
-                    orgLists.map((list) => (
-                      <DropdownMenuItem
-                        key={list.list_id}
-                        onClick={() =>
-                          addToListMutation.mutate({
-                            listId: list.list_id,
-                            orgIds: selectedOrgIds,
-                          })
-                        }
-                      >
-                        {list.name}
-                      </DropdownMenuItem>
-                    ))
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-              {activeListId !== null ? (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8 text-xs"
-                  disabled={listMutationPending}
-                  onClick={() =>
-                    removeFromListMutation.mutate({
-                      listId: activeListId,
-                      orgIds: selectedOrgIds,
-                    })
-                  }
-                >
-                  <ListX className="size-3.5" />
-                  Remove
-                </Button>
-              ) : null}
-            </>
-          ) : null}
-
           {/* CSV export */}
           <Button
             variant="outline"
@@ -916,101 +836,13 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
             table={table}
             columnCount={columns.length}
             emptyMessage="No organizations match your filters."
-            minWidth={selectMode ? "50rem" : "48rem"}
+            minWidth="50rem"
             onRowClick={(org: OrgListItem) => {
-              if (selectMode) {
-                setRowSelection((current) => {
-                  const next: RowSelectionState = { ...current };
-                  if (next[org.org_id]) {
-                    delete next[org.org_id];
-                  } else {
-                    next[org.org_id] = true;
-                  }
-                  return next;
-                });
-                return;
-              }
               setSelectedOrgId(org.org_id);
             }}
           />
         )}
       </div>
-
-      {/* Manage Lists dialog */}
-      <Dialog open={listsDialogOpen} onOpenChange={setListsDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Organization lists</DialogTitle>
-            <DialogDescription>
-              Create named lists to organize companies of interest.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            {orgLists.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No lists yet. Create one below.
-              </p>
-            ) : (
-              <ul className="divide-y">
-                {orgLists.map((list) => (
-                  <li
-                    key={list.list_id}
-                    className="flex items-center justify-between py-2"
-                  >
-                    <div>
-                      <p className="text-sm font-medium">{list.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {list.org_count} organization(s)
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs"
-                        onClick={() => handleRenameList(list)}
-                      >
-                        <Pencil className="size-3.5" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 text-xs text-destructive hover:text-destructive"
-                        onClick={() => deleteListMutation.mutate(list.list_id)}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="flex items-center gap-2">
-              <Input
-                value={newListName}
-                onChange={(event) => setNewListName(event.target.value)}
-                placeholder="New list name…"
-                className="h-8 flex-1 text-xs"
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    handleCreateList();
-                  }
-                }}
-              />
-              <Button
-                size="sm"
-                className="h-8 text-xs"
-                onClick={handleCreateList}
-                disabled={
-                  createListMutation.isPending || newListName.trim().length === 0
-                }
-              >
-                Create
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Org detail sheet */}
       <Sheet

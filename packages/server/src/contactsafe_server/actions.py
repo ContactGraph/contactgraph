@@ -437,6 +437,7 @@ async def get_user_profile(
             headline=headline,
             location=user.location,
             google_profile_name=user.google_profile_name,
+            google_profile_picture=user.google_profile_picture,
             phone=person_fields.get("phone"),  # type: ignore[arg-type]
             linkedin_url=person_fields.get("linkedin_url"),  # type: ignore[arg-type]
             bio_summary=person_fields.get("bio_summary"),  # type: ignore[arg-type]
@@ -1556,6 +1557,25 @@ async def start_job_discovery(
 
         service = JobDiscoveryService(db, ctx.settings)
         return await service.start_discovery(user_id)
+
+
+async def start_single_org_job_discovery(
+    ctx: AppContext,
+    user_id: UUID | None,
+    org_id: UUID,
+) -> "StartSingleOrgDiscoveryResult":
+    from contactsafe_core.contact_schemas import StartSingleOrgDiscoveryResult
+
+    if user_id is None:
+        return StartSingleOrgDiscoveryResult(
+            scheduled=False,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        return await service.discover_single_org(user_id, org_id)
 
 
 async def get_job_discovery_status(

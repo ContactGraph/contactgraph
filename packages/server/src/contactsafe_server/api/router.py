@@ -47,6 +47,8 @@ from contactsafe_core.contact_schemas import (
     SetJobMonitorConfigRequest,
     SetJobPreferencesRequest,
     StartJobDiscoveryResult,
+    StartSingleOrgDiscoveryRequest,
+    StartSingleOrgDiscoveryResult,
     OrgDetailResult,
     OrgEnrichmentStatusResult,
     PersonDetailResult,
@@ -740,6 +742,18 @@ async def api_start_job_discovery(
     user_id: EffectiveUser,
 ) -> StartJobDiscoveryResult:
     return await actions.start_job_discovery(ctx, user_id)
+
+
+@router.post(
+    "/start-single-org-job-discovery",
+    response_model=StartSingleOrgDiscoveryResult,
+)
+async def api_start_single_org_job_discovery(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: StartSingleOrgDiscoveryRequest,
+) -> StartSingleOrgDiscoveryResult:
+    return await actions.start_single_org_job_discovery(ctx, user_id, org_id=body.org_id)
 
 
 @router.post("/cancel-job-discovery")

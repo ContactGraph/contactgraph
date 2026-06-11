@@ -241,7 +241,7 @@ class Settings(BaseSettings):
         description="Email addresses that automatically receive contactsafe:admin scope on login",
     )
     theirstack_base_url: str = Field(default="https://api.theirstack.com")
-    theirstack_request_timeout_seconds: float = Field(default=30.0)
+    theirstack_request_timeout_seconds: float = Field(default=90.0)
     theirstack_job_max_age_days: int = Field(
         default=30,
         description="Max age of job postings returned by TheirStack searches",

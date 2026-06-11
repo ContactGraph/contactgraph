@@ -51,6 +51,9 @@ export function SiteHeader({ email }: { email: string | null }) {
     email ??
     "";
 
+  const profilePicture: string | null =
+    profileQuery.data?.google_profile_picture ?? null;
+
   const initials: string = displayName
     .split(/[\s@.]+/)
     .filter(Boolean)
@@ -130,14 +133,21 @@ export function SiteHeader({ email }: { email: string | null }) {
             <>
               <Link
                 href="/profile"
-                className="flex items-center gap-2 rounded-full no-underline hover:opacity-80"
+                className="flex items-center rounded-full no-underline hover:opacity-80"
+                title={displayName}
               >
-                <span className="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
-                  {initials}
-                </span>
-                <span className="hidden max-w-[160px] truncate text-sm font-medium text-foreground sm:inline">
-                  {displayName}
-                </span>
+                {profilePicture !== null ? (
+                  <img
+                    src={profilePicture}
+                    alt={displayName}
+                    className="size-7 rounded-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <span className="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+                    {initials}
+                  </span>
+                )}
               </Link>
             </>
           ) : (

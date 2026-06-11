@@ -68,10 +68,26 @@ export function isGraphReady(sources: ReadonlyArray<SourceSummary>): boolean {
   return isPhoneImportComplete(sources) && isLinkedInImportComplete(sources);
 }
 
+export const JOB_PROSPECTS_LIST_NAME: "Job Prospects" = "Job Prospects";
+
+export function findJobProspectsList(
+  orgLists: ReadonlyArray<OrgListSummary>,
+): OrgListSummary | undefined {
+  return orgLists.find((list) => list.name === JOB_PROSPECTS_LIST_NAME);
+}
+
 export function hasTargetCompanies(
   orgLists: ReadonlyArray<OrgListSummary>,
 ): boolean {
-  return orgLists.some((list) => list.org_count > 0);
+  const jobProspectsList: OrgListSummary | undefined =
+    findJobProspectsList(orgLists);
+  return jobProspectsList !== undefined && jobProspectsList.org_count > 0;
+}
+
+export function jobProspectsStarredCount(
+  orgLists: ReadonlyArray<OrgListSummary>,
+): number {
+  return findJobProspectsList(orgLists)?.org_count ?? 0;
 }
 
 export function hasJobPreferences(
@@ -108,6 +124,24 @@ export function isOrgEnrichmentComplete(
     orgEnrichmentStatus.orgs_total > 0 &&
     orgEnrichmentStatus.orgs_enriched >= orgEnrichmentStatus.orgs_total
   );
+}
+
+export function isOrgEnrichmentBlocking(
+  orgEnrichmentStatus: OrgEnrichmentStatusResult | undefined,
+): boolean {
+  if (orgEnrichmentStatus === undefined) {
+    return true;
+  }
+  if (orgEnrichmentStatus.orgs_total === 0) {
+    return false;
+  }
+  if (
+    orgEnrichmentStatus.state === "failed" ||
+    orgEnrichmentStatus.state === "pending"
+  ) {
+    return false;
+  }
+  return !isOrgEnrichmentComplete(orgEnrichmentStatus);
 }
 
 export function isSourceStepInProgress(

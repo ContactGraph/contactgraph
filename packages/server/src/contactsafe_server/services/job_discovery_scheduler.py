@@ -99,6 +99,20 @@ async def _periodic_job_discovery_loop() -> None:
                 )
                 user_ids: list[uuid.UUID] = list(result.scalars().all())
                 for user_id in user_ids:
+                    async with factory() as enrichment_db:
+                        from contactsafe_server.services.org_enrichment_service import (
+                            OrgEnrichmentService,
+                        )
+
+                        enrichment_service = OrgEnrichmentService(enrichment_db, ctx.settings)
+                        enrich_result = await enrichment_service.start_enrichment(user_id)
+                        if enrich_result.scheduled:
+                            logger.info(
+                                "Daily org enrichment for user %s: %s",
+                                user_id,
+                                enrich_result.message,
+                            )
+
                     async with factory() as db:
                         from contactsafe_server.services.job_discovery_service import JobDiscoveryService
 
