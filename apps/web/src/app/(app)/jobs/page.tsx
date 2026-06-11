@@ -145,6 +145,11 @@ function OrgContactsList({
                 ({person.current_role})
               </span>
             ) : null}
+            {person.shared_from ? (
+              <span className="ml-0.5 inline-flex items-center rounded border px-1 py-0 text-[10px] text-muted-foreground">
+                via {person.shared_from}
+              </span>
+            ) : null}
           </span>
         ))}
       </span>
@@ -281,7 +286,8 @@ function JobsListings() {
         primary_domain:
           company?.primary_domain ?? orgInfo?.primary_domain ?? null,
         description: company?.description ?? orgInfo?.description ?? null,
-        contact_count: orgInfo?.contact_count ?? 0,
+        contact_count:
+          (orgInfo?.contact_count ?? 0) + (orgInfo?.shared_contact_count ?? 0),
         last_checked_at: lastCheckedMap.get(orgId) ?? null,
         jobs,
         allJobs,

@@ -1125,6 +1125,7 @@ async def list_people(
     user_id: UUID | None,
     *,
     network_only: bool = True,
+    include_shared: bool = True,
 ) -> ListPeopleResult:
     if user_id is None:
         return ListPeopleResult(
@@ -1136,7 +1137,9 @@ async def list_people(
         )
     async with ctx.session_factory() as db:
         service: ContactsService = ContactsService(db)
-        return await service.list_people(user_id, network_only=network_only)
+        return await service.list_people(
+            user_id, network_only=network_only, include_shared=include_shared
+        )
 
 
 async def list_strong_ties(
@@ -1291,7 +1294,12 @@ async def enrich_person(
         return EnrichPersonResult(message="Enrichment complete.", queued=True)
 
 
-async def list_orgs(ctx: AppContext, user_id: UUID | None) -> ListOrgsResult:
+async def list_orgs(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    include_shared: bool = True,
+) -> ListOrgsResult:
     if user_id is None:
         return ListOrgsResult(
             orgs=[],
@@ -1300,7 +1308,7 @@ async def list_orgs(ctx: AppContext, user_id: UUID | None) -> ListOrgsResult:
         )
     async with ctx.session_factory() as db:
         service: ContactsService = ContactsService(db)
-        return await service.list_orgs(user_id)
+        return await service.list_orgs(user_id, include_shared=include_shared)
 
 
 async def get_org(

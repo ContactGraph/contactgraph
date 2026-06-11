@@ -124,6 +124,9 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
   const [selectedSizeBands, setSelectedSizeBands] = useState<ReadonlySet<string>>(
     new Set(),
   );
+  const [selectedSharers, setSelectedSharers] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
   const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
 
   useEffect(() => {
@@ -161,7 +164,8 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
 
   const orgsQuery = useQuery({
     queryKey: ["organizations"],
-    queryFn: () => proxyPost<ListOrgsResult>("list-orgs"),
+    queryFn: () =>
+      proxyPost<ListOrgsResult>("list-orgs", { include_shared: true }),
     staleTime: 0,
   });
 
@@ -357,6 +361,16 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     return [...bands].sort();
   }, [allOrgs]);
 
+  const availableSharers: string[] = useMemo(() => {
+    const sharers = new Set<string>();
+    for (const org of allOrgs) {
+      for (const name of org.shared_from) {
+        sharers.add(name);
+      }
+    }
+    return [...sharers].sort();
+  }, [allOrgs]);
+
   const filteredOrgs: OrgListItem[] = useMemo(() => {
     let rows: OrgListItem[] = allOrgs;
     if (selectedCategories.size > 0) {
@@ -371,8 +385,13 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
           selectedSizeBands.has(org.company_size_band),
       );
     }
+    if (selectedSharers.size > 0) {
+      rows = rows.filter((org) =>
+        org.shared_from.some((name) => selectedSharers.has(name)),
+      );
+    }
     return rows;
-  }, [allOrgs, selectedCategories, selectedSizeBands]);
+  }, [allOrgs, selectedCategories, selectedSizeBands, selectedSharers]);
 
   const starAllRef = useRef<() => void>(() => {});
   const unstarAllRef = useRef<() => void>(() => {});
@@ -451,10 +470,35 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
         header: ({ column }) => (
           <CompactSortHeader column={column} label="Contacts" />
         ),
-        cell: ({ row }) => (
-          <CompactCell value={row.original.contact_count.toString()} />
-        ),
-        meta: { width: "w-[4.5rem]" },
+        cell: ({ row }) => {
+          const own: number = row.original.contact_count;
+          const shared: number = row.original.shared_contact_count;
+          if (shared > 0) {
+            return (
+              <span className="text-xs">
+                {own > 0 ? `${own} + ` : ""}
+                <span className="text-muted-foreground">{shared} shared</span>
+              </span>
+            );
+          }
+          return <CompactCell value={own.toString()} />;
+        },
+        meta: { width: "w-[5.5rem]" },
+      },
+      {
+        id: "shared_by",
+        accessorFn: (row: OrgListItem) => row.shared_from.join(", "),
+        header: "Shared by",
+        cell: ({ row }) => {
+          const sharers: string[] = row.original.shared_from;
+          if (sharers.length === 0) return <CompactCell value="—" />;
+          return (
+            <span className="text-xs text-muted-foreground">
+              {sharers.map((name) => `via ${name}`).join(", ")}
+            </span>
+          );
+        },
+        meta: { width: "w-[5.5rem]" },
       },
       {
         id: "star",
@@ -583,6 +627,7 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
         org.primary_domain,
         org.description,
         org.categories.map((tag) => formatIndustryTags([tag])).join(" "),
+        ...org.shared_from.map((name) => `via ${name}`),
       ]
         .filter(Boolean)
         .join(" ")
@@ -672,11 +717,23 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     });
   };
 
+  const toggleSharer = (name: string): void => {
+    setSelectedSharers((current) => {
+      const next = new Set(current);
+      if (next.has(name)) {
+        next.delete(name);
+      } else {
+        next.add(name);
+      }
+      return next;
+    });
+  };
+
   const starMutationPending: boolean =
     starToggleMutation.isPending || bulkStarMutation.isPending;
 
   const hasActiveFilters: boolean =
-    selectedCategories.size > 0 || selectedSizeBands.size > 0;
+    selectedCategories.size > 0 || selectedSizeBands.size > 0 || selectedSharers.size > 0;
 
   return (
     <div className="space-y-2">
@@ -791,6 +848,42 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
           </DropdownMenuContent>
         </DropdownMenu>
 
+        {/* Shared by filter */}
+        {availableSharers.length > 0 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm" className="h-8 text-xs">
+                Shared by
+                {selectedSharers.size > 0 ? (
+                  <Badge variant="secondary" className="ml-1">
+                    {selectedSharers.size}
+                  </Badge>
+                ) : null}
+                <ChevronDown className="size-3" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-72 overflow-y-auto">
+              {availableSharers.map((name) => (
+                <DropdownMenuCheckboxItem
+                  key={name}
+                  checked={selectedSharers.has(name)}
+                  onCheckedChange={() => toggleSharer(name)}
+                >
+                  {name}
+                </DropdownMenuCheckboxItem>
+              ))}
+              {selectedSharers.size > 0 ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => setSelectedSharers(new Set())}>
+                    Clear
+                  </DropdownMenuItem>
+                </>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
+
         {hasActiveFilters && (
           <Button
             variant="ghost"
@@ -799,6 +892,7 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
             onClick={() => {
               setSelectedCategories(new Set());
               setSelectedSizeBands(new Set());
+              setSelectedSharers(new Set());
             }}
           >
             Clear filters
