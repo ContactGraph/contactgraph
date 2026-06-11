@@ -49,11 +49,11 @@ export function SiteHeader({ email }: { email: string | null }) {
     ? [
         { kind: "internal", href: "/graph", label: "Graph" },
         { kind: "internal", href: "/jobs", label: "Jobs" },
-        { kind: "internal", href: "/sharing", label: "Graph Sharing" },
+        { kind: "internal", href: "/sharing", label: "Sharing" },
       ]
     : [
         { kind: "internal", href: "/graph", label: "Graph" },
-        { kind: "internal", href: "/sharing", label: "Graph Sharing" },
+        { kind: "internal", href: "/sharing", label: "Sharing" },
       ];
 
   const links: readonly NavLink[] = email ? appLinks : marketingLinks;
