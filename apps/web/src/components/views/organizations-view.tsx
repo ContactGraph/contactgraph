@@ -15,7 +15,6 @@ import {
   Download,
   MoreHorizontal,
   Pencil,
-  Search,
   Star,
   Users,
 } from "lucide-react";
@@ -41,7 +40,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sheet,
@@ -750,15 +749,12 @@ export function OrganizationsView({
 
       {/* Toolbar: search, filters, select, actions — single row */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative w-48">
-          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search…"
-            className="h-8 pl-8 text-xs"
-          />
-        </div>
+        <SearchInput
+          containerClassName="w-48"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search…"
+        />
 
         {/* Category filter */}
         <DropdownMenu>

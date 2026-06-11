@@ -81,8 +81,8 @@ export default function GraphPage() {
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">Graph</h1>
           <p className="text-sm text-muted-foreground">
             Browse people and organizations in your network.

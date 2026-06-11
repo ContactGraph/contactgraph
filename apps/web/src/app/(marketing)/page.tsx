@@ -64,13 +64,15 @@ export default function HomePage() {
         </ol>
 
         <p>
-          <strong>Free</strong> for personal use.{" "}
+          ContactGraph is <strong>private</strong> so your data stays yours (you can
+          export or delete anytime),{" "}
           <strong>
             <a href={GITHUB_REPO_URL} className="no-underline hover:underline">
-              Open source
+              open source
             </a>
           </strong>
-          {" "}— your data stays yours. Export or delete anytime.
+          , so you can verify and contribute, and <strong>free</strong> for personal
+          use.
         </p>
 
         <p>

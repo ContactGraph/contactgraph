@@ -40,6 +40,32 @@ _LINKEDIN_UPLOAD_RELATIONSHIP_TYPES: list[str] = ["linkedin_connections_upload"]
 _PHONE_UPLOAD_RELATIONSHIP_TYPES: list[str] = ["phone_contacts_upload"]
 _IMPORT_PROGRESS_COMMIT_BATCH: int = 25
 _LINKEDIN_IMPORT_COMMIT_BATCH: int = 10
+_EMAIL_AT_RE = __import__("re").compile(r"@")
+
+
+def _should_prefer_phone_name(
+    *,
+    phone_name: str,
+    existing_name: str | None,
+    primary_email: str | None,
+) -> bool:
+    """Decide whether a phone contact's display name should replace the current one.
+
+    Phone contacts are the user's authoritative address book, so their name
+    should win when the existing name is missing, is just an email, or is a
+    longer business-style expansion (e.g. "Shalom Ormsby Images Inc.").
+    """
+    if not existing_name:
+        return True
+    if existing_name == (primary_email or ""):
+        return True
+    if _EMAIL_AT_RE.search(existing_name):
+        return True
+    existing_words: list[str] = existing_name.strip().lower().split()
+    phone_words: list[str] = phone_name.strip().lower().split()
+    if len(phone_words) >= 2 and existing_words[:len(phone_words)] == phone_words:
+        return True
+    return False
 
 
 def _merged_relationship_types_on_conflict() -> text:
@@ -163,9 +189,10 @@ class FileUploadImportService:
                 linkedin_url=contact.linkedin_url,
             )
 
-            if contact.display_name and (
-                not person.canonical_name
-                or person.canonical_name == (person.primary_email or "")
+            if contact.display_name and _should_prefer_phone_name(
+                phone_name=contact.display_name,
+                existing_name=person.canonical_name,
+                primary_email=person.primary_email,
             ):
                 person.canonical_name = contact.display_name
 

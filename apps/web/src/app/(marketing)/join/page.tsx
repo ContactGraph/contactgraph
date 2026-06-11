@@ -43,7 +43,7 @@ export default function JoinPage() {
         <Link href="/login" className="text-primary hover:underline">
           Sign in
         </Link>{" "}
-        and check your Sharing tab.
+        and check your Graph Sharing tab.
       </p>
     </main>
   );

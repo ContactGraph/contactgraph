@@ -26,11 +26,15 @@ from contactsafe_server.db.models import (
     UserRelationshipObservation,
 )
 
+from contactsafe_server.services.email_normalization import normalize_gmail
 from contactsafe_server.services.phone_normalization import normalize_phone
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 _EMAIL_RE: re.Pattern[str] = re.compile(r"@")
+_LINKEDIN_PREFIX_RE: re.Pattern[str] = re.compile(
+    r"^https?://(www\.)?linkedin\.com/in/", re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +94,14 @@ class PersonDedupService:
         )
         groups_merged += email_groups_merged
         persons_removed += email_removed
+
+        name_groups_merged, name_removed = await self._dedup_by_name_containment(
+            person_ids=[pid for pid in person_ids if pid not in merged_ids],
+            alias_counts=alias_counts,
+            merged_ids=merged_ids,
+        )
+        groups_merged += name_groups_merged
+        persons_removed += name_removed
 
         await self._db.flush()
         message: str = (
@@ -215,9 +227,13 @@ class PersonDedupService:
         email_to_person_ids: dict[str, list[uuid.UUID]] = defaultdict(list)
         for person in persons:
             if _looks_like_email(person.canonical_name):
-                email_to_person_ids[person.canonical_name.lower()].append(person.id)
+                raw: str = person.canonical_name.lower()
+                email_to_person_ids[raw].append(person.id)
+                email_to_person_ids[normalize_gmail(raw)].append(person.id)
             if person.primary_email:
-                email_to_person_ids[person.primary_email.lower()].append(person.id)
+                raw = person.primary_email.lower()
+                email_to_person_ids[raw].append(person.id)
+                email_to_person_ids[normalize_gmail(raw)].append(person.id)
 
         stmt = select(PersonAlias).where(
             PersonAlias.person_id.in_(active_ids),
@@ -225,7 +241,9 @@ class PersonDedupService:
         )
         result = await self._db.execute(stmt)
         for alias in result.scalars().all():
-            email_to_person_ids[alias.value.lower()].append(alias.person_id)
+            raw = alias.value.lower()
+            email_to_person_ids[raw].append(alias.person_id)
+            email_to_person_ids[normalize_gmail(raw)].append(alias.person_id)
 
         groups_merged: int = 0
         persons_removed: int = 0
@@ -246,6 +264,100 @@ class PersonDedupService:
                 merged_ids.add(duplicate.id)
                 persons_removed += 1
             groups_merged += 1
+        return groups_merged, persons_removed
+
+    async def _dedup_by_name_containment(
+        self,
+        *,
+        person_ids: list[uuid.UUID],
+        alias_counts: dict[uuid.UUID, int],
+        merged_ids: set[uuid.UUID],
+    ) -> tuple[int, int]:
+        """Merge persons whose canonical_name is a prefix of another's.
+
+        Catches patterns like "Shalom Ormsby" vs "Shalom Ormsby Images Inc."
+        where the real person's name is embedded in a business / vanity name.
+        Only merges when the shorter name has >=2 words (to avoid false
+        positives on single first names) and a shared alias (email, LinkedIn
+        URL, or phone) confirms they refer to the same entity.
+        """
+        active_ids: list[uuid.UUID] = [pid for pid in person_ids if pid not in merged_ids]
+        if len(active_ids) < 2:
+            return 0, 0
+
+        persons: list[Person] = await self._load_persons(active_ids)
+
+        alias_stmt = select(PersonAlias).where(
+            PersonAlias.person_id.in_(active_ids),
+        )
+        alias_result = await self._db.execute(alias_stmt)
+
+        person_identity_keys: dict[uuid.UUID, set[str]] = defaultdict(set)
+        for alias in alias_result.scalars().all():
+            keys: set[str] = person_identity_keys[alias.person_id]
+            if alias.kind == "email":
+                keys.add(f"email:{normalize_gmail(alias.value.lower())}")
+            elif alias.kind == "linkedin_url":
+                keys.add(f"li:{_normalize_linkedin_url(alias.value)}")
+            elif alias.kind == "phone":
+                keys.add(f"phone:{normalize_phone(alias.value)}")
+
+        for person in persons:
+            if person.primary_email:
+                person_identity_keys[person.id].add(
+                    f"email:{normalize_gmail(person.primary_email.lower())}"
+                )
+
+        by_last_name: dict[str, list[Person]] = defaultdict(list)
+        for person in persons:
+            if person.id in merged_ids or _looks_like_email(person.canonical_name):
+                continue
+            words: list[str] = person.canonical_name.strip().lower().split()
+            if len(words) >= 2:
+                by_last_name[words[1]].append(person)
+
+        groups_merged: int = 0
+        persons_removed: int = 0
+
+        for candidates in by_last_name.values():
+            if len(candidates) < 2:
+                continue
+            candidates.sort(key=lambda p: len(p.canonical_name.strip().split()))
+
+            for i, shorter in enumerate(candidates):
+                if shorter.id in merged_ids:
+                    continue
+                shorter_words: list[str] = shorter.canonical_name.strip().lower().split()
+                if len(shorter_words) < 2:
+                    continue
+
+                for longer in candidates[i + 1:]:
+                    if longer.id in merged_ids:
+                        continue
+                    longer_words: list[str] = longer.canonical_name.strip().lower().split()
+                    if longer_words[:len(shorter_words)] != shorter_words:
+                        continue
+
+                    shorter_keys: set[str] = person_identity_keys.get(shorter.id, set())
+                    longer_keys: set[str] = person_identity_keys.get(longer.id, set())
+                    if not (shorter_keys & longer_keys):
+                        continue
+
+                    survivor: Person = self._pick_survivor(
+                        (shorter, longer), alias_counts,
+                    )
+                    duplicate: Person = longer if survivor.id == shorter.id else shorter
+                    if _looks_like_email(survivor.canonical_name) or (
+                        len(survivor.canonical_name.split()) > len(duplicate.canonical_name.split())
+                    ):
+                        survivor.canonical_name = duplicate.canonical_name
+
+                    await self._merge_person(survivor=survivor, duplicate=duplicate)
+                    await self._db.delete(duplicate)
+                    merged_ids.add(duplicate.id)
+                    persons_removed += 1
+                    groups_merged += 1
+
         return groups_merged, persons_removed
 
     async def _merge_person(
@@ -584,3 +696,8 @@ class PersonDedupService:
 
 def _looks_like_email(name: str) -> bool:
     return bool(_EMAIL_RE.search(name))
+
+
+def _normalize_linkedin_url(url: str) -> str:
+    """Extract the LinkedIn slug for comparison, ignoring www/https differences."""
+    return _LINKEDIN_PREFIX_RE.sub("", url.strip()).strip("/").lower()
