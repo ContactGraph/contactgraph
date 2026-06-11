@@ -661,7 +661,6 @@ function JobsListings() {
                                 {job.relevance_reason}
                               </Badge>
                             ) : null}
-                            <Badge variant="secondary">{job.source}</Badge>
                           </div>
                         </div>
                       </CardHeader>
