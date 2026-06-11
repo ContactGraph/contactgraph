@@ -701,21 +701,64 @@ async def delete_user_account(
     ctx: AppContext,
     user_id: UUID | None,
 ) -> DeleteUserAccountResult:
+    import asyncio
+    from sqlalchemy import select
+    from sqlalchemy.exc import DBAPIError
+    from contactsafe_server.db.models import Source
+    from contactsafe_server.services.import_scheduler import (
+        is_source_sync_running,
+        release_sync_lock,
+    )
+
     if user_id is None:
         return DeleteUserAccountResult(
             deleted=False,
             message="Authentication required. Provide a Bearer token.",
         )
+
+    # Cancel all running syncs, enrichment, and job discovery before deleting
+    # to avoid deadlocks with background tasks writing to the same rows.
     async with ctx.session_factory() as db:
-        user: User | None = await db.get(User, user_id)
-        if user is None:
-            return DeleteUserAccountResult(deleted=False, message="User not found.")
-        await db.delete(user)
+        sources = (
+            await db.execute(select(Source).where(Source.user_id == user_id))
+        ).scalars().all()
+        for source in sources:
+            if source.sync_state in (SyncState.SYNCING.value, SyncState.PENDING.value):
+                source.sync_state = SyncState.FAILED.value
+                source.sync_error = "Account deleted."
+            if is_source_sync_running(source.id):
+                release_sync_lock(source.id, user_id)
         await db.commit()
-        return DeleteUserAccountResult(
-            deleted=True,
-            message="Your account and all associated data have been deleted.",
-        )
+
+    # Brief yield so background tasks can observe the cancelled state and wind down.
+    await asyncio.sleep(0.2)
+
+    max_attempts: int = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with ctx.session_factory() as db:
+                user: User | None = await db.get(User, user_id)
+                if user is None:
+                    return DeleteUserAccountResult(deleted=False, message="User not found.")
+                await db.delete(user)
+                await db.commit()
+                return DeleteUserAccountResult(
+                    deleted=True,
+                    message="Your account and all associated data have been deleted.",
+                )
+        except DBAPIError as exc:
+            is_deadlock: bool = "DeadlockDetectedError" in str(exc) or "deadlock" in str(exc).lower()
+            if is_deadlock and attempt < max_attempts:
+                logger.warning(
+                    "Deadlock on account deletion attempt %d/%d for user %s, retrying",
+                    attempt, max_attempts, user_id,
+                )
+                await asyncio.sleep(0.5 * attempt)
+                continue
+            logger.exception("Account deletion failed for user %s", user_id)
+            raise
+
+    return DeleteUserAccountResult(deleted=False, message="Deletion failed after retries.")
 
 
 async def upload_source(

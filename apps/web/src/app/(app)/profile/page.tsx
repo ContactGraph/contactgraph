@@ -18,6 +18,7 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -704,14 +705,14 @@ export default function ProfilePage() {
       </Dialog>
 
       <Dialog open={deleteAccountDialogOpen} onOpenChange={setDeleteAccountDialogOpen}>
-        <DialogContent>
+        <DialogContent className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Delete your account?</DialogTitle>
+            <DialogDescription>
+              This permanently deletes your account, imports, lists, job preferences,
+              and network observations. This cannot be undone.
+            </DialogDescription>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            This permanently deletes your account, imports, lists, job preferences,
-            and network observations. This cannot be undone.
-          </p>
           {deleteAccountMutation.error ? (
             <Alert variant="destructive">
               <AlertDescription>{deleteAccountMutation.error.message}</AlertDescription>
