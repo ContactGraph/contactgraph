@@ -203,7 +203,9 @@ export function JobSetupCards() {
       linkedinProfileSource.sync_state === "failed"
     ) {
       setLinkedinProfileProcessing(false);
-      if (linkedinProfileSource.sync_state === "failed") {
+      if (linkedinProfileSource.sync_state === "complete") {
+        setLinkedinProfileDialogOpen(false);
+      } else {
         setLinkedinProfileUploadError(
           "Could not read that PDF. Try re-exporting from LinkedIn.",
         );
@@ -375,14 +377,17 @@ export function JobSetupCards() {
             </div>
           </div>
           {profileComplete ? (
-            <button
-              type="button"
-              className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-              onClick={() => setLinkedinProfileDialogOpen(true)}
-              disabled={uploadMutation.isPending || profileInProgress}
-            >
-              re-upload
-            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-muted-foreground">Uploaded</span>
+              <button
+                type="button"
+                className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                onClick={() => setLinkedinProfileDialogOpen(true)}
+                disabled={uploadMutation.isPending || profileInProgress}
+              >
+                re-upload
+              </button>
+            </div>
           ) : profileInProgress ? (
             <Button variant="outline" size="sm" disabled>
               <Loader2 className="size-4 animate-spin" />
@@ -462,7 +467,12 @@ export function JobSetupCards() {
             }
           >
             {setJobPreferencesMutation.isPending ? (
-              <Loader2 className="size-4 animate-spin" />
+              <>
+                <Loader2 className="size-4 animate-spin" />
+                Saving…
+              </>
+            ) : preferencesComplete ? (
+              "Saved"
             ) : (
               "Save preferences"
             )}

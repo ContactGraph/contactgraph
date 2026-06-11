@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import (
@@ -19,6 +19,7 @@ from contactsafe_core.contact_schemas import (
     OrgJobsByCompany,
     SetJobMonitorConfigRequest,
     StartJobDiscoveryResult,
+    StartSingleOrgDiscoveryResult,
 )
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import (
@@ -207,13 +208,26 @@ class JobDiscoveryService:
         for job in jobs:
             jobs_by_org.setdefault(job.org_id, []).append(job)
 
+        last_checked_subq = (
+            select(
+                JobScrapeRun.org_id,
+                func.max(JobScrapeRun.completed_at).label("last_checked_at"),
+            )
+            .where(JobScrapeRun.org_id.in_(org_ids))
+            .group_by(JobScrapeRun.org_id)
+        )
+        last_checked_result = await self._db.execute(last_checked_subq)
+        last_checked_map: dict[uuid.UUID, datetime] = {
+            row.org_id: row.last_checked_at
+            for row in last_checked_result.all()
+            if row.last_checked_at is not None
+        }
+
         companies: list[OrgJobsByCompany] = []
         total_jobs: int = 0
         total_relevant: int = 0
         for org in orgs:
             org_jobs: list[OrgJob] = jobs_by_org.get(org.id, [])
-            if active_only and not org_jobs:
-                continue
 
             job_items: list[OrgJobItem] = []
             for job in org_jobs:
@@ -249,17 +263,17 @@ class JobDiscoveryService:
                     )
                 )
 
-            if job_items:
-                total_jobs += len(job_items)
-                companies.append(
-                    OrgJobsByCompany(
-                        org_id=org.id,
-                        org_name=org.canonical_name,
-                        primary_domain=org.primary_domain,
-                        description=org.description,
-                        jobs=job_items,
-                    ),
-                )
+            total_jobs += len(job_items)
+            companies.append(
+                OrgJobsByCompany(
+                    org_id=org.id,
+                    org_name=org.canonical_name,
+                    primary_domain=org.primary_domain,
+                    description=org.description,
+                    last_checked_at=last_checked_map.get(org.id),
+                    jobs=job_items,
+                ),
+            )
 
         message: str = (
             f"Found {total_jobs} open job(s) across {len(companies)} company(ies)."
@@ -327,6 +341,50 @@ class JobDiscoveryService:
         await self._db.commit()
 
         await self._classify_new_jobs(user_id)
+
+    async def discover_single_org(
+        self,
+        user_id: uuid.UUID,
+        org_id: uuid.UUID,
+    ) -> StartSingleOrgDiscoveryResult:
+        """Run discovery for a single org synchronously (not backgrounded)."""
+        org: Org | None = await self._db.get(Org, org_id)
+        if org is None:
+            return StartSingleOrgDiscoveryResult(
+                scheduled=False, message="Organization not found.",
+            )
+
+        apply_ats_detection_to_org(org)
+        found, new_count, source, error = await self._discover_jobs_for_org(org)
+
+        scrape_run = JobScrapeRun(
+            org_id=org.id,
+            source=source,
+            started_at=datetime.now(tz=UTC),
+            completed_at=datetime.now(tz=UTC),
+            jobs_found=found,
+            new_jobs=new_count,
+            error=error,
+        )
+        self._db.add(scrape_run)
+        await self._db.commit()
+
+        if new_count > 0:
+            await self._classify_new_jobs(user_id)
+
+        if error:
+            return StartSingleOrgDiscoveryResult(
+                scheduled=True,
+                jobs_found=found,
+                new_jobs=new_count,
+                message=f"Discovery completed with error: {error}",
+            )
+        return StartSingleOrgDiscoveryResult(
+            scheduled=True,
+            jobs_found=found,
+            new_jobs=new_count,
+            message=f"Found {found} jobs ({new_count} new) for {org.canonical_name}.",
+        )
 
     async def upsert_discovered_job(
         self,
