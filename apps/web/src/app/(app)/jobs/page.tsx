@@ -180,6 +180,18 @@ function OrgContactsList({
             and {hiddenCount} other{hiddenCount !== 1 ? "s" : ""}
           </button>
         ) : null}
+        {expanded && people.length > CONTACTS_COLLAPSED_LIMIT ? (
+          <button
+            type="button"
+            className="ml-0.5 text-primary underline-offset-2 hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(false);
+            }}
+          >
+            Show less
+          </button>
+        ) : null}
       </span>
     </div>
   );
