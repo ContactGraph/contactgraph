@@ -200,6 +200,9 @@ function OrgContactsList({
 function JobsListings() {
   const [showAll, setShowAll] = useState<boolean>(false);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
+  const [settingsDirty, setSettingsDirty] = useState<boolean>(false);
+  const [settingsDiscardOpen, setSettingsDiscardOpen] =
+    useState<boolean>(false);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [isDetailDirty, setIsDetailDirty] = useState<boolean>(false);
   const [discardDialogOpen, setDiscardDialogOpen] = useState<boolean>(false);
@@ -424,7 +427,13 @@ function JobsListings() {
                   : `${totalShown} jobs across ${orgTiles.length} companies`}
             </p>
           </div>
-          <ResponsiveModal open={settingsOpen} onOpenChange={setSettingsOpen}>
+          <ResponsiveModal open={settingsOpen} onOpenChange={(open: boolean) => {
+            if (!open && settingsDirty) {
+              setSettingsDiscardOpen(true);
+              return;
+            }
+            setSettingsOpen(open);
+          }}>
             <ResponsiveModalTrigger asChild>
               <Button
                 type="button"
@@ -443,7 +452,7 @@ function JobsListings() {
                   Update your role preferences, location, and target companies.
                 </ResponsiveModalDescription>
               </ResponsiveModalHeader>
-              <JobSetupCards compact />
+              <JobSetupCards compact onDirtyChange={setSettingsDirty} />
             </ResponsiveModalContent>
           </ResponsiveModal>
         </div>
@@ -754,6 +763,19 @@ function JobsListings() {
         onSave={handleSaveAndClose}
         onDiscard={closeDetailPanel}
         isSaving={isClosingSave}
+      />
+
+      <UnsavedChangesDialog
+        open={settingsDiscardOpen}
+        onOpenChange={setSettingsDiscardOpen}
+        onSave={() => {
+          setSettingsDiscardOpen(false);
+        }}
+        onDiscard={() => {
+          setSettingsDiscardOpen(false);
+          setSettingsDirty(false);
+          setSettingsOpen(false);
+        }}
       />
     </div>
   );
