@@ -122,10 +122,18 @@ export function PeopleView({
           const person: PersonListItem = row.original;
           return (
             <div className="flex items-center gap-1.5 truncate">
+              {person.is_claimed ? (
+                <img
+                  src={person.avatar_url ?? ""}
+                  alt=""
+                  className="size-5 shrink-0 rounded-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : null}
               <span className="truncate">{person.display_name}</span>
-              {person.is_strong_tie ? (
-                <Badge variant="secondary" className="shrink-0 px-1 py-0 text-[10px]">
-                  Pro
+              {person.is_claimed ? (
+                <Badge variant="secondary" className="shrink-0 px-1 py-0 text-[10px] font-medium uppercase tracking-wide">
+                  Active
                 </Badge>
               ) : null}
               {person.shared_from ? (
@@ -136,7 +144,7 @@ export function PeopleView({
             </div>
           );
         },
-        meta: { width: "w-[10rem]" },
+        meta: { width: "w-[12rem]" },
       },
       {
         accessorKey: "phone",

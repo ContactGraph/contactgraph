@@ -16,6 +16,11 @@ def split_display_name(display_name: str) -> tuple[str, str]:
     return parts[0], parts[1]
 
 
+def join_display_name(first_name: str, last_name: str) -> str:
+    """Combine first and last name for API display_name (inverse of split_display_name)."""
+    return f"{first_name} {last_name}".strip()
+
+
 class PersonListItem(BaseModel):
     person_id: UUID
     first_name: str
@@ -34,6 +39,8 @@ class PersonListItem(BaseModel):
     is_broadcast: bool = False
     is_automated: bool = False
     is_strong_tie: bool = False
+    is_claimed: bool = False
+    avatar_url: str | None = None
     linkedin_url: str | None = None
     scrapingdog_enriched: bool = False
     shared_from: str | None = None
@@ -162,6 +169,8 @@ class PersonDetailResult(BaseModel):
     is_human: bool = False
     is_broadcast: bool = False
     is_automated: bool = False
+    is_claimed: bool = False
+    avatar_url: str | None = None
     message: str
 
 

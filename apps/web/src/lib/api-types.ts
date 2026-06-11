@@ -320,6 +320,8 @@ export interface PersonListItem {
   is_broadcast: boolean;
   is_automated: boolean;
   is_strong_tie: boolean;
+  is_claimed: boolean;
+  avatar_url: string | null;
   linkedin_url: string | null;
   scrapingdog_enriched: boolean;
   shared_from: string | null;
@@ -451,6 +453,8 @@ export interface PersonDetailResult {
   is_human: boolean;
   is_broadcast: boolean;
   is_automated: boolean;
+  is_claimed: boolean;
+  avatar_url: string | null;
   message: string;
 }
 
@@ -713,6 +717,12 @@ export interface ListOrgJobsResult {
   companies: OrgJobsByCompany[];
   total_jobs: number;
   total_relevant: number;
+  message: string;
+}
+
+export interface DedupPersonsResult {
+  groups_merged: number;
+  persons_removed: number;
   message: string;
 }
 

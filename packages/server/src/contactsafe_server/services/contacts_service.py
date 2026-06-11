@@ -19,6 +19,7 @@ from contactsafe_core.contact_schemas import (
     PersonListItem,
     UpdateOrgRequest,
     UpdatePersonRequest,
+    join_display_name,
     split_display_name,
 )
 from contactsafe_core.enums import (
@@ -134,6 +135,7 @@ class ContactsService:
         linkedin_by_person: dict[uuid.UUID, str] = await self._load_linkedin_urls(person_ids)
         strong_tie_ids: set[uuid.UUID] = await self._load_strong_tie_ids(user_id, person_ids)
         enriched_ids: set[uuid.UUID] = await self._load_scrapingdog_enriched_ids(person_ids)
+        claimed_avatars: dict[uuid.UUID, str | None] = await self._load_claimed_avatars(person_ids)
 
         people: list[PersonListItem] = []
         for person, obs, source in rows:
@@ -157,7 +159,7 @@ class ContactsService:
                     person_id=person.id,
                     first_name=first_name,
                     last_name=last_name,
-                    display_name=person.canonical_name,
+                    display_name=join_display_name(first_name, last_name),
                     primary_email=person.primary_email,
                     phone=phone,
                     org_name=person.current_org_name,
@@ -171,6 +173,8 @@ class ContactsService:
                     is_broadcast=obs.is_broadcast,
                     is_automated=obs.is_automated,
                     is_strong_tie=person.id in strong_tie_ids,
+                    is_claimed=person.id in claimed_avatars,
+                    avatar_url=claimed_avatars.get(person.id),
                     linkedin_url=linkedin_by_person.get(person.id),
                     scrapingdog_enriched=person.id in enriched_ids,
                 )
@@ -256,11 +260,15 @@ class ContactsService:
         )
         web_links: list[str] = list(dict.fromkeys(social_profiles.values()))
 
+        claimed_avatars: dict[uuid.UUID, str | None] = await self._load_claimed_avatars(
+            [person_id],
+        )
+
         return PersonDetailResult(
             person_id=person.id,
             first_name=first_name,
             last_name=last_name,
-            display_name=person.canonical_name,
+            display_name=join_display_name(first_name, last_name),
             primary_email=person.primary_email,
             phone=phones[0] if phones else None,
             phones=phones,
@@ -284,6 +292,8 @@ class ContactsService:
             is_human=obs.is_human,
             is_broadcast=obs.is_broadcast,
             is_automated=obs.is_automated,
+            is_claimed=person_id in claimed_avatars,
+            avatar_url=claimed_avatars.get(person_id),
             message=f"Contact details for {person.canonical_name}.",
         )
 
@@ -392,7 +402,7 @@ class ContactsService:
         people_summaries: list[OrgPersonSummary] = [
             OrgPersonSummary(
                 person_id=person.id,
-                display_name=person.canonical_name,
+                display_name=join_display_name(*split_display_name(person.canonical_name)),
                 primary_email=person.primary_email,
                 current_role=person.current_role,
             )
@@ -687,7 +697,9 @@ class ContactsService:
         """Return (first_name, masked_last, masked_display_name) with last initial only."""
         first, last = split_display_name(full_name)
         masked_last: str = f"{last[0]}." if last else ""
-        masked_display: str = f"{first} {masked_last}".strip() if first else full_name
+        masked_display: str = (
+            join_display_name(first, masked_last) if first else full_name
+        )
         return first, masked_last, masked_display
 
     async def _load_shared_people(
@@ -1066,6 +1078,21 @@ class ContactsService:
             .distinct()
         )
         return {row[0] for row in result.all()}
+
+    async def _load_claimed_avatars(
+        self,
+        person_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, str | None]:
+        """Return {person_id: avatar_url} for persons linked to a User account."""
+        if not person_ids:
+            return {}
+        result = await self._db.execute(
+            select(User.person_id, User.google_profile_picture).where(
+                User.person_id.in_(person_ids),
+                User.person_id.isnot(None),
+            )
+        )
+        return {pid: avatar for pid, avatar in result.all()}
 
     async def _load_emails_by_person(
         self,

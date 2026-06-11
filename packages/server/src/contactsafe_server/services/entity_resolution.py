@@ -7,12 +7,14 @@ On miss: fall back to exact canonical_name match, then create a new entity.
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.db.models import Org, OrgAlias, Person, PersonAlias
+from contactsafe_server.services.email_normalization import normalize_gmail
 from contactsafe_server.services.phone_normalization import normalize_phone
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -25,6 +27,13 @@ _PERSON_ALIAS_PRIORITY: list[str] = [
     "bluesky_handle",
     "twitter_handle",
 ]
+
+_WWW_PREFIX_RE: re.Pattern[str] = re.compile(r"^(https?://)www\.", re.IGNORECASE)
+
+
+def _normalize_linkedin_url(url: str) -> str:
+    """Canonical form: strip www. prefix, lowercase, drop trailing slash."""
+    return _WWW_PREFIX_RE.sub(r"\1", url.strip()).lower().rstrip("/")
 
 
 def _extract_first_name(canonical_name: str) -> str:
@@ -42,12 +51,23 @@ def _extract_last_name(canonical_name: str) -> str:
 
 
 def build_last_name_index(persons: list[Person]) -> dict[str, list[Person]]:
-    """Build an in-memory index of persons keyed by lowered last-name token."""
+    """Build an in-memory index of persons keyed by lowered last-name token.
+
+    For multi-word names (>2 words) like "Shalom Ormsby Images Inc.", also
+    indexes under the second word ("ormsby") so that standard first+last
+    lookups can find persons whose canonical_name has a business suffix.
+    """
     index: dict[str, list[Person]] = {}
     for person in persons:
-        last: str = _extract_last_name(person.canonical_name).lower()
-        if last:
-            index.setdefault(last, []).append(person)
+        words: list[str] = person.canonical_name.strip().lower().split()
+        if not words:
+            continue
+        last: str = words[-1]
+        index.setdefault(last, []).append(person)
+        if len(words) > 2:
+            second_word: str = words[1]
+            if second_word != last:
+                index.setdefault(second_word, []).append(person)
     return index
 
 
@@ -132,7 +152,7 @@ class EntityResolver:
         """
         candidates: list[tuple[str, str]] = []
         if linkedin_url:
-            candidates.append(("linkedin_url", linkedin_url.lower().rstrip("/")))
+            candidates.append(("linkedin_url", _normalize_linkedin_url(linkedin_url)))
         if github_url:
             candidates.append(("github_url", github_url.lower().rstrip("/")))
         for email in emails:
@@ -192,7 +212,7 @@ class EntityResolver:
         Name matching uses exact last name + nickname-aware first name.
         """
         display_name: str = f"{first_name} {last_name}".strip() or "Unknown"
-        normalized_url: str = linkedin_url.lower().rstrip("/")
+        normalized_url: str = _normalize_linkedin_url(linkedin_url)
         url_alias: PersonAlias | None = await self._find_alias(
             "linkedin_url", normalized_url,
         )
@@ -239,6 +259,8 @@ class EntityResolver:
         """Match using exact last name + nickname-aware first name.
 
         Uses the pre-built name_index keyed by lowered last name token.
+        Falls back to prefix matching for names with business suffixes
+        (e.g. "Shalom Ormsby Images Inc." should match "Shalom Ormsby").
         """
         from contactsafe_server.services.nickname_table import first_names_match
 
@@ -246,22 +268,49 @@ class EntityResolver:
             return None
 
         last_key: str = last_name.strip().lower()
-        candidates: list[Person] | None = name_index.get(last_key)
-        if not candidates:
-            return None
-
         target_first: str = first_name.strip()
-        matches: list[Person] = []
-        for person in candidates:
-            person_first: str = _extract_first_name(person.canonical_name)
-            if first_names_match(target_first, person_first):
-                matches.append(person)
 
-        if len(matches) == 1:
-            return matches[0]
+        candidates: list[Person] | None = name_index.get(last_key)
+        if candidates:
+            matches: list[Person] = []
+            for person in candidates:
+                person_first: str = _extract_first_name(person.canonical_name)
+                if first_names_match(target_first, person_first):
+                    matches.append(person)
+            if len(matches) == 1:
+                return matches[0]
+
+        target_prefix: str = f"{target_first} {last_key}".lower()
+        if len(target_prefix.split()) < 2:
+            return None
+        prefix_matches: list[Person] = []
+        for group in name_index.values():
+            for person in group:
+                words: list[str] = person.canonical_name.strip().lower().split()
+                if len(words) <= 2:
+                    continue
+                person_prefix: str = " ".join(words[:2])
+                if person_prefix == target_prefix:
+                    prefix_matches.append(person)
+        if len(prefix_matches) == 1:
+            return prefix_matches[0]
         return None
 
     async def _find_alias(self, kind: str, value: str) -> PersonAlias | None:
+        hit: PersonAlias | None = await self._find_alias_exact(kind, value)
+        if hit is not None:
+            return hit
+        if kind == "email":
+            gmail_form: str = normalize_gmail(value)
+            if gmail_form != value:
+                return await self._find_alias_exact(kind, gmail_form)
+        elif kind == "linkedin_url":
+            normalized: str = _normalize_linkedin_url(value)
+            if normalized != value:
+                return await self._find_alias_exact(kind, normalized)
+        return None
+
+    async def _find_alias_exact(self, kind: str, value: str) -> PersonAlias | None:
         if self._person_alias_cache is not None:
             person_id: uuid.UUID | None = self._person_alias_cache.get((kind, value))
             if person_id is None:
@@ -306,8 +355,16 @@ class EntityResolver:
         )
         cache_key: tuple[str, str] = (kind, normalised)
 
+        gmail_key: tuple[str, str] | None = None
+        if kind == "email":
+            gmail_normalised: str = normalize_gmail(normalised)
+            if gmail_normalised != normalised:
+                gmail_key = (kind, gmail_normalised)
+
         if self._person_alias_cache is not None:
             existing_id: uuid.UUID | None = self._person_alias_cache.get(cache_key)
+            if existing_id is None and gmail_key is not None:
+                existing_id = self._person_alias_cache.get(gmail_key)
             if existing_id is not None:
                 if existing_id == person_id:
                     return False
@@ -328,6 +385,14 @@ class EntityResolver:
         )
         result = await self._session.execute(stmt)
         existing: PersonAlias | None = result.scalar_one_or_none()
+        if existing is None and gmail_key is not None:
+            gmail_stmt = (
+                select(PersonAlias)
+                .where(PersonAlias.kind == kind, PersonAlias.value == gmail_key[1])
+                .limit(1)
+            )
+            gmail_result = await self._session.execute(gmail_stmt)
+            existing = gmail_result.scalar_one_or_none()
         if existing is not None:
             if existing.person_id == person_id:
                 return False
@@ -352,7 +417,7 @@ class EntityResolver:
         """Return an existing org or create a new one."""
         candidates: list[tuple[str, str]] = []
         if linkedin_url:
-            candidates.append(("linkedin_url", linkedin_url.lower().rstrip("/")))
+            candidates.append(("linkedin_url", _normalize_linkedin_url(linkedin_url)))
         if domain:
             candidates.append(("domain", domain.lower().strip()))
         if name:
