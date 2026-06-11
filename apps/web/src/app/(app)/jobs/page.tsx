@@ -99,6 +99,8 @@ interface OrgTile {
   status: "scanning" | "done" | "no-jobs";
 }
 
+const CONTACTS_COLLAPSED_LIMIT: number = 3;
+
 function OrgContactsList({
   orgId,
   contactCount,
@@ -108,6 +110,7 @@ function OrgContactsList({
   contactCount: number;
   onSelectPerson: (personId: string) => void;
 }) {
+  const [expanded, setExpanded] = useState<boolean>(false);
   const orgDetailQuery = useQuery({
     queryKey: ["org-detail", orgId],
     queryFn: () => proxyPost<OrgDetailResult>("get-org", { org_id: orgId }),
@@ -131,11 +134,15 @@ function OrgContactsList({
 
   if (people.length === 0) return null;
 
+  const visiblePeople: readonly OrgPersonSummary[] =
+    expanded ? people : people.slice(0, CONTACTS_COLLAPSED_LIMIT);
+  const hiddenCount: number = people.length - visiblePeople.length;
+
   return (
     <div className="flex items-center gap-1 text-xs text-muted-foreground">
       <Users className="size-3 shrink-0" />
       <span className="flex flex-wrap items-center gap-x-0.5">
-        {people.map((person, idx) => (
+        {visiblePeople.map((person, idx) => (
           <span key={person.person_id}>
             {idx > 0 ? ", " : ""}
             <button
@@ -161,6 +168,18 @@ function OrgContactsList({
             ) : null}
           </span>
         ))}
+        {hiddenCount > 0 ? (
+          <button
+            type="button"
+            className="ml-0.5 text-primary underline-offset-2 hover:underline"
+            onClick={(e) => {
+              e.stopPropagation();
+              setExpanded(true);
+            }}
+          >
+            and {hiddenCount} other{hiddenCount !== 1 ? "s" : ""}
+          </button>
+        ) : null}
       </span>
     </div>
   );
