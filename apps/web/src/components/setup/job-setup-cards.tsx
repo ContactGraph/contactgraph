@@ -1,13 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowRight,
-  ChevronDown,
-  ListPlus,
-  Loader2,
-  Plus,
-} from "lucide-react";
+import { ArrowRight, Loader2, Plus } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -22,21 +16,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import type {
-  CreateOrgListResult,
   JobDiscoveryStatusResult,
   JobMonitorConfigResult,
   JobPreferencesResult,
   ListOrgListsResult,
   ListSourcesResult,
+  OrgEnrichmentStatusResult,
   OrgListSummary,
   SetJobMonitorConfigRequest,
   SourceSummary,
@@ -46,10 +32,14 @@ import type {
 } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
 import {
+  findJobProspectsList,
   hasJobPreferences,
   hasTargetCompanies,
   isLinkedInProfileComplete,
+  isOrgEnrichmentBlocking,
+  isOrgEnrichmentComplete,
   isSourceStepInProgress,
+  jobProspectsStarredCount,
   sourceForType,
 } from "@/lib/setup-utils";
 
@@ -62,9 +52,6 @@ export function JobSetupCards() {
     useState<string | null>(null);
   const [linkedinProfileProcessing, setLinkedinProfileProcessing] =
     useState<boolean>(false);
-  const [selectedTargetListId, setSelectedTargetListId] = useState<string | null>(
-    null,
-  );
   const [preferencesText, setPreferencesText] = useState<string>("");
   const [locationPref, setLocationPref] = useState<string | null>(null);
   const [locationCity, setLocationCity] = useState<string>("");
@@ -85,6 +72,22 @@ export function JobSetupCards() {
   const orgListsQuery = useQuery({
     queryKey: ["org-lists"],
     queryFn: () => proxyPost<ListOrgListsResult>("list-org-lists"),
+  });
+
+  const orgEnrichmentQuery = useQuery({
+    queryKey: ["org-enrichment-status"],
+    queryFn: () =>
+      proxyPost<OrgEnrichmentStatusResult>("get-org-enrichment-status"),
+    refetchInterval: (query) => {
+      const data: OrgEnrichmentStatusResult | undefined = query.state.data;
+      if (data === undefined) {
+        return 4000;
+      }
+      if (data.orgs_total === 0 || data.state === "failed") {
+        return false;
+      }
+      return isOrgEnrichmentComplete(data) ? false : 4000;
+    },
   });
 
   const jobPreferencesQuery = useQuery({
@@ -115,19 +118,6 @@ export function JobSetupCards() {
       toast.success(result.message);
       await queryClient.invalidateQueries({ queryKey: ["job-preferences"] });
       await queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
-    },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
-  });
-
-  const createOrgListMutation = useMutation({
-    mutationFn: (name: string) =>
-      proxyPost<CreateOrgListResult>("create-org-list", { name }),
-    onSuccess: async (result: CreateOrgListResult) => {
-      toast.success(result.message);
-      setSelectedTargetListId(result.list_id);
-      await queryClient.invalidateQueries({ queryKey: ["org-lists"] });
     },
     onError: (error: Error) => {
       toast.error(error.message);
@@ -179,6 +169,8 @@ export function JobSetupCards() {
 
   const sources: SourceSummary[] = sourcesQuery.data?.sources ?? [];
   const orgLists: OrgListSummary[] = orgListsQuery.data?.lists ?? [];
+  const orgEnrichmentStatus: OrgEnrichmentStatusResult | undefined =
+    orgEnrichmentQuery.data;
   const jobMonitorConfig: JobMonitorConfigResult | undefined =
     jobMonitorConfigQuery.data;
   const jobDiscoveryStatus: JobDiscoveryStatusResult | undefined =
@@ -187,14 +179,17 @@ export function JobSetupCards() {
     sources,
     "linkedin_profile_upload",
   );
+  const jobProspectsList: OrgListSummary | undefined =
+    findJobProspectsList(orgLists);
 
-  const selectedTargetList: OrgListSummary | undefined = orgLists.find(
-    (list) => list.list_id === selectedTargetListId,
-  );
-
+  const starredCount: number = jobProspectsStarredCount(orgLists);
   const targetComplete: boolean = hasTargetCompanies(orgLists);
   const profileComplete: boolean = isLinkedInProfileComplete(sources);
   const preferencesComplete: boolean = hasJobPreferences(jobPreferencesQuery.data);
+  const enrichmentBlocking: boolean =
+    isOrgEnrichmentBlocking(orgEnrichmentStatus);
+  const enrichmentInProgress: boolean =
+    orgEnrichmentQuery.isLoading || enrichmentBlocking;
 
   useEffect(() => {
     if (!linkedinProfileProcessing) {
@@ -215,12 +210,6 @@ export function JobSetupCards() {
       }
     }
   }, [linkedinProfileProcessing, linkedinProfileSource]);
-
-  useEffect(() => {
-    if (jobMonitorConfig?.list_id && selectedTargetListId === null) {
-      setSelectedTargetListId(jobMonitorConfig.list_id);
-    }
-  }, [jobMonitorConfig?.list_id, selectedTargetListId]);
 
   useEffect(() => {
     const serverText: string | null = jobPreferencesQuery.data?.text ?? null;
@@ -264,18 +253,6 @@ export function JobSetupCards() {
     [uploadMutation],
   );
 
-  const handleCreateTargetList = useCallback((): void => {
-    const name: string | null = window.prompt("New list name");
-    if (name === null) {
-      return;
-    }
-    const trimmed: string = name.trim();
-    if (trimmed.length === 0) {
-      return;
-    }
-    createOrgListMutation.mutate(trimmed);
-  }, [createOrgListMutation]);
-
   useEffect(() => {
     if (autoStartedRef.current) {
       return;
@@ -286,21 +263,14 @@ export function JobSetupCards() {
     if (jobMonitorConfig?.enabled) {
       return;
     }
-    if (selectedTargetListId === null) {
-      const listWithOrgs: OrgListSummary | undefined = orgLists.find(
-        (list) => list.org_count > 0,
-      );
-      if (listWithOrgs === undefined) {
-        return;
-      }
-      setSelectedTargetListId(listWithOrgs.list_id);
+    if (jobProspectsList === undefined) {
       return;
     }
 
     autoStartedRef.current = true;
     void (async (): Promise<void> => {
       await setJobMonitorConfigMutation.mutateAsync({
-        list_id: selectedTargetListId,
+        list_id: jobProspectsList.list_id,
         enabled: true,
       });
       startJobDiscoveryMutation.mutate();
@@ -310,8 +280,7 @@ export function JobSetupCards() {
     profileComplete,
     preferencesComplete,
     jobMonitorConfig?.enabled,
-    selectedTargetListId,
-    orgLists,
+    jobProspectsList,
     setJobMonitorConfigMutation,
     startJobDiscoveryMutation,
   ]);
@@ -319,6 +288,16 @@ export function JobSetupCards() {
   const profileInProgress: boolean =
     isSourceStepInProgress("linkedin_profile_upload", sources) ||
     linkedinProfileProcessing;
+
+  const enrichmentProgressLabel: string = (() => {
+    if (orgEnrichmentStatus === undefined) {
+      return "Enrichment process still running…";
+    }
+    if (orgEnrichmentStatus.progress_message !== null) {
+      return orgEnrichmentStatus.progress_message;
+    }
+    return `Enriching company data (${orgEnrichmentStatus.orgs_enriched.toLocaleString()} of ${orgEnrichmentStatus.orgs_total.toLocaleString()})…`;
+  })();
 
   return (
     <div className="space-y-6">
@@ -335,67 +314,44 @@ export function JobSetupCards() {
             <div className="mt-0.5 shrink-0">
               <SetupStepStatusIcon
                 complete={targetComplete}
-                inProgress={false}
+                inProgress={enrichmentInProgress && !targetComplete}
               />
             </div>
             <div className="space-y-1">
-              <CardTitle className="text-base">Select job prospects</CardTitle>
+              <CardTitle className="text-base">
+                Select organizations for jobs
+              </CardTitle>
               <CardDescription>
-                Choose organizations from your network to monitor for open roles.
+                Star companies in your network that you would like to work at.
               </CardDescription>
+              {enrichmentInProgress ? (
+                <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin" />
+                  {enrichmentProgressLabel}
+                </p>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  {starredCount === 0
+                    ? "0 organizations selected for job search"
+                    : `${starredCount.toLocaleString()} organization${starredCount === 1 ? "" : "s"} selected for job search`}
+                </p>
+              )}
             </div>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" disabled={orgListsQuery.isLoading}>
-                  {selectedTargetList !== undefined
-                    ? `${selectedTargetList.name} (${selectedTargetList.org_count})`
-                    : "Choose list…"}
-                  <ChevronDown className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                {orgLists.length === 0 ? (
-                  <DropdownMenuItem disabled>No lists yet</DropdownMenuItem>
+          {!enrichmentInProgress ? (
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/graph?tab=organizations">
+                {starredCount === 0 ? (
+                  <>
+                    Go to Organizations tab
+                    <ArrowRight className="size-4" />
+                  </>
                 ) : (
-                  orgLists.map((list) => (
-                    <DropdownMenuCheckboxItem
-                      key={list.list_id}
-                      checked={selectedTargetListId === list.list_id}
-                      onCheckedChange={() =>
-                        setSelectedTargetListId(
-                          selectedTargetListId === list.list_id
-                            ? null
-                            : list.list_id,
-                        )
-                      }
-                    >
-                      {list.name} ({list.org_count})
-                    </DropdownMenuCheckboxItem>
-                  ))
+                  "Edit"
                 )}
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  onClick={handleCreateTargetList}
-                  disabled={createOrgListMutation.isPending}
-                >
-                  <ListPlus className="mr-2 size-4" />
-                  Create new list…
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            {selectedTargetList !== undefined ? (
-              <Button variant="outline" size="sm" asChild>
-                <Link
-                  href={`/graph?tab=organizations&list=${encodeURIComponent(selectedTargetList.list_id)}`}
-                >
-                  Add companies
-                  <ArrowRight className="size-4" />
-                </Link>
-              </Button>
-            ) : null}
-          </div>
+              </Link>
+            </Button>
+          ) : null}
         </CardHeader>
       </Card>
 

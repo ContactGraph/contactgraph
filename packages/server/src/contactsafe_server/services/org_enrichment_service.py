@@ -8,7 +8,7 @@ import re
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -144,12 +144,34 @@ class OrgEnrichmentService:
             message="Company enrichment started in the background.",
         )
 
+    _STALE_RUN_THRESHOLD: timedelta = timedelta(minutes=5)
+
+    async def _recover_stale_run(self, run: OrgEnrichmentRun) -> None:
+        """Mark a run as failed if the background task appears to have crashed."""
+        if run.state != "running":
+            return
+        stale_cutoff: datetime = datetime.now(tz=UTC) - self._STALE_RUN_THRESHOLD
+        if run.updated_at > stale_cutoff:
+            return
+        logger.warning(
+            "Recovering stale enrichment run %s (last updated %s)",
+            run.id,
+            run.updated_at.isoformat(),
+        )
+        run.state = "failed"
+        run.error = "Enrichment task stopped unexpectedly. You can retry."
+        run.completed_at = datetime.now(tz=UTC)
+        run.progress_message = None
+        await self._db.commit()
+
     async def get_status(self, user_id: uuid.UUID) -> OrgEnrichmentStatusResult:
         run: OrgEnrichmentRun | None = await self._latest_run(user_id)
         orgs_total: int = await self._count_user_orgs(user_id)
         orgs_enriched: int = await self._count_enriched_orgs(user_id)
 
         if run is not None:
+            if run.state == "running":
+                await self._recover_stale_run(run)
             state: OrgEnrichmentState = run.state  # type: ignore[assignment]
             return OrgEnrichmentStatusResult(
                 state=state,
@@ -390,7 +412,10 @@ class OrgEnrichmentService:
 
     async def _has_running_run(self, user_id: uuid.UUID) -> bool:
         run: OrgEnrichmentRun | None = await self._latest_run(user_id)
-        return run is not None and run.state == "running"
+        if run is None or run.state != "running":
+            return False
+        await self._recover_stale_run(run)
+        return run.state == "running"
 
     @staticmethod
     def _progress_message(orgs_enriched: int, orgs_total: int) -> str:
