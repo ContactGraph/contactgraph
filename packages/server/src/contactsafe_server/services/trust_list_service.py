@@ -250,15 +250,21 @@ class TrustListService:
         )
         result = await self._db.execute(stmt)
         invites: list[TrustListInvite] = list(result.scalars().all())
-        return [
-            TrustListInviteSummary(
+        summaries: list[TrustListInviteSummary] = []
+        for inv in invites:
+            on_platform: bool = await self._resolve_user_by_email(inv.invitee_email) is not None
+            if on_platform:
+                copy: str = self._generate_invite_copy_existing_user()
+            else:
+                copy = self._generate_invite_copy_new_user(inv.referral_code)
+            summaries.append(TrustListInviteSummary(
                 invite_id=inv.id,
                 invitee_email=inv.invitee_email,
                 status=TrustListInviteStatus(inv.status),
                 created_at=inv.created_at,
-            )
-            for inv in invites
-        ]
+                invite_copy=copy,
+            ))
+        return summaries
 
     async def _get_inbound_invites(self, user_id: uuid.UUID) -> list[PendingInboundInvite]:
         user: User | None = await self._db.get(User, user_id)

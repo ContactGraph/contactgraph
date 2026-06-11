@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Copy, Check } from "lucide-react";
 import { Children, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -233,23 +234,51 @@ export default function SharingPage() {
             className="lg:col-span-2"
           >
             {data?.outbound_invites.map((invite) => (
-              <li
-                key={invite.invite_id}
-                className="flex items-center justify-between gap-3 py-3"
-              >
-                <div>
-                  <p className="font-medium">{invite.invitee_email}</p>
-                  <p className="text-sm text-muted-foreground">
-                    Sent {formatDate(invite.created_at)}
-                  </p>
-                </div>
-                <Badge variant="outline">{invite.status}</Badge>
-              </li>
+              <OutboundInviteRow key={invite.invite_id} invite={invite} />
             ))}
           </SharingSection>
         </div>
       )}
     </div>
+  );
+}
+
+function OutboundInviteRow({
+  invite,
+}: {
+  invite: ViewTrustedUsersResult["outbound_invites"][number];
+}) {
+  const [copied, setCopied] = useState<boolean>(false);
+
+  const handleCopy = (): void => {
+    if (!invite.invite_copy) return;
+    void navigator.clipboard.writeText(invite.invite_copy);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <li className="flex items-center justify-between gap-3 py-3">
+      <div>
+        <p className="font-medium">{invite.invitee_email}</p>
+        <p className="text-sm text-muted-foreground">
+          Sent {formatDate(invite.created_at)}
+        </p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Badge variant="outline">{invite.status}</Badge>
+        {invite.invite_copy ? (
+          <Button size="sm" variant="outline" onClick={handleCopy}>
+            {copied ? (
+              <Check className="size-4" />
+            ) : (
+              <Copy className="size-4" />
+            )}
+            {copied ? "Copied" : "Copy invite"}
+          </Button>
+        ) : null}
+      </div>
+    </li>
   );
 }
 
