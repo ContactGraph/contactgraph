@@ -38,6 +38,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -124,9 +126,7 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
   const [selectedSizeBands, setSelectedSizeBands] = useState<ReadonlySet<string>>(
     new Set(),
   );
-  const [selectedSharers, setSelectedSharers] = useState<ReadonlySet<string>>(
-    new Set(),
-  );
+  const [viewingFilter, setViewingFilter] = useState<string>("mine");
   const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
 
   useEffect(() => {
@@ -373,6 +373,16 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
 
   const filteredOrgs: OrgListItem[] = useMemo(() => {
     let rows: OrgListItem[] = allOrgs;
+
+    // Filter by whose orgs we're viewing
+    if (viewingFilter === "mine") {
+      rows = rows.filter((org) => org.contact_count > 0);
+    } else if (viewingFilter !== "all") {
+      rows = rows.filter((org) =>
+        org.shared_from.includes(viewingFilter),
+      );
+    }
+
     if (selectedCategories.size > 0) {
       rows = rows.filter((org) =>
         org.categories.some((tag) => selectedCategories.has(tag)),
@@ -385,13 +395,8 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
           selectedSizeBands.has(org.company_size_band),
       );
     }
-    if (selectedSharers.size > 0) {
-      rows = rows.filter((org) =>
-        org.shared_from.some((name) => selectedSharers.has(name)),
-      );
-    }
     return rows;
-  }, [allOrgs, selectedCategories, selectedSizeBands, selectedSharers]);
+  }, [allOrgs, viewingFilter, selectedCategories, selectedSizeBands]);
 
   const starAllRef = useRef<() => void>(() => {});
   const unstarAllRef = useRef<() => void>(() => {});
@@ -717,23 +722,12 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     });
   };
 
-  const toggleSharer = (name: string): void => {
-    setSelectedSharers((current) => {
-      const next = new Set(current);
-      if (next.has(name)) {
-        next.delete(name);
-      } else {
-        next.add(name);
-      }
-      return next;
-    });
-  };
 
   const starMutationPending: boolean =
     starToggleMutation.isPending || bulkStarMutation.isPending;
 
   const hasActiveFilters: boolean =
-    selectedCategories.size > 0 || selectedSizeBands.size > 0 || selectedSharers.size > 0;
+    selectedCategories.size > 0 || selectedSizeBands.size > 0;
 
   return (
     <div className="space-y-2">
@@ -848,38 +842,29 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Shared by filter */}
+        {/* Viewing dropdown */}
         {availableSharers.length > 0 ? (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" className="h-8 text-xs">
-                Shared by
-                {selectedSharers.size > 0 ? (
-                  <Badge variant="secondary" className="ml-1">
-                    {selectedSharers.size}
-                  </Badge>
-                ) : null}
-                <ChevronDown className="size-3" />
+                {viewingFilter === "all"
+                  ? "All contacts"
+                  : viewingFilter === "mine"
+                    ? "My contacts"
+                    : `${viewingFilter}'s contacts`}
+                <ChevronDown className="ml-1 size-3" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="max-h-72 overflow-y-auto">
-              {availableSharers.map((name) => (
-                <DropdownMenuCheckboxItem
-                  key={name}
-                  checked={selectedSharers.has(name)}
-                  onCheckedChange={() => toggleSharer(name)}
-                >
-                  {name}
-                </DropdownMenuCheckboxItem>
-              ))}
-              {selectedSharers.size > 0 ? (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => setSelectedSharers(new Set())}>
-                    Clear
-                  </DropdownMenuItem>
-                </>
-              ) : null}
+            <DropdownMenuContent align="start">
+              <DropdownMenuRadioGroup value={viewingFilter} onValueChange={setViewingFilter}>
+                <DropdownMenuRadioItem value="mine">My contacts</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="all">All contacts</DropdownMenuRadioItem>
+                {availableSharers.map((name) => (
+                  <DropdownMenuRadioItem key={name} value={name}>
+                    {name}&rsquo;s contacts
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
         ) : null}
@@ -892,7 +877,6 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
             onClick={() => {
               setSelectedCategories(new Set());
               setSelectedSizeBands(new Set());
-              setSelectedSharers(new Set());
             }}
           >
             Clear filters

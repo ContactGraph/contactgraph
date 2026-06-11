@@ -11,7 +11,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { Download, Search } from "lucide-react";
+import { ChevronDown, Download, Search } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -25,6 +25,13 @@ import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -53,7 +60,8 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
   const [isClosingSave, setIsClosingSave] = useState<boolean>(false);
   const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
 
-  const [filter, setFilter] = useState<"all" | "phone_linkedin" | "phone_only" | "linkedin_only" | "shared">("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "phone_linkedin" | "phone_only" | "linkedin_only">("phone_linkedin");
+  const [viewingFilter, setViewingFilter] = useState<string>("mine");
 
   useEffect(() => {
     setIsDetailDirty(false);
@@ -225,26 +233,49 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
     [],
   );
 
+  const availableSharers: string[] = useMemo(() => {
+    const names = new Set<string>();
+    for (const p of peopleQuery.data?.people ?? []) {
+      if (p.shared_from) {
+        names.add(p.shared_from);
+      }
+    }
+    return [...names].sort();
+  }, [peopleQuery.data?.people]);
+
   const filteredPeople: PersonListItem[] = useMemo(() => {
     const all: PersonListItem[] = peopleQuery.data?.people ?? [];
-    if (filter === "all") return all;
-    if (filter === "shared") return all.filter((p: PersonListItem) => !!p.shared_from);
-    return all.filter((p: PersonListItem) => {
-      if (p.shared_from) return false;
-      const hasPhone: boolean = !!p.phone;
-      const hasLinkedin: boolean = !!p.linkedin_url;
-      switch (filter) {
-        case "phone_linkedin":
-          return hasPhone && hasLinkedin;
-        case "phone_only":
-          return hasPhone && !hasLinkedin;
-        case "linkedin_only":
-          return !hasPhone && hasLinkedin;
-        default:
-          return true;
-      }
-    });
-  }, [peopleQuery.data?.people, filter]);
+
+    // First: filter by whose contacts we're viewing
+    let rows: PersonListItem[];
+    if (viewingFilter === "all") {
+      rows = all;
+    } else if (viewingFilter === "mine") {
+      rows = all.filter((p: PersonListItem) => !p.shared_from);
+    } else {
+      rows = all.filter((p: PersonListItem) => p.shared_from === viewingFilter);
+    }
+
+    // Second: apply source filter (only meaningful for own contacts)
+    if (viewingFilter === "mine" && sourceFilter !== "all") {
+      rows = rows.filter((p: PersonListItem) => {
+        const hasPhone: boolean = !!p.phone;
+        const hasLinkedin: boolean = !!p.linkedin_url;
+        switch (sourceFilter) {
+          case "phone_linkedin":
+            return hasPhone && hasLinkedin;
+          case "phone_only":
+            return hasPhone && !hasLinkedin;
+          case "linkedin_only":
+            return !hasPhone && hasLinkedin;
+          default:
+            return true;
+        }
+      });
+    }
+
+    return rows;
+  }, [peopleQuery.data?.people, viewingFilter, sourceFilter]);
 
   const table = useReactTable({
     data: filteredPeople,
@@ -381,25 +412,54 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
         </div>
       )}
 
-      <div className="flex gap-1">
-        {([
-          ["all", "All"],
-          ["phone_linkedin", "Phone + LinkedIn"],
-          ["phone_only", "Phone only"],
-          ["linkedin_only", "LinkedIn only"],
-          ["shared", "Shared with me"],
-        ] as const).map(([value, label]) => (
-          <Button
-            key={value}
-            type="button"
-            variant={filter === value ? "default" : "outline"}
-            size="sm"
-            className="h-8 text-xs px-2.5"
-            onClick={() => setFilter(value)}
-          >
-            {label}
-          </Button>
-        ))}
+      <div className="flex flex-wrap items-center gap-2">
+        {/* Viewing dropdown */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="h-8 text-xs">
+              {viewingFilter === "all"
+                ? "All contacts"
+                : viewingFilter === "mine"
+                  ? "My contacts"
+                  : `${viewingFilter}'s contacts`}
+              <ChevronDown className="ml-1 size-3" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuRadioGroup value={viewingFilter} onValueChange={setViewingFilter}>
+              <DropdownMenuRadioItem value="mine">My contacts</DropdownMenuRadioItem>
+              <DropdownMenuRadioItem value="all">All contacts</DropdownMenuRadioItem>
+              {availableSharers.map((name) => (
+                <DropdownMenuRadioItem key={name} value={name}>
+                  {name}&rsquo;s contacts
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Source filter buttons (only when viewing own contacts) */}
+        {viewingFilter === "mine" ? (
+          <div className="flex gap-1">
+            {([
+              ["phone_linkedin", "Phone + LinkedIn"],
+              ["phone_only", "Phone only"],
+              ["linkedin_only", "LinkedIn only"],
+              ["all", "All sources"],
+            ] as const).map(([value, label]) => (
+              <Button
+                key={value}
+                type="button"
+                variant={sourceFilter === value ? "default" : "outline"}
+                size="sm"
+                className="h-8 text-xs px-2.5"
+                onClick={() => setSourceFilter(value)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {peopleQuery.error ? (
