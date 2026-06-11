@@ -1688,14 +1688,21 @@ async def set_job_preferences(
         user.job_location_city = location_city.strip() if location_city else None
         await db.commit()
 
-        from contactsafe_server.services.job_relevance_service import JobRelevanceService
+    import asyncio
 
-        svc = JobRelevanceService(db, ctx.settings)
-        count: int = await svc.reclassify_all(user_id)
-        return JobPreferencesResult(
-            text=user.job_preferences_text,
-            location_pref=user.job_location_pref,
-            location_city=user.job_location_city,
-            classified_job_count=count,
-            message=f"Preferences saved. Classified {count} job(s).",
-        )
+    async def _reclassify_background() -> None:
+        async with ctx.session_factory() as bg_db:
+            from contactsafe_server.services.job_relevance_service import JobRelevanceService
+
+            svc = JobRelevanceService(bg_db, ctx.settings)
+            await svc.reclassify_all(user_id)
+
+    asyncio.ensure_future(_reclassify_background())
+
+    return JobPreferencesResult(
+        text=text.strip() or None,
+        location_pref=location_pref,
+        location_city=location_city.strip() if location_city else None,
+        classified_job_count=0,
+        message="Preferences saved. Re-classifying jobs in background…",
+    )

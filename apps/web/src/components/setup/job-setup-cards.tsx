@@ -43,7 +43,7 @@ import {
   sourceForType,
 } from "@/lib/setup-utils";
 
-export function JobSetupCards() {
+export function JobSetupCards({ compact = false }: { compact?: boolean }) {
   const queryClient = useQueryClient();
   const autoStartedRef = useRef<boolean>(false);
   const [linkedinProfileDialogOpen, setLinkedinProfileDialogOpen] =
@@ -302,13 +302,15 @@ export function JobSetupCards() {
   })();
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
-        <p className="text-muted-foreground">
-          Set up job search to monitor career pages at companies in your network.
-        </p>
-      </div>
+    <div className={compact ? "space-y-4" : "space-y-6"}>
+      {!compact ? (
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
+          <p className="text-muted-foreground">
+            Set up job search to monitor career pages at companies in your network.
+          </p>
+        </div>
+      ) : null}
 
       <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-4">

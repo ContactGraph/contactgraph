@@ -9,6 +9,7 @@ import {
   ExternalLink,
   Loader2,
   RefreshCw,
+  Settings2,
   Users,
 } from "lucide-react";
 import Link from "next/link";
@@ -16,6 +17,14 @@ import Link from "next/link";
 import { PersonDetailPanel } from "@/components/person-detail-panel";
 import { JobSetupCards } from "@/components/setup/job-setup-cards";
 import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -159,6 +168,7 @@ function OrgContactsList({
 
 function JobsListings() {
   const [showAll, setShowAll] = useState<boolean>(false);
+  const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
   const [isDetailDirty, setIsDetailDirty] = useState<boolean>(false);
   const [discardDialogOpen, setDiscardDialogOpen] = useState<boolean>(false);
@@ -384,10 +394,10 @@ function JobsListings() {
         </div>
         <div className="flex items-center gap-2">
           {hasRelevance ? (
-            <div className="inline-flex items-center rounded-md border text-xs">
+            <div className="inline-flex h-8 items-center overflow-hidden rounded-md border text-xs">
               <button
                 type="button"
-                className={`rounded-l-md px-3 py-1.5 transition-colors ${
+                className={`h-full px-3 transition-colors ${
                   !showAll
                     ? "bg-primary text-primary-foreground"
                     : "hover:bg-muted"
@@ -398,7 +408,7 @@ function JobsListings() {
               </button>
               <button
                 type="button"
-                className={`rounded-r-md border-l px-3 py-1.5 transition-colors ${
+                className={`h-full border-l px-3 transition-colors ${
                   showAll
                     ? "bg-primary text-primary-foreground"
                     : "hover:bg-muted"
@@ -422,6 +432,23 @@ function JobsListings() {
             )}
             Check all
           </Button>
+          <Dialog open={settingsOpen} onOpenChange={setSettingsOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Settings2 className="size-4" />
+                Jobs Settings
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Jobs Settings</DialogTitle>
+                <DialogDescription>
+                  Update your role preferences, location, and target companies.
+                </DialogDescription>
+              </DialogHeader>
+              <JobSetupCards compact />
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
