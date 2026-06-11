@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  Download,
   ExternalLink,
   Loader2,
   RefreshCw,
@@ -61,6 +62,7 @@ import { proxyPost } from "@/lib/proxy-client";
 import { findJobProspectsList } from "@/lib/setup-utils";
 import { useOnboardingPhase } from "@/lib/use-onboarding-phase";
 import { useJobBookmarks } from "@/lib/use-job-bookmarks";
+import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 
 function formatSalary(min: number | null, max: number | null): string | null {
   if (min === null && max === null) return null;
@@ -419,6 +421,28 @@ function JobsListings() {
     setDiscardDialogOpen(false);
   };
 
+  const handleDownloadCsv = (): void => {
+    const allJobs: { company: string; job: OrgJobItem }[] = [];
+    for (const tile of orgTiles) {
+      for (const job of tile.jobs) {
+        allJobs.push({ company: tile.org_name, job });
+      }
+    }
+    const csv: string = buildCsv(
+      ["Company", "Title", "Location", "Department", "Remote", "Salary", "URL"],
+      allJobs.map(({ company, job }) => [
+        company,
+        job.title,
+        job.location ?? "",
+        job.department ?? "",
+        job.remote_status ?? "",
+        formatSalary(job.salary_min, job.salary_max) ?? "",
+        job.url,
+      ]),
+    );
+    downloadCsv(csvFilename("jobs"), csv);
+  };
+
   const handleDetailSheetOpenChange = (open: boolean): void => {
     if (open) return;
     if (isDetailDirty) {
@@ -533,6 +557,16 @@ function JobsListings() {
               <RefreshCw className="mr-1.5 size-3.5" />
             )}
             Check all
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleDownloadCsv}
+            disabled={loading || totalShown === 0}
+          >
+            <Download className="mr-1.5 size-3.5" />
+            CSV
           </Button>
         </div>
       </div>
