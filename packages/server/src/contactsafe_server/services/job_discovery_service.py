@@ -5,8 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import UTC, datetime
-from typing import Literal
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,25 +13,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from contactsafe_core.contact_schemas import (
     FlatJobListResult,
     JobDetailResult,
-    JobDiscoveryStatusResult,
     JobMonitorConfigResult,
+    JobScanStatusResult,
     ListOrgJobsResult,
     OrgJobItem,
     OrgJobsByCompany,
     OrgPersonSummary,
     SetJobMonitorConfigRequest,
-    StartJobDiscoveryResult,
     StartSingleOrgDiscoveryResult,
 )
 from contactsafe_server.config import Settings
-from contactsafe_server.events import (
-    DiscoveryCancelledEvent,
-    DiscoveryCompleteEvent,
-    DiscoveryProgressEvent,
-    job_event_bus,
-)
 from contactsafe_server.db.models import (
-    JobDiscoveryRun,
     JobScrapeRun,
     Org,
     OrgJob,
@@ -45,57 +36,32 @@ from contactsafe_server.db.models import (
 )
 from contactsafe_server.services.ats_detection import apply_ats_detection_to_org
 from contactsafe_server.services.ats_job_clients import AtsJobClient
-from contactsafe_server.services.job_discovery_scheduler import (
-    release_job_discovery_lock,
-    schedule_job_discovery,
-)
+from contactsafe_server.services.job_discovery_scheduler import is_global_scan_active
 from contactsafe_server.services.job_discovery_types import DiscoveredJob
 from contactsafe_server.services.theirstack_client import TheirStackClient
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-
-def _publish_discovery_progress(
-    user_id: uuid.UUID,
-    *,
-    orgs_processed: int,
-    orgs_total: int,
-    jobs_found: int,
-    new_jobs: int,
-    progress_message: str | None,
-) -> None:
-    event: DiscoveryProgressEvent = {
-        "type": "discovery_progress",
-        "orgs_processed": orgs_processed,
-        "orgs_total": orgs_total,
-        "jobs_found": jobs_found,
-        "new_jobs": new_jobs,
-        "progress_message": progress_message,
-    }
-    job_event_bus.publish(user_id, event)
-
-
-def _publish_discovery_complete(
-    user_id: uuid.UUID,
-    *,
-    jobs_found: int,
-    new_jobs: int,
-) -> None:
-    event: DiscoveryCompleteEvent = {
-        "type": "discovery_complete",
-        "jobs_found": jobs_found,
-        "new_jobs": new_jobs,
-    }
-    job_event_bus.publish(user_id, event)
-
-
-def _publish_discovery_cancelled(user_id: uuid.UUID) -> None:
-    event: DiscoveryCancelledEvent = {"type": "discovery_cancelled"}
-    job_event_bus.publish(user_id, event)
-
-JobDiscoveryState = Literal["pending", "running", "complete", "failed"]
-
 _LAYER1_PROVIDERS: frozenset[str] = frozenset({"greenhouse", "lever", "ashby"})
+
+
+class ScrapeOrgResult:
+    __slots__ = ("jobs_found", "new_jobs", "source", "error", "scanned")
+
+    def __init__(
+        self,
+        *,
+        jobs_found: int,
+        new_jobs: int,
+        source: str,
+        error: str | None,
+        scanned: bool,
+    ) -> None:
+        self.jobs_found: int = jobs_found
+        self.new_jobs: int = new_jobs
+        self.source: str = source
+        self.error: str | None = error
+        self.scanned: bool = scanned
 
 
 class JobDiscoveryService:
@@ -154,83 +120,131 @@ class JobDiscoveryService:
         await self._db.flush()
         return await self.get_monitor_config(user_id)
 
-    async def start_discovery(self, user_id: uuid.UUID) -> StartJobDiscoveryResult:
-        if await self._has_running_run(user_id):
-            return StartJobDiscoveryResult(
-                scheduled=False,
-                state="running",
-                message="Job discovery is already running.",
-            )
-
+    async def get_scan_status(self, user_id: uuid.UUID) -> JobScanStatusResult:
         org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
-        if not org_ids:
-            return StartJobDiscoveryResult(
-                scheduled=False,
-                state="complete",
-                message="No organizations to scan. Select a target list with companies.",
+        total: int = len(org_ids)
+        if total == 0:
+            return JobScanStatusResult(
+                scanned=0,
+                total=0,
+                scanning_active=False,
+                message="No companies selected for job monitoring.",
             )
 
-        run = JobDiscoveryRun(
-            user_id=user_id,
-            state="running",
-            started_at=datetime.now(tz=UTC),
-            orgs_total=len(org_ids),
-            orgs_processed=0,
-            progress_message="Starting job discovery…",
+        cutoff: datetime = datetime.now(tz=UTC) - timedelta(
+            hours=self._settings.job_scrape_cooldown_hours,
         )
-        self._db.add(run)
-        await self._db.flush()
+        scanned_result = await self._db.execute(
+            select(func.count(func.distinct(JobScrapeRun.org_id))).where(
+                JobScrapeRun.org_id.in_(org_ids),
+                JobScrapeRun.completed_at >= cutoff,
+                JobScrapeRun.error.is_(None),
+            ),
+        )
+        scanned: int = int(scanned_result.scalar_one())
+        scanning_active: bool = scanned < total or is_global_scan_active()
 
-        if not schedule_job_discovery(user_id, run.id):
-            run.state = "failed"
-            run.error = "Could not schedule job discovery task"
-            run.completed_at = datetime.now(tz=UTC)
-            await self._db.commit()
-            return StartJobDiscoveryResult(
-                scheduled=False,
-                state="failed",
-                message="Job discovery is already running.",
+        if scanned >= total:
+            message = f"{scanned} of {total} companies scanned today."
+        elif scanning_active:
+            message = (
+                f"{scanned} of {total} companies scanned today — scanning in progress."
             )
+        else:
+            message = f"{scanned} of {total} companies scanned today."
 
-        await self._db.commit()
-        _publish_discovery_progress(
-            user_id,
-            orgs_processed=0,
-            orgs_total=len(org_ids),
-            jobs_found=0,
-            new_jobs=0,
-            progress_message=run.progress_message,
-        )
-        return StartJobDiscoveryResult(
-            scheduled=True,
-            state="running",
-            message="Job discovery started in the background.",
+        return JobScanStatusResult(
+            scanned=scanned,
+            total=total,
+            scanning_active=scanning_active,
+            message=message,
         )
 
-    async def get_status(self, user_id: uuid.UUID) -> JobDiscoveryStatusResult:
-        run: JobDiscoveryRun | None = await self._latest_run(user_id)
-        if run is None:
-            return JobDiscoveryStatusResult(
-                state="pending",
-                orgs_total=0,
-                orgs_processed=0,
+    async def collect_all_monitored_org_ids(self) -> list[uuid.UUID]:
+        result = await self._db.execute(
+            select(OrgListMembership.org_id)
+            .join(User, User.job_monitor_list_id == OrgListMembership.org_list_id)
+            .where(
+                User.job_monitor_enabled.is_(True),
+                User.job_monitor_list_id.is_not(None),
+            )
+            .distinct(),
+        )
+        return list(result.scalars().all())
+
+    async def was_recently_scraped(self, org_id: uuid.UUID) -> bool:
+        cutoff: datetime = datetime.now(tz=UTC) - timedelta(
+            hours=self._settings.job_scrape_cooldown_hours,
+        )
+        result = await self._db.execute(
+            select(JobScrapeRun.id)
+            .where(
+                JobScrapeRun.org_id == org_id,
+                JobScrapeRun.completed_at >= cutoff,
+                JobScrapeRun.error.is_(None),
+            )
+            .limit(1),
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def scrape_org_global(
+        self,
+        org_id: uuid.UUID,
+        *,
+        force: bool = False,
+    ) -> ScrapeOrgResult:
+        """Scrape one org and record a JobScrapeRun."""
+        if not force and await self.was_recently_scraped(org_id):
+            return ScrapeOrgResult(
                 jobs_found=0,
                 new_jobs=0,
-                progress_message=None,
+                source="none",
                 error=None,
-                message="No job discovery runs yet.",
+                scanned=False,
             )
-        state: JobDiscoveryState = run.state  # type: ignore[assignment]
-        return JobDiscoveryStatusResult(
-            state=state,
-            orgs_total=run.orgs_total,
-            orgs_processed=run.orgs_processed,
-            jobs_found=run.jobs_found,
-            new_jobs=run.new_jobs,
-            progress_message=run.progress_message,
-            error=run.error,
-            message=self._status_message(state, run),
+
+        org: Org | None = await self._db.get(Org, org_id)
+        if org is None:
+            return ScrapeOrgResult(
+                jobs_found=0,
+                new_jobs=0,
+                source="none",
+                error=None,
+                scanned=False,
+            )
+
+        apply_ats_detection_to_org(org)
+        found, new_count, source, error = await self._discover_jobs_for_org(org)
+
+        if source == "theirstack":
+            await asyncio.sleep(7.0)
+
+        actually_scanned: bool = source != "none" or error is not None
+        if actually_scanned:
+            scrape_run = JobScrapeRun(
+                org_id=org.id,
+                source=source,
+                started_at=datetime.now(tz=UTC),
+                completed_at=datetime.now(tz=UTC),
+                jobs_found=found,
+                new_jobs=new_count,
+                error=error,
+            )
+            self._db.add(scrape_run)
+
+        await self._db.commit()
+        return ScrapeOrgResult(
+            jobs_found=found,
+            new_jobs=new_count,
+            source=source,
+            error=error,
+            scanned=actually_scanned,
         )
+
+    async def classify_for_all_monitoring_users(self, org_id: uuid.UUID) -> None:
+        user_ids: list[uuid.UUID] = await self._users_monitoring_org(org_id)
+        for user_id in user_ids:
+            await self._classify_new_jobs(user_id)
 
     async def list_jobs_for_user(
         self,
@@ -534,101 +548,6 @@ class JobDiscoveryService:
             message=f"Job detail for {job.title}.",
         )
 
-    async def run_discovery(self, user_id: uuid.UUID, run_id: uuid.UUID) -> None:
-        run: JobDiscoveryRun | None = await self._db.get(JobDiscoveryRun, run_id)
-        if run is None or run.user_id != user_id:
-            return
-
-        org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
-        run.orgs_total = len(org_ids)
-        run.state = "running"
-        run.started_at = datetime.now(tz=UTC)
-        run.progress_message = "Scanning organizations…"
-        await self._db.commit()
-        _publish_discovery_progress(
-            user_id,
-            orgs_processed=0,
-            orgs_total=len(org_ids),
-            jobs_found=0,
-            new_jobs=0,
-            progress_message=run.progress_message,
-        )
-
-        total_jobs_found: int = 0
-        total_new_jobs: int = 0
-        processed: int = 0
-        skipped: int = 0
-
-        for org_id in org_ids:
-            await self._db.refresh(run)
-            if run.state == "cancelled":
-                _publish_discovery_cancelled(user_id)
-                return
-
-            org: Org | None = await self._db.get(Org, org_id)
-            if org is None:
-                processed += 1
-                continue
-
-            apply_ats_detection_to_org(org)
-            found, new_count, source, error = await self._discover_jobs_for_org(org)
-
-            if source == "theirstack":
-                await asyncio.sleep(7.0)
-
-            actually_scanned: bool = source != "none" or error is not None
-            if actually_scanned:
-                scrape_run = JobScrapeRun(
-                    org_id=org.id,
-                    source=source,
-                    started_at=datetime.now(tz=UTC),
-                    completed_at=datetime.now(tz=UTC),
-                    jobs_found=found,
-                    new_jobs=new_count,
-                    error=error,
-                )
-                self._db.add(scrape_run)
-            else:
-                skipped += 1
-
-            total_jobs_found += found
-            total_new_jobs += new_count
-            processed += 1
-            run.orgs_processed = processed
-            run.jobs_found = total_jobs_found
-            run.new_jobs = total_new_jobs
-            scanned_count: int = processed - skipped
-            if skipped > 0:
-                run.progress_message = (
-                    f"Scanned {scanned_count}/{run.orgs_total} companies "
-                    f"({skipped} skipped — no supported careers page)…"
-                )
-            else:
-                run.progress_message = f"Scanned {processed}/{run.orgs_total} companies…"
-            await self._db.commit()
-            _publish_discovery_progress(
-                user_id,
-                orgs_processed=processed,
-                orgs_total=run.orgs_total,
-                jobs_found=total_jobs_found,
-                new_jobs=total_new_jobs,
-                progress_message=run.progress_message,
-            )
-
-            if new_count > 0:
-                await self._classify_new_jobs(user_id)
-
-        run.state = "complete"
-        run.completed_at = datetime.now(tz=UTC)
-        run.progress_message = None
-        run.error = None
-        await self._db.commit()
-        _publish_discovery_complete(
-            user_id,
-            jobs_found=total_jobs_found,
-            new_jobs=total_new_jobs,
-        )
-
     async def discover_single_org(
         self,
         user_id: uuid.UUID,
@@ -641,24 +560,8 @@ class JobDiscoveryService:
                 scheduled=False, message="Organization not found.",
             )
 
-        apply_ats_detection_to_org(org)
-        found, new_count, source, error = await self._discover_jobs_for_org(org)
-
-        actually_scanned: bool = source != "none" or error is not None
-        if actually_scanned:
-            scrape_run = JobScrapeRun(
-                org_id=org.id,
-                source=source,
-                started_at=datetime.now(tz=UTC),
-                completed_at=datetime.now(tz=UTC),
-                jobs_found=found,
-                new_jobs=new_count,
-                error=error,
-            )
-            self._db.add(scrape_run)
-            await self._db.commit()
-        else:
-            await self._db.commit()
+        result: ScrapeOrgResult = await self.scrape_org_global(org_id, force=True)
+        if not result.scanned:
             return StartSingleOrgDiscoveryResult(
                 scheduled=False,
                 message=(
@@ -667,21 +570,24 @@ class JobDiscoveryService:
                 ),
             )
 
-        if new_count > 0:
+        if result.new_jobs > 0:
             await self._classify_new_jobs(user_id)
 
-        if error:
+        if result.error:
             return StartSingleOrgDiscoveryResult(
                 scheduled=True,
-                jobs_found=found,
-                new_jobs=new_count,
-                message=f"Discovery completed with error: {error}",
+                jobs_found=result.jobs_found,
+                new_jobs=result.new_jobs,
+                message=f"Discovery completed with error: {result.error}",
             )
         return StartSingleOrgDiscoveryResult(
             scheduled=True,
-            jobs_found=found,
-            new_jobs=new_count,
-            message=f"Found {found} jobs ({new_count} new) for {org.canonical_name}.",
+            jobs_found=result.jobs_found,
+            new_jobs=result.new_jobs,
+            message=(
+                f"Found {result.jobs_found} jobs ({result.new_jobs} new) "
+                f"for {org.canonical_name}."
+            ),
         )
 
     async def upsert_discovered_job(
@@ -866,76 +772,17 @@ class JobDiscoveryService:
         )
         return list(result.scalars().all())
 
-    async def _has_running_run(self, user_id: uuid.UUID) -> bool:
+    async def _users_monitoring_org(self, org_id: uuid.UUID) -> list[uuid.UUID]:
         result = await self._db.execute(
-            select(JobDiscoveryRun.id).where(
-                JobDiscoveryRun.user_id == user_id,
-                JobDiscoveryRun.state == "running",
+            select(User.id)
+            .join(
+                OrgListMembership,
+                OrgListMembership.org_list_id == User.job_monitor_list_id,
+            )
+            .where(
+                OrgListMembership.org_id == org_id,
+                User.job_monitor_enabled.is_(True),
+                User.job_monitor_list_id.is_not(None),
             ),
         )
-        return result.scalar_one_or_none() is not None
-
-    async def cancel_discovery(self, user_id: uuid.UUID) -> None:
-        """Mark the current running discovery as cancelled."""
-        result = await self._db.execute(
-            select(JobDiscoveryRun).where(
-                JobDiscoveryRun.user_id == user_id,
-                JobDiscoveryRun.state == "running",
-            ),
-        )
-        run: JobDiscoveryRun | None = result.scalar_one_or_none()
-        if run is not None:
-            run.state = "cancelled"
-            run.completed_at = datetime.now(tz=UTC)
-            run.progress_message = None
-            run.error = "Cancelled by user."
-            await self._db.commit()
-            _publish_discovery_cancelled(user_id)
-        release_job_discovery_lock(user_id)
-
-    async def _latest_run(self, user_id: uuid.UUID) -> JobDiscoveryRun | None:
-        result = await self._db.execute(
-            select(JobDiscoveryRun)
-            .where(JobDiscoveryRun.user_id == user_id)
-            .order_by(JobDiscoveryRun.created_at.desc())
-            .limit(1),
-        )
-        return result.scalar_one_or_none()
-
-    @staticmethod
-    def _status_message(state: JobDiscoveryState, run: JobDiscoveryRun) -> str:
-        if state == "running":
-            return (
-                f"Scanning companies ({run.orgs_processed}/{run.orgs_total}). "
-                f"{run.jobs_found} jobs found so far."
-            )
-        if state == "complete":
-            return (
-                f"Discovery complete. {run.jobs_found} jobs found "
-                f"({run.new_jobs} new)."
-            )
-        if state == "failed":
-            return run.error or "Job discovery failed."
-        if state == "cancelled":
-            return "Job discovery was cancelled."
-        return "Job discovery pending."
-
-    async def maybe_start_scheduled_discovery(self, user_id: uuid.UUID) -> bool:
-        if await self._has_running_run(user_id):
-            return False
-        org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
-        if not org_ids:
-            return False
-        run = JobDiscoveryRun(
-            user_id=user_id,
-            state="running",
-            started_at=datetime.now(tz=UTC),
-            orgs_total=len(org_ids),
-            orgs_processed=0,
-            progress_message="Scheduled scan…",
-        )
-        self._db.add(run)
-        await self._db.flush()
-        run_id: uuid.UUID = run.id
-        await self._db.commit()
-        return schedule_job_discovery(user_id, run_id)
+        return list(result.scalars().all())

@@ -39,12 +39,11 @@ from contactsafe_core.contact_schemas import (
     StrongTieCountResult,
     FlatJobListResult,
     JobDetailResult,
-    JobDiscoveryStatusResult,
     JobMonitorConfigResult,
+    JobScanStatusResult,
     JobPreferencesResult,
     ListOrgJobsResult,
     SetJobMonitorConfigRequest,
-    StartJobDiscoveryResult,
     UpdateOrgRequest,
     UpdatePersonRequest,
 )
@@ -1612,21 +1611,22 @@ async def set_job_monitor_config(
         return result
 
 
-async def start_job_discovery(
+async def get_job_scan_status(
     ctx: AppContext,
     user_id: UUID | None,
-) -> StartJobDiscoveryResult:
+) -> JobScanStatusResult:
     if user_id is None:
-        return StartJobDiscoveryResult(
-            scheduled=False,
-            state="failed",
+        return JobScanStatusResult(
+            scanned=0,
+            total=0,
+            scanning_active=False,
             message="Authentication required.",
         )
     async with ctx.session_factory() as db:
         from contactsafe_server.services.job_discovery_service import JobDiscoveryService
 
         service = JobDiscoveryService(db, ctx.settings)
-        return await service.start_discovery(user_id)
+        return await service.get_scan_status(user_id)
 
 
 async def start_single_org_job_discovery(
@@ -1646,45 +1646,6 @@ async def start_single_org_job_discovery(
 
         service = JobDiscoveryService(db, ctx.settings)
         return await service.discover_single_org(user_id, org_id)
-
-
-async def get_job_discovery_status(
-    ctx: AppContext,
-    user_id: UUID | None,
-) -> JobDiscoveryStatusResult:
-    if user_id is None:
-        return JobDiscoveryStatusResult(
-            state="pending",
-            orgs_total=0,
-            orgs_processed=0,
-            jobs_found=0,
-            new_jobs=0,
-            progress_message=None,
-            error=None,
-            message="Authentication required.",
-        )
-    async with ctx.session_factory() as db:
-        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
-
-        service = JobDiscoveryService(db, ctx.settings)
-        return await service.get_status(user_id)
-
-
-async def cancel_job_discovery(
-    ctx: AppContext,
-    user_id: UUID | None,
-) -> None:
-    if user_id is None:
-        return
-    from contactsafe_server.services.job_relevance_service import cancel_scoring
-
-    cancel_scoring(user_id)
-
-    async with ctx.session_factory() as db:
-        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
-
-        service = JobDiscoveryService(db, ctx.settings)
-        await service.cancel_discovery(user_id)
 
 
 async def list_org_jobs(

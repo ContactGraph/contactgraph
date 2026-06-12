@@ -76,7 +76,7 @@ export function useJobEvents(): JobEventsState {
     const eventSource: EventSource = new EventSource("/api/events/jobs");
 
     const invalidateJobQueries = (): void => {
-      void queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
+      void queryClient.invalidateQueries({ queryKey: ["job-scan-status"] });
       void queryClient.invalidateQueries({ queryKey: ["flat-jobs"] });
     };
 

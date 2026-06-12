@@ -17,9 +17,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type {
-  JobDiscoveryStatusResult,
   JobMonitorConfigResult,
   JobPreferencesResult,
+  JobScanStatusResult,
   SetJobPreferencesRequest,
   ListOrgListsResult,
   ListSourcesResult,
@@ -28,7 +28,6 @@ import type {
   SetJobMonitorConfigRequest,
   SourceSummary,
   SourceType,
-  StartJobDiscoveryResult,
   UploadSourceResult,
 } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
@@ -93,12 +92,12 @@ export function JobSetupCards({
     queryFn: () => proxyPost<JobMonitorConfigResult>("get-job-monitor-config"),
   });
 
-  const jobDiscoveryStatusQuery = useQuery({
-    queryKey: ["job-discovery-status"],
-    queryFn: () =>
-      proxyPost<JobDiscoveryStatusResult>("get-job-discovery-status"),
+  const jobScanStatusQuery = useQuery({
+    queryKey: ["job-scan-status"],
+    queryFn: () => proxyPost<JobScanStatusResult>("get-job-scan-status"),
+    enabled: jobMonitorConfigQuery.data?.enabled === true,
     refetchInterval: (query) =>
-      query.state.data?.state === "running" ? 2000 : false,
+      query.state.data?.scanning_active ? 30_000 : false,
   });
 
   const setJobPreferencesMutation = useMutation({
@@ -109,7 +108,7 @@ export function JobSetupCards({
       await queryClient.invalidateQueries({ queryKey: ["job-preferences"] });
       await queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
       await queryClient.invalidateQueries({ queryKey: ["flat-jobs"] });
-      await queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
+      await queryClient.invalidateQueries({ queryKey: ["job-scan-status"] });
     },
     onError: (error: Error) => {
       toast.error(error.message);
@@ -122,18 +121,6 @@ export function JobSetupCards({
     onSuccess: async (result: JobMonitorConfigResult) => {
       toast.success(result.message);
       await queryClient.invalidateQueries({ queryKey: ["job-monitor-config"] });
-    },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
-  });
-
-  const startJobDiscoveryMutation = useMutation({
-    mutationFn: () => proxyPost<StartJobDiscoveryResult>("start-job-discovery"),
-    onSuccess: async (result: StartJobDiscoveryResult) => {
-      toast.success(result.message);
-      await queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
-      await queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
     },
     onError: (error: Error) => {
       toast.error(error.message);
@@ -165,8 +152,7 @@ export function JobSetupCards({
     orgEnrichmentQuery.data;
   const jobMonitorConfig: JobMonitorConfigResult | undefined =
     jobMonitorConfigQuery.data;
-  const jobDiscoveryStatus: JobDiscoveryStatusResult | undefined =
-    jobDiscoveryStatusQuery.data;
+  const jobScanStatus: JobScanStatusResult | undefined = jobScanStatusQuery.data;
   const linkedinProfileSource: SourceSummary | undefined = sourceForType(
     sources,
     "linkedin_profile_upload",
@@ -312,13 +298,10 @@ export function JobSetupCards({
     }
 
     autoStartedRef.current = true;
-    void (async (): Promise<void> => {
-      await setJobMonitorConfigMutation.mutateAsync({
-        list_id: jobProspectsList.list_id,
-        enabled: true,
-      });
-      startJobDiscoveryMutation.mutate();
-    })();
+    void setJobMonitorConfigMutation.mutateAsync({
+      list_id: jobProspectsList.list_id,
+      enabled: true,
+    });
   }, [
     targetComplete,
     profileComplete,
@@ -326,7 +309,6 @@ export function JobSetupCards({
     jobMonitorConfig?.enabled,
     jobProspectsList,
     setJobMonitorConfigMutation,
-    startJobDiscoveryMutation,
   ]);
 
   const profileInProgress: boolean =
@@ -552,9 +534,15 @@ export function JobSetupCards({
         </CardContent>
       </Card>
 
-      {jobDiscoveryStatus?.state === "running" ? (
+      {jobMonitorConfig?.enabled && jobScanStatus !== undefined && jobScanStatus.total > 0 ? (
         <p className="text-sm text-muted-foreground">
-          {jobDiscoveryStatus.progress_message ?? jobDiscoveryStatus.message}
+          {jobScanStatus.scanning_active || jobScanStatus.scanned < jobScanStatus.total
+            ? `${jobScanStatus.scanned} of ${jobScanStatus.total} companies scanned today — scanning in progress.`
+            : `${jobScanStatus.scanned} of ${jobScanStatus.total} companies scanned today.`}
+        </p>
+      ) : jobMonitorConfig?.enabled ? (
+        <p className="text-sm text-muted-foreground">
+          Your companies will be scanned automatically within a few minutes.
         </p>
       ) : null}
 
