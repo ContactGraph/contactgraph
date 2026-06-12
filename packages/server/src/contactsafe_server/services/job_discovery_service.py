@@ -25,6 +25,12 @@ from contactsafe_core.contact_schemas import (
     StartSingleOrgDiscoveryResult,
 )
 from contactsafe_server.config import Settings
+from contactsafe_server.events import (
+    DiscoveryCancelledEvent,
+    DiscoveryCompleteEvent,
+    DiscoveryProgressEvent,
+    job_event_bus,
+)
 from contactsafe_server.db.models import (
     JobDiscoveryRun,
     JobScrapeRun,
@@ -46,6 +52,45 @@ from contactsafe_server.services.job_discovery_types import DiscoveredJob
 from contactsafe_server.services.theirstack_client import TheirStackClient
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+
+def _publish_discovery_progress(
+    user_id: uuid.UUID,
+    *,
+    orgs_processed: int,
+    orgs_total: int,
+    jobs_found: int,
+    new_jobs: int,
+    progress_message: str | None,
+) -> None:
+    event: DiscoveryProgressEvent = {
+        "type": "discovery_progress",
+        "orgs_processed": orgs_processed,
+        "orgs_total": orgs_total,
+        "jobs_found": jobs_found,
+        "new_jobs": new_jobs,
+        "progress_message": progress_message,
+    }
+    job_event_bus.publish(user_id, event)
+
+
+def _publish_discovery_complete(
+    user_id: uuid.UUID,
+    *,
+    jobs_found: int,
+    new_jobs: int,
+) -> None:
+    event: DiscoveryCompleteEvent = {
+        "type": "discovery_complete",
+        "jobs_found": jobs_found,
+        "new_jobs": new_jobs,
+    }
+    job_event_bus.publish(user_id, event)
+
+
+def _publish_discovery_cancelled(user_id: uuid.UUID) -> None:
+    event: DiscoveryCancelledEvent = {"type": "discovery_cancelled"}
+    job_event_bus.publish(user_id, event)
 
 JobDiscoveryState = Literal["pending", "running", "complete", "failed"]
 
@@ -349,6 +394,12 @@ class JobDiscoveryService:
                     is_relevant=is_relevant,
                     match_score=match_score,
                     relevance_reason=reason,
+                    role_score=rel.role_score if rel else None,
+                    role_reason=rel.role_reason if rel else None,
+                    seniority_score=rel.seniority_score if rel else None,
+                    seniority_reason=rel.seniority_reason if rel else None,
+                    location_score=rel.location_score if rel else None,
+                    location_reason=rel.location_reason if rel else None,
                 )
             )
 
@@ -424,6 +475,12 @@ class JobDiscoveryService:
             is_relevant=rel.is_relevant if rel else None,
             match_score=rel.match_score if rel else None,
             relevance_reason=rel.reason if rel else None,
+            role_score=rel.role_score if rel else None,
+            role_reason=rel.role_reason if rel else None,
+            seniority_score=rel.seniority_score if rel else None,
+            seniority_reason=rel.seniority_reason if rel else None,
+            location_score=rel.location_score if rel else None,
+            location_reason=rel.location_reason if rel else None,
         )
 
         return JobDetailResult(
@@ -446,6 +503,14 @@ class JobDiscoveryService:
         run.started_at = datetime.now(tz=UTC)
         run.progress_message = "Scanning organizations…"
         await self._db.commit()
+        _publish_discovery_progress(
+            user_id,
+            orgs_processed=0,
+            orgs_total=len(org_ids),
+            jobs_found=0,
+            new_jobs=0,
+            progress_message=run.progress_message,
+        )
 
         total_jobs_found: int = 0
         total_new_jobs: int = 0
@@ -455,6 +520,7 @@ class JobDiscoveryService:
         for org_id in org_ids:
             await self._db.refresh(run)
             if run.state == "cancelled":
+                _publish_discovery_cancelled(user_id)
                 return
 
             org: Org | None = await self._db.get(Org, org_id)
@@ -498,6 +564,14 @@ class JobDiscoveryService:
             else:
                 run.progress_message = f"Scanned {processed}/{run.orgs_total} companies…"
             await self._db.commit()
+            _publish_discovery_progress(
+                user_id,
+                orgs_processed=processed,
+                orgs_total=run.orgs_total,
+                jobs_found=total_jobs_found,
+                new_jobs=total_new_jobs,
+                progress_message=run.progress_message,
+            )
 
             if new_count > 0:
                 await self._classify_new_jobs(user_id)
@@ -507,6 +581,11 @@ class JobDiscoveryService:
         run.progress_message = None
         run.error = None
         await self._db.commit()
+        _publish_discovery_complete(
+            user_id,
+            jobs_found=total_jobs_found,
+            new_jobs=total_new_jobs,
+        )
 
     async def discover_single_org(
         self,
@@ -737,6 +816,7 @@ class JobDiscoveryService:
             run.progress_message = None
             run.error = "Cancelled by user."
             await self._db.commit()
+            _publish_discovery_cancelled(user_id)
         release_job_discovery_lock(user_id)
 
     async def _latest_run(self, user_id: uuid.UUID) -> JobDiscoveryRun | None:

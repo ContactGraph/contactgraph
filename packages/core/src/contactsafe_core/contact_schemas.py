@@ -388,6 +388,12 @@ class OrgJobItem(BaseModel):
     is_relevant: bool | None = None
     match_score: int | None = None
     relevance_reason: str | None = None
+    role_score: int | None = None
+    role_reason: str | None = None
+    seniority_score: int | None = None
+    seniority_reason: str | None = None
+    location_score: int | None = None
+    location_reason: str | None = None
 
 
 class OrgJobsByCompany(BaseModel):
@@ -437,11 +443,15 @@ class SetJobPreferencesRequest(BaseModel):
     text: str
     location_pref: str | None = None
     location_city: str | None = None
+    commute_max_minutes: int | None = None
+    commute_note: str | None = None
 
 
 class JobPreferencesResult(BaseModel):
     text: str | None = None
     location_pref: str | None = None
     location_city: str | None = None
+    commute_max_minutes: int | None = None
+    commute_note: str | None = None
     classified_job_count: int = 0
     message: str

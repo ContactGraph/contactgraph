@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -59,6 +60,7 @@ import { proxyPost } from "@/lib/proxy-client";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { useOnboardingPhase } from "@/lib/use-onboarding-phase";
 import { useJobBookmarks } from "@/lib/use-job-bookmarks";
+import { useJobEvents } from "@/lib/use-job-events";
 
 function formatSalary(min: number | null, max: number | null): string | null {
   if (min === null && max === null) return null;
@@ -128,25 +130,17 @@ function JobsTable() {
     useState<boolean>(false);
   const queryClient = useQueryClient();
   const { bookmarks, toggle: toggleBookmark, isBookmarked } = useJobBookmarks();
+  const jobEvents = useJobEvents();
 
   const jobsQuery = useQuery({
     queryKey: ["flat-jobs"],
     queryFn: () => proxyPost<FlatJobListResult>("list-flat-jobs"),
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (data === undefined) return false;
-      if (data.total_jobs === 0) return 5000;
-      const hasUnscored: boolean = data.jobs.some((j) => j.match_score === null);
-      return hasUnscored ? 3000 : false;
-    },
   });
 
   const discoveryStatusQuery = useQuery({
     queryKey: ["job-discovery-status"],
     queryFn: () =>
       proxyPost<JobDiscoveryStatusResult>("get-job-discovery-status"),
-    refetchInterval: (query) =>
-      query.state.data?.state === "running" ? 2000 : false,
   });
 
   const checkAllMutation = useMutation({
@@ -161,13 +155,20 @@ function JobsTable() {
   const cancelMutation = useMutation({
     mutationFn: () => proxyPost<{ ok: boolean }>("cancel-job-discovery"),
     onSuccess: () => {
+      toast.success("Cancelling… will stop after the current batch finishes.");
       void queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
       void queryClient.invalidateQueries({ queryKey: ["flat-jobs"] });
     },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
   });
 
+  const discoveryStatus: JobDiscoveryStatusResult | undefined =
+    discoveryStatusQuery.data;
   const discoveryRunning: boolean =
-    discoveryStatusQuery.data?.state === "running";
+    jobEvents.discoveryRunning || discoveryStatus?.state === "running";
+  const scoringActive: boolean = jobEvents.scoringActive;
 
   const data: FlatJobListResult | undefined = jobsQuery.data;
   const loading: boolean = jobsQuery.isLoading;
@@ -386,13 +387,8 @@ function JobsTable() {
   const visibleCount: number = table.getRowModel().rows.length;
   const totalCount: number = data?.total_jobs ?? 0;
 
-  const unscoredCount: number = useMemo(
-    () => (data?.jobs ?? []).filter((j) => j.match_score === null).length,
-    [data?.jobs],
-  );
-
-  const discoveryStatus: JobDiscoveryStatusResult | undefined =
-    discoveryStatusQuery.data;
+  const discoveryProgress = jobEvents.discoveryProgress;
+  const scoringProgress = jobEvents.scoringProgress;
 
   return (
     <div className="space-y-3">
@@ -487,7 +483,7 @@ function JobsTable() {
         </div>
 
         <div className="ml-auto flex items-center gap-2">
-          {discoveryRunning ? (
+          {discoveryRunning || scoringActive ? (
             <Button
               variant="outline"
               size="sm"
@@ -529,32 +525,33 @@ function JobsTable() {
         </div>
       </div>
 
-      {discoveryRunning || unscoredCount > 0 ? (
+      {discoveryRunning || scoringActive ? (
         <div className="flex flex-col gap-1.5 rounded-lg border bg-muted/40 px-4 py-2.5">
           {discoveryRunning ? (
             <div className="flex items-center gap-2 text-sm">
               <Loader2 className="size-3.5 animate-spin text-primary" />
               <span className="font-medium">Scanning</span>
               <span className="text-muted-foreground">
-                {discoveryStatus?.progress_message ??
-                  `${discoveryStatus?.orgs_processed ?? 0} of ${discoveryStatus?.orgs_total ?? 0} companies`}
+                {discoveryProgress?.progressMessage ??
+                  discoveryStatus?.progress_message ??
+                  `${discoveryProgress?.orgsProcessed ?? discoveryStatus?.orgs_processed ?? 0} of ${discoveryProgress?.orgsTotal ?? discoveryStatus?.orgs_total ?? 0} companies`}
               </span>
-              {(discoveryStatus?.jobs_found ?? 0) > 0 ? (
+              {(discoveryProgress?.jobsFound ?? discoveryStatus?.jobs_found ?? 0) > 0 ? (
                 <span className="text-muted-foreground">
-                  · {discoveryStatus!.jobs_found} jobs found
-                  {(discoveryStatus!.new_jobs ?? 0) > 0
-                    ? ` (${discoveryStatus!.new_jobs} new)`
+                  · {discoveryProgress?.jobsFound ?? discoveryStatus?.jobs_found ?? 0} jobs found
+                  {(discoveryProgress?.newJobs ?? discoveryStatus?.new_jobs ?? 0) > 0
+                    ? ` (${discoveryProgress?.newJobs ?? discoveryStatus?.new_jobs ?? 0} new)`
                     : ""}
                 </span>
               ) : null}
             </div>
           ) : null}
-          {unscoredCount > 0 ? (
+          {scoringActive ? (
             <div className="flex items-center gap-2 text-sm">
               <Loader2 className="size-3.5 animate-spin text-primary" />
-              <span className="font-medium">Classifying jobs</span>
+              <span className="font-medium">Scoring jobs</span>
               <span className="text-muted-foreground">
-                ({totalCount - unscoredCount} of {totalCount})
+                ({scoringProgress?.scored ?? 0} of {scoringProgress?.total ?? totalCount})
               </span>
             </div>
           ) : null}

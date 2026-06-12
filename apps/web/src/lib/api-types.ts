@@ -698,6 +698,12 @@ export interface OrgJobItem {
   is_relevant: boolean | null;
   match_score: number | null;
   relevance_reason: string | null;
+  role_score: number | null;
+  role_reason: string | null;
+  seniority_score: number | null;
+  seniority_reason: string | null;
+  location_score: number | null;
+  location_reason: string | null;
 }
 
 export interface OrgJobsByCompany {
@@ -749,12 +755,16 @@ export interface SetJobPreferencesRequest {
   text: string;
   location_pref: string | null;
   location_city: string | null;
+  commute_max_minutes: number | null;
+  commute_note: string | null;
 }
 
 export interface JobPreferencesResult {
   text: string | null;
   location_pref: string | null;
   location_city: string | null;
+  commute_max_minutes: number | null;
+  commute_note: string | null;
   classified_job_count: number;
   message: string;
 }

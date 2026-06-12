@@ -64,6 +64,48 @@ function stripMarkdown(text: string): string {
     .trim();
 }
 
+function SubScoreRow({
+  label,
+  score,
+  reason,
+  weight,
+}: {
+  label: string;
+  score: number | null;
+  reason: string | null;
+  weight: number;
+}) {
+  if (score === null) return null;
+  const barColor: string =
+    score >= 70
+      ? "bg-green-500"
+      : score >= 40
+        ? "bg-yellow-500"
+        : "bg-red-400";
+  return (
+    <div className="space-y-0.5">
+      <div className="flex items-center gap-2">
+        <span className="w-16 shrink-0 text-xs font-medium">{label}</span>
+        <div className="h-1.5 flex-1 rounded-full bg-muted">
+          <div
+            className={`h-full rounded-full ${barColor}`}
+            style={{ width: `${score}%` }}
+          />
+        </div>
+        <span className="w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+          {score}
+        </span>
+        <span className="w-8 shrink-0 text-right text-[10px] text-muted-foreground/60">
+          ×{weight}%
+        </span>
+      </div>
+      {reason ? (
+        <p className="pl-[4.5rem] text-xs text-muted-foreground">{reason}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export function JobDetailPanel({
   jobId,
   onSelectPerson,
@@ -121,7 +163,30 @@ export function JobDetailPanel({
               </span>
             ) : null}
           </div>
-          {job.relevance_reason ? (
+          {job.role_score !== null ||
+          job.seniority_score !== null ||
+          job.location_score !== null ? (
+            <div className="space-y-1.5 rounded-md border bg-muted/30 px-3 py-2">
+              <SubScoreRow
+                label="Function"
+                score={job.role_score}
+                reason={job.role_reason}
+                weight={60}
+              />
+              <SubScoreRow
+                label="Seniority"
+                score={job.seniority_score}
+                reason={job.seniority_reason}
+                weight={25}
+              />
+              <SubScoreRow
+                label="Location"
+                score={job.location_score}
+                reason={job.location_reason}
+                weight={15}
+              />
+            </div>
+          ) : job.relevance_reason ? (
             <p className="text-sm text-muted-foreground">
               {job.relevance_reason}
             </p>

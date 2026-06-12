@@ -1673,6 +1673,10 @@ async def cancel_job_discovery(
 ) -> None:
     if user_id is None:
         return
+    from contactsafe_server.services.job_relevance_service import cancel_scoring
+
+    cancel_scoring(user_id)
+
     async with ctx.session_factory() as db:
         from contactsafe_server.services.job_discovery_service import JobDiscoveryService
 
@@ -1758,6 +1762,8 @@ async def get_job_preferences(
             text=user.job_preferences_text,
             location_pref=user.job_location_pref,
             location_city=user.job_location_city,
+            commute_max_minutes=user.job_commute_max_minutes,
+            commute_note=user.job_commute_note,
             classified_job_count=count,
             message="OK",
         )
@@ -1769,6 +1775,8 @@ async def set_job_preferences(
     text: str,
     location_pref: str | None = None,
     location_city: str | None = None,
+    commute_max_minutes: int | None = None,
+    commute_note: str | None = None,
 ) -> JobPreferencesResult:
     if user_id is None:
         return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
@@ -1781,9 +1789,15 @@ async def set_job_preferences(
         user.job_preferences_text = text.strip() or None
         user.job_location_pref = location_pref
         user.job_location_city = location_city.strip() if location_city else None
+        user.job_commute_max_minutes = commute_max_minutes
+        user.job_commute_note = commute_note.strip() if commute_note else None
         await db.commit()
 
     import asyncio
+
+    from contactsafe_server.services.job_relevance_service import cancel_scoring
+
+    cancel_scoring(user_id)
 
     async def _reclassify_background() -> None:
         async with ctx.session_factory() as bg_db:
@@ -1799,5 +1813,5 @@ async def set_job_preferences(
         location_pref=location_pref,
         location_city=location_city.strip() if location_city else None,
         classified_job_count=0,
-        message="Preferences saved. Re-classifying jobs in background…",
+        message="Preferences saved. Rescoring jobs in background…",
     )
