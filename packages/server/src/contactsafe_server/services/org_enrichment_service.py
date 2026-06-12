@@ -28,6 +28,11 @@ from contactsafe_server.db.models import (
     PersonAlias,
     UserPersonObservation,
 )
+from contactsafe_server.graph_event_publishers import (
+    publish_org_enrichment_complete,
+    publish_org_enrichment_failed,
+    publish_org_enrichment_progress,
+)
 from contactsafe_server.services.contacts_service import PHONE_RELATIONSHIP
 from contactsafe_server.services.exa_client import ExaClient
 from contactsafe_server.services.org_company_size import (
@@ -138,6 +143,12 @@ class OrgEnrichmentService:
             )
 
         await self._db.commit()
+        publish_org_enrichment_progress(
+            user_id,
+            orgs_enriched=0,
+            orgs_total=len(unenriched_org_ids),
+            progress_message=run.progress_message,
+        )
         return EnrichOrgsResult(
             scheduled=True,
             state="running",
@@ -163,6 +174,12 @@ class OrgEnrichmentService:
         run.completed_at = datetime.now(tz=UTC)
         run.progress_message = None
         await self._db.commit()
+        publish_org_enrichment_failed(
+            run.user_id,
+            orgs_enriched=run.orgs_enriched,
+            orgs_total=run.orgs_total,
+            error=run.error,
+        )
 
     async def get_status(self, user_id: uuid.UUID) -> OrgEnrichmentStatusResult:
         run: OrgEnrichmentRun | None = await self._latest_run(user_id)
@@ -217,6 +234,12 @@ class OrgEnrichmentService:
         run.completed_at = datetime.now(tz=UTC)
         run.progress_message = None
         await self._db.commit()
+        publish_org_enrichment_failed(
+            user_id,
+            orgs_enriched=run.orgs_enriched,
+            orgs_total=run.orgs_total,
+            error=run.error,
+        )
         return CancelOrgEnrichmentResult(
             cancelled=True,
             message="Enrichment cancelled.",
@@ -233,6 +256,12 @@ class OrgEnrichmentService:
         run.orgs_enriched = 0
         run.progress_message = self._progress_message(0, run.orgs_total)
         await self._db.commit()
+        publish_org_enrichment_progress(
+            user_id,
+            orgs_enriched=0,
+            orgs_total=run.orgs_total,
+            progress_message=run.progress_message,
+        )
 
         for index, org in enumerate(orgs, start=1):
             run = await self._db.get(OrgEnrichmentRun, run_id)
@@ -250,6 +279,12 @@ class OrgEnrichmentService:
                     run.orgs_total,
                 )
                 await self._db.commit()
+                publish_org_enrichment_progress(
+                    user_id,
+                    orgs_enriched=run.orgs_enriched,
+                    orgs_total=run.orgs_total,
+                    progress_message=run.progress_message,
+                )
                 logger.info(
                     "Org enrichment progress: %d/%d (%s)",
                     run.orgs_enriched,
@@ -271,6 +306,11 @@ class OrgEnrichmentService:
         run.completed_at = datetime.now(tz=UTC)
         run.progress_message = None
         await self._db.commit()
+        publish_org_enrichment_complete(
+            user_id,
+            orgs_enriched=run.orgs_enriched,
+            orgs_total=run.orgs_total,
+        )
 
     async def _enrich_one_org(self, org: Org) -> None:
         summary_query: str = build_company_summary_query(org.canonical_name)
@@ -723,6 +763,12 @@ async def _run_org_enrichment_task(user_id: uuid.UUID, run_id: uuid.UUID) -> Non
                     run.completed_at = datetime.now(tz=UTC)
                     run.progress_message = None
                     await db.commit()
+                    publish_org_enrichment_failed(
+                        user_id,
+                        orgs_enriched=run.orgs_enriched,
+                        orgs_total=run.orgs_total,
+                        error=run.error,
+                    )
         except Exception:
             logger.exception("Failed to mark org enrichment run %s as failed", run_id)
     finally:

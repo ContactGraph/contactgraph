@@ -32,6 +32,7 @@ import type {
   UploadSourceResult,
 } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
+import { useGraphEvents } from "@/lib/use-graph-events";
 import {
   findJobProspectsList,
   hasJobPreferences,
@@ -51,6 +52,7 @@ export function JobSetupCards({
   compact?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
+  useGraphEvents();
   const queryClient = useQueryClient();
   const autoStartedRef = useRef<boolean>(false);
   const [linkedinProfileDialogOpen, setLinkedinProfileDialogOpen] =
@@ -68,14 +70,6 @@ export function JobSetupCards({
   const sourcesQuery = useQuery({
     queryKey: ["sources"],
     queryFn: () => proxyPost<ListSourcesResult>("list-sources"),
-    refetchInterval: (query) => {
-      const data: ListSourcesResult | undefined = query.state.data;
-      const syncing: boolean =
-        data?.sources.some((source) => source.sync_state === "syncing") ?? false;
-      const pending: boolean =
-        data?.sources.some((source) => source.sync_state === "pending") ?? false;
-      return syncing || pending || linkedinProfileProcessing ? 4000 : false;
-    },
   });
 
   const orgListsQuery = useQuery({
@@ -87,16 +81,6 @@ export function JobSetupCards({
     queryKey: ["org-enrichment-status"],
     queryFn: () =>
       proxyPost<OrgEnrichmentStatusResult>("get-org-enrichment-status"),
-    refetchInterval: (query) => {
-      const data: OrgEnrichmentStatusResult | undefined = query.state.data;
-      if (data === undefined) {
-        return 4000;
-      }
-      if (data.orgs_total === 0 || data.state === "failed") {
-        return false;
-      }
-      return isOrgEnrichmentComplete(data) ? false : 4000;
-    },
   });
 
   const jobPreferencesQuery = useQuery({

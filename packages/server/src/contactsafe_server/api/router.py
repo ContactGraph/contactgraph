@@ -98,7 +98,7 @@ from contactsafe_core.schemas import (
 from contactsafe_server import actions
 from contactsafe_server.db.models import User
 from contactsafe_server.deps import AppContext
-from contactsafe_server.events import JobEvent, job_event_bus
+from contactsafe_server.events import GraphEvent, JobEvent, graph_event_bus, job_event_bus
 from contactsafe_server.services.jwt_service import JWTService
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -785,7 +785,7 @@ async def api_get_job_discovery_status(
     return await actions.get_job_discovery_status(ctx, user_id)
 
 
-def _format_sse_event(event: JobEvent) -> str:
+def _format_sse_event(event: JobEvent | GraphEvent) -> str:
     return f"data: {json.dumps(event)}\n\n"
 
 
@@ -840,6 +840,77 @@ async def api_job_events(
                 yield _format_sse_event(event)
         finally:
             job_event_bus.unregister(user_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/events/graph")
+async def api_graph_events(
+    request: Request,
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> StreamingResponse:
+    async def event_generator():
+        queue = graph_event_bus.register(user_id)
+        try:
+            async with ctx.session_factory() as db:
+                from contactsafe_core.enums import SyncState
+                from contactsafe_server.db.models import Source
+                from contactsafe_server.graph_event_publishers import source_sync_event_for
+                from contactsafe_server.services.org_enrichment_service import OrgEnrichmentService
+
+                sources_result = await db.execute(
+                    select(Source).where(
+                        Source.user_id == user_id,
+                        Source.sync_state.in_(
+                            [
+                                SyncState.SYNCING.value,
+                                SyncState.PENDING.value,
+                                SyncState.PARTIAL.value,
+                            ],
+                        ),
+                    ),
+                )
+                for source in sources_result.scalars().all():
+                    yield _format_sse_event(source_sync_event_for(source))
+
+                org_service = OrgEnrichmentService(db, ctx.settings)
+                enrichment_status = await org_service.get_status(user_id)
+                if enrichment_status.state == "running":
+                    yield _format_sse_event(
+                        {
+                            "type": "org_enrichment_progress",
+                            "orgs_enriched": enrichment_status.orgs_enriched,
+                            "orgs_total": enrichment_status.orgs_total,
+                            "progress_message": enrichment_status.progress_message,
+                            "state": "running",
+                        },
+                    )
+
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event: GraphEvent | None = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=15.0,
+                    )
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                if event is None:
+                    break
+                yield _format_sse_event(event)
+        finally:
+            graph_event_bus.unregister(user_id, queue)
 
     return StreamingResponse(
         event_generator(),

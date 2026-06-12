@@ -10,6 +10,7 @@ import type {
   OrgEnrichmentStatusResult,
 } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
+import { useGraphEvents } from "@/lib/use-graph-events";
 
 import {
   hasTargetCompanies,
@@ -45,6 +46,8 @@ export interface OnboardingPhaseState {
 }
 
 export function useOnboardingPhase(): OnboardingPhaseState {
+  useGraphEvents();
+
   const sourcesQuery = useQuery({
     queryKey: ["sources"],
     queryFn: () => proxyPost<ListSourcesResult>("list-sources"),
@@ -69,16 +72,6 @@ export function useOnboardingPhase(): OnboardingPhaseState {
     queryKey: ["org-enrichment-status"],
     queryFn: () =>
       proxyPost<OrgEnrichmentStatusResult>("get-org-enrichment-status"),
-    refetchInterval: (query) => {
-      const data: OrgEnrichmentStatusResult | undefined = query.state.data;
-      if (data === undefined) {
-        return 4000;
-      }
-      if (data.orgs_total === 0 || data.state === "failed") {
-        return false;
-      }
-      return isOrgEnrichmentComplete(data) ? false : 4000;
-    },
   });
 
   const sources = sourcesQuery.data?.sources ?? [];

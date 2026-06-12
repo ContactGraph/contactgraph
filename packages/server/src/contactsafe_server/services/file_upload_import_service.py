@@ -32,6 +32,7 @@ from contactsafe_server.services.phone_contacts_parser import (
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.import_write_lock import user_import_write_lock
 from contactsafe_server.services.upload_payload_crypto import read_upload_payload
+from contactsafe_server.graph_event_publishers import publish_source_sync_update
 from contactsafe_server.services.user_person_service import ensure_user_person
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -95,6 +96,7 @@ class FileUploadImportService:
     async def _commit_progress(self, source: Source) -> None:
         await self._db.commit()
         await self._db.refresh(source)
+        publish_source_sync_update(source)
 
     async def run_sync(self, source_id: uuid.UUID) -> None:
         source: Source | None = await self._db.get(Source, source_id)
@@ -115,6 +117,7 @@ class FileUploadImportService:
         source.contacts_resolved = 0
         source.contacts_pending = 0
         await self._db.flush()
+        publish_source_sync_update(source)
 
         try:
             filename, content = read_upload_payload(
@@ -139,6 +142,7 @@ class FileUploadImportService:
                 source.connection_status = SourceConnectionStatus.CONNECTED.value
                 source.contacts_pending = 0
                 await self._db.flush()
+                publish_source_sync_update(source)
         except Exception as exc:
             logger.exception("Upload import failed for source %s", source_id)
             await self._db.rollback()
@@ -147,6 +151,7 @@ class FileUploadImportService:
                 failed_source.sync_state = SyncState.FAILED.value
                 failed_source.sync_error = str(exc)[:500]
                 await self._db.commit()
+                publish_source_sync_update(failed_source)
             raise
 
     async def _ingest_phone_contacts(

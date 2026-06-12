@@ -1,4 +1,4 @@
-"""In-memory pub/sub for job discovery and scoring progress events."""
+"""In-memory pub/sub for job discovery, scoring, and graph progress events."""
 
 from __future__ import annotations
 
@@ -55,23 +55,80 @@ JobEvent = (
 )
 
 
+class SourceSyncProgressEvent(TypedDict):
+    type: Literal["source_sync_progress"]
+    source_id: str
+    source_type: str
+    sync_state: str
+    contacts_found: int
+    contacts_resolved: int
+    contacts_pending: int
+    sync_error: str | None
+
+
+class SourceSyncCompleteEvent(TypedDict):
+    type: Literal["source_sync_complete"]
+    source_id: str
+    source_type: str
+    contacts_found: int
+    contacts_resolved: int
+
+
+class SourceSyncFailedEvent(TypedDict):
+    type: Literal["source_sync_failed"]
+    source_id: str
+    source_type: str
+    sync_error: str | None
+
+
+class OrgEnrichmentProgressEvent(TypedDict):
+    type: Literal["org_enrichment_progress"]
+    orgs_enriched: int
+    orgs_total: int
+    progress_message: str | None
+    state: Literal["running"]
+
+
+class OrgEnrichmentCompleteEvent(TypedDict):
+    type: Literal["org_enrichment_complete"]
+    orgs_enriched: int
+    orgs_total: int
+
+
+class OrgEnrichmentFailedEvent(TypedDict):
+    type: Literal["org_enrichment_failed"]
+    orgs_enriched: int
+    orgs_total: int
+    error: str | None
+
+
+GraphEvent = (
+    SourceSyncProgressEvent
+    | SourceSyncCompleteEvent
+    | SourceSyncFailedEvent
+    | OrgEnrichmentProgressEvent
+    | OrgEnrichmentCompleteEvent
+    | OrgEnrichmentFailedEvent
+)
+
+
 @dataclass
-class JobEventBus:
-    _subscribers: dict[uuid.UUID, list[asyncio.Queue[JobEvent | None]]] = field(
+class _EventBus[TEvent]:
+    _subscribers: dict[uuid.UUID, list[asyncio.Queue[TEvent | None]]] = field(
         default_factory=dict,
     )
 
-    def register(self, user_id: uuid.UUID) -> asyncio.Queue[JobEvent | None]:
-        queue: asyncio.Queue[JobEvent | None] = asyncio.Queue()
+    def register(self, user_id: uuid.UUID) -> asyncio.Queue[TEvent | None]:
+        queue: asyncio.Queue[TEvent | None] = asyncio.Queue()
         self._subscribers.setdefault(user_id, []).append(queue)
         return queue
 
     def unregister(
         self,
         user_id: uuid.UUID,
-        queue: asyncio.Queue[JobEvent | None],
+        queue: asyncio.Queue[TEvent | None],
     ) -> None:
-        subscribers: list[asyncio.Queue[JobEvent | None]] | None = self._subscribers.get(
+        subscribers: list[asyncio.Queue[TEvent | None]] | None = self._subscribers.get(
             user_id,
         )
         if subscribers is None:
@@ -81,9 +138,20 @@ class JobEventBus:
         if not subscribers:
             del self._subscribers[user_id]
 
-    def publish(self, user_id: uuid.UUID, event: JobEvent) -> None:
+    def publish(self, user_id: uuid.UUID, event: TEvent) -> None:
         for queue in self._subscribers.get(user_id, []):
             queue.put_nowait(event)
 
 
+@dataclass
+class JobEventBus(_EventBus[JobEvent]):
+    pass
+
+
+@dataclass
+class GraphEventBus(_EventBus[GraphEvent]):
+    pass
+
+
 job_event_bus: JobEventBus = JobEventBus()
+graph_event_bus: GraphEventBus = GraphEventBus()
