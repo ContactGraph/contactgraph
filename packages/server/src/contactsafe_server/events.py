@@ -45,6 +45,11 @@ class ScoringCancelledEvent(TypedDict):
     total: int
 
 
+class ScanProgressEvent(TypedDict):
+    type: Literal["scan_progress"]
+    scanning_active: bool
+
+
 JobEvent = (
     DiscoveryProgressEvent
     | DiscoveryCompleteEvent
@@ -52,6 +57,7 @@ JobEvent = (
     | ScoringProgressEvent
     | ScoringCompleteEvent
     | ScoringCancelledEvent
+    | ScanProgressEvent
 )
 
 
