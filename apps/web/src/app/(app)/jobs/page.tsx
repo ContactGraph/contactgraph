@@ -1,23 +1,32 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
+  useReactTable,
+  type ColumnDef,
+  type SortingState,
+} from "@tanstack/react-table";
+import {
   Bookmark,
-  CheckCircle2,
-  ChevronDown,
-  ChevronRight,
   Download,
   ExternalLink,
   Loader2,
   RefreshCw,
   Settings,
-  Users,
   XCircle,
 } from "lucide-react";
 import Link from "next/link";
 
-import { PersonDetailPanel } from "@/components/person-detail-panel";
+import {
+  CompactCell,
+  CompactSortHeader,
+  CompactTableShell,
+} from "@/components/data-table/compact-table";
+import { JobDetailPanel } from "@/components/job-detail-panel";
 import { JobSetupCards } from "@/components/setup/job-setup-cards";
 import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import {
@@ -29,14 +38,9 @@ import {
   ResponsiveModalTrigger,
 } from "@/components/ui/responsive-modal";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { SearchInput } from "@/components/ui/search-input";
 import {
   Sheet,
   SheetContent,
@@ -46,24 +50,15 @@ import {
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
+  FlatJobListResult,
   JobDiscoveryStatusResult,
-  ListOrgJobsResult,
-  ListOrgListsResult,
-  ListOrgsResult,
-  OrgDetailResult,
   OrgJobItem,
-  OrgListItem,
-  OrgPersonSummary,
-  PersonDetailResult,
   StartJobDiscoveryResult,
-  StartSingleOrgDiscoveryResult,
 } from "@/lib/api-types";
-import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { proxyPost } from "@/lib/proxy-client";
-import { findJobProspectsList } from "@/lib/setup-utils";
+import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { useOnboardingPhase } from "@/lib/use-onboarding-phase";
 import { useJobBookmarks } from "@/lib/use-job-bookmarks";
-import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 
 function formatSalary(min: number | null, max: number | null): string | null {
   if (min === null && max === null) return null;
@@ -84,180 +79,63 @@ function formatRelativeTime(iso: string): string {
   return `${days}d ago`;
 }
 
-function hasRelevanceData(data: ListOrgJobsResult | undefined): boolean {
-  if (!data) return false;
-  return data.companies.some((c) =>
-    c.jobs.some((j) => j.is_relevant !== null),
-  );
-}
-
-function stripMarkdown(text: string): string {
-  return text
-    .replace(/#{1,6}\s+/g, "")
-    .replace(/\*\*(.+?)\*\*/g, "$1")
-    .replace(/__(.+?)__/g, "$1")
-    .replace(/\*(.+?)\*/g, "$1")
-    .replace(/_(.+?)_/g, "$1")
-    .replace(/~~(.+?)~~/g, "$1")
-    .replace(/`(.+?)`/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/^[-*+]\s+/gm, "• ")
-    .replace(/^\d+\.\s+/gm, "")
-    .replace(/\n{2,}/g, " ")
-    .replace(/\n/g, " ")
-    .trim();
-}
-
-interface OrgTile {
-  org_id: string;
-  org_name: string;
-  primary_domain: string | null;
-  description: string | null;
-  contact_count: number;
-  last_checked_at: string | null;
-  jobs: OrgJobItem[];
-  allJobs: OrgJobItem[];
-  status: "scanning" | "done" | "no-jobs";
-}
-
-const CONTACTS_COLLAPSED_LIMIT: number = 3;
-
-function OrgContactsList({
-  orgId,
-  contactCount,
-  onSelectPerson,
-}: {
-  orgId: string;
-  contactCount: number;
-  onSelectPerson: (personId: string) => void;
-}) {
-  const [expanded, setExpanded] = useState<boolean>(false);
-  const orgDetailQuery = useQuery({
-    queryKey: ["org-detail", orgId],
-    queryFn: () => proxyPost<OrgDetailResult>("get-org", { org_id: orgId }),
-    staleTime: 120_000,
-  });
-
-  const people: readonly OrgPersonSummary[] =
-    orgDetailQuery.data?.people ?? [];
-
-  if (contactCount === 0) return null;
-
-  if (orgDetailQuery.isLoading) {
+function MatchBadge({ score }: { score: number | null }) {
+  if (score === null) {
     return (
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Users className="size-3" />
-        <Loader2 className="size-3 animate-spin" />
-        Loading {contactCount} contact{contactCount !== 1 ? "s" : ""}…
-      </div>
+      <span className="text-xs text-muted-foreground/50">—</span>
     );
   }
-
-  if (people.length === 0) return null;
-
-  const visiblePeople: readonly OrgPersonSummary[] =
-    expanded ? people : people.slice(0, CONTACTS_COLLAPSED_LIMIT);
-  const hiddenCount: number = people.length - visiblePeople.length;
-
+  const color: string =
+    score >= 70
+      ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+      : score >= 40
+        ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
+        : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400";
   return (
-    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-      <Users className="size-3 shrink-0" />
-      <span className="flex flex-wrap items-center gap-x-0.5">
-        {visiblePeople.map((person, idx) => (
-          <span key={person.person_id}>
-            {idx > 0 ? ", " : ""}
-            <button
-              type="button"
-              className="text-primary underline-offset-2 hover:underline"
-              onClick={(e) => {
-                e.stopPropagation();
-                onSelectPerson(person.person_id);
-              }}
-            >
-              {person.display_name}
-            </button>
-            {person.current_role ? (
-              <span className="text-muted-foreground/70">
-                {" "}
-                ({person.current_role})
-              </span>
-            ) : null}
-            {person.shared_from ? (
-              <span className="ml-0.5 inline-flex items-center rounded border px-1 py-0 text-[10px] text-muted-foreground">
-                via {person.shared_from}
-              </span>
-            ) : null}
-          </span>
-        ))}
-        {hiddenCount > 0 ? (
-          <button
-            type="button"
-            className="ml-0.5 text-primary underline-offset-2 hover:underline"
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded(true);
-            }}
-          >
-            and {hiddenCount} other{hiddenCount !== 1 ? "s" : ""}
-          </button>
-        ) : null}
-        {expanded && people.length > CONTACTS_COLLAPSED_LIMIT ? (
-          <button
-            type="button"
-            className="ml-0.5 text-primary underline-offset-2 hover:underline"
-            onClick={(e) => {
-              e.stopPropagation();
-              setExpanded(false);
-            }}
-          >
-            Show less
-          </button>
-        ) : null}
-      </span>
-    </div>
+    <span
+      className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[11px] font-semibold leading-none ${color}`}
+    >
+      {score}%
+    </span>
   );
 }
 
 type JobFilter = "bookmarked" | "relevant" | "all";
 
-function JobsListings() {
+function scoreSortingFn(
+  rowA: { getValue: (id: string) => unknown },
+  rowB: { getValue: (id: string) => unknown },
+  columnId: string,
+): number {
+  const a: number | null = rowA.getValue(columnId) as number | null;
+  const b: number | null = rowB.getValue(columnId) as number | null;
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return a - b;
+}
+
+function JobsTable() {
+  const [search, setSearch] = useState<string>("");
   const [filter, setFilter] = useState<JobFilter>("relevant");
+  const [sorting, setSorting] = useState<SortingState>([
+    { id: "match", desc: true },
+  ]);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [settingsDirty, setSettingsDirty] = useState<boolean>(false);
   const [settingsDiscardOpen, setSettingsDiscardOpen] =
     useState<boolean>(false);
-  const [selectedPersonId, setSelectedPersonId] = useState<string | null>(null);
-  const [isDetailDirty, setIsDetailDirty] = useState<boolean>(false);
-  const [discardDialogOpen, setDiscardDialogOpen] = useState<boolean>(false);
-  const [isClosingSave, setIsClosingSave] = useState<boolean>(false);
-  const [expandedOrgs, setExpandedOrgs] = useState<ReadonlySet<string>>(
-    new Set(),
-  );
-  const [checkingOrgs, setCheckingOrgs] = useState<ReadonlySet<string>>(
-    new Set(),
-  );
-  const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
   const queryClient = useQueryClient();
   const { bookmarks, toggle: toggleBookmark, isBookmarked } = useJobBookmarks();
 
   const jobsQuery = useQuery({
-    queryKey: ["org-jobs"],
-    queryFn: () => proxyPost<ListOrgJobsResult>("list-org-jobs"),
+    queryKey: ["flat-jobs"],
+    queryFn: () => proxyPost<FlatJobListResult>("list-flat-jobs"),
     refetchInterval: (query) => {
       const data = query.state.data;
       return data !== undefined && data.total_jobs === 0 ? 5000 : false;
     },
-  });
-
-  const orgListsQuery = useQuery({
-    queryKey: ["org-lists"],
-    queryFn: () => proxyPost<ListOrgListsResult>("list-org-lists"),
-  });
-
-  const orgsQuery = useQuery({
-    queryKey: ["organizations"],
-    queryFn: () => proxyPost<ListOrgsResult>("list-orgs"),
-    staleTime: 60_000,
   });
 
   const discoveryStatusQuery = useQuery({
@@ -268,180 +146,223 @@ function JobsListings() {
       query.state.data?.state === "running" ? 2000 : false,
   });
 
-  const personDetailQuery = useQuery({
-    queryKey: ["person", selectedPersonId],
-    queryFn: () =>
-      proxyPost<PersonDetailResult>("get-person", {
-        person_id: selectedPersonId,
-      }),
-    enabled: selectedPersonId !== null,
-  });
-
   const checkAllMutation = useMutation({
     mutationFn: () =>
       proxyPost<StartJobDiscoveryResult>("start-job-discovery"),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
-      void queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["flat-jobs"] });
     },
   });
 
   const cancelMutation = useMutation({
-    mutationFn: () =>
-      proxyPost<{ ok: boolean }>("cancel-job-discovery"),
+    mutationFn: () => proxyPost<{ ok: boolean }>("cancel-job-discovery"),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
-      void queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["flat-jobs"] });
     },
   });
 
   const discoveryRunning: boolean =
     discoveryStatusQuery.data?.state === "running";
 
-  const data: ListOrgJobsResult | undefined = jobsQuery.data;
-  const loading: boolean = jobsQuery.isLoading || orgsQuery.isLoading;
-  const hasRelevance: boolean = hasRelevanceData(data);
-
-  const starredOrgIds: ReadonlySet<string> = useMemo(() => {
-    const list = findJobProspectsList(orgListsQuery.data?.lists ?? []);
-    return new Set(list?.org_ids ?? []);
-  }, [orgListsQuery.data?.lists]);
-
-  const orgNameMap: ReadonlyMap<string, OrgListItem> = useMemo(() => {
-    const map = new Map<string, OrgListItem>();
-    for (const org of orgsQuery.data?.orgs ?? []) {
-      map.set(org.org_id, org);
-    }
-    return map;
-  }, [orgsQuery.data?.orgs]);
-
-  const lastCheckedMap: ReadonlyMap<string, string> = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const company of data?.companies ?? []) {
-      if (company.last_checked_at) {
-        map.set(company.org_id, company.last_checked_at);
-      }
-    }
-    return map;
-  }, [data?.companies]);
-
-  const jobsByOrgId: ReadonlyMap<
-    string,
-    { filtered: OrgJobItem[]; all: OrgJobItem[] }
-  > = useMemo(() => {
-    const map = new Map<
-      string,
-      { filtered: OrgJobItem[]; all: OrgJobItem[] }
-    >();
-    for (const company of data?.companies ?? []) {
-      let filtered: OrgJobItem[];
-      if (filter === "bookmarked") {
-        filtered = company.jobs.filter((j) => bookmarks.has(j.job_id));
-      } else if (filter === "all" || !hasRelevance) {
-        filtered = company.jobs;
-      } else {
-        filtered = company.jobs.filter((j) => j.is_relevant === true);
-      }
-      map.set(company.org_id, { filtered, all: company.jobs });
-    }
-    return map;
-  }, [data?.companies, hasRelevance, filter, bookmarks]);
-
-  const orgTiles: OrgTile[] = useMemo(() => {
-    const tiles: OrgTile[] = [];
-    for (const orgId of starredOrgIds) {
-      const orgInfo: OrgListItem | undefined = orgNameMap.get(orgId);
-      const company = (data?.companies ?? []).find((c) => c.org_id === orgId);
-      const jobData = jobsByOrgId.get(orgId);
-      const jobs: OrgJobItem[] = jobData?.filtered ?? [];
-      const allJobs: OrgJobItem[] = jobData?.all ?? [];
-      const status: OrgTile["status"] =
-        allJobs.length > 0
-          ? "done"
-          : discoveryRunning || checkingOrgs.has(orgId)
-            ? "scanning"
-            : "no-jobs";
-      tiles.push({
-        org_id: orgId,
-        org_name: company?.org_name ?? orgInfo?.name ?? "Unknown",
-        primary_domain:
-          company?.primary_domain ?? orgInfo?.primary_domain ?? null,
-        description: company?.description ?? orgInfo?.description ?? null,
-        contact_count:
-          (orgInfo?.contact_count ?? 0) + (orgInfo?.shared_contact_count ?? 0),
-        last_checked_at: lastCheckedMap.get(orgId) ?? null,
-        jobs,
-        allJobs,
-        status,
-      });
-    }
-    tiles.sort((a, b) => {
-      if (a.jobs.length > 0 && b.jobs.length === 0) return -1;
-      if (a.jobs.length === 0 && b.jobs.length > 0) return 1;
-      return a.org_name.localeCompare(b.org_name);
-    });
-    return tiles;
-  }, [
-    starredOrgIds,
-    orgNameMap,
-    jobsByOrgId,
-    lastCheckedMap,
-    data?.companies,
-    discoveryRunning,
-    checkingOrgs,
-  ]);
-
-  const totalShown: number = orgTiles.reduce(
-    (acc, t) => acc + t.jobs.length,
-    0,
+  const data: FlatJobListResult | undefined = jobsQuery.data;
+  const loading: boolean = jobsQuery.isLoading;
+  const hasScores: boolean = useMemo(
+    () => (data?.jobs ?? []).some((j) => j.match_score !== null),
+    [data?.jobs],
   );
 
-  const handleCheckOrg = async (orgId: string): Promise<void> => {
-    setCheckingOrgs((prev) => new Set([...prev, orgId]));
-    try {
-      await proxyPost<StartSingleOrgDiscoveryResult>(
-        "start-single-org-job-discovery",
-        { org_id: orgId },
-      );
-      await queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
-    } finally {
-      setCheckingOrgs((prev) => {
-        const next = new Set(prev);
-        next.delete(orgId);
-        return next;
-      });
+  const filteredJobs: OrgJobItem[] = useMemo(() => {
+    const all: OrgJobItem[] = data?.jobs ?? [];
+    if (filter === "bookmarked") {
+      return all.filter((j) => bookmarks.has(j.job_id));
     }
-  };
+    if (filter === "relevant" && hasScores) {
+      return all.filter((j) => j.is_relevant === true);
+    }
+    return all;
+  }, [data?.jobs, filter, hasScores, bookmarks]);
 
-  const handleToggle = (orgId: string, open: boolean): void => {
-    setExpandedOrgs((prev) => {
-      const next = new Set(prev);
-      if (open) {
-        next.add(orgId);
-      } else {
-        next.delete(orgId);
-      }
-      return next;
-    });
-  };
+  const columns: ColumnDef<OrgJobItem>[] = useMemo(
+    () => [
+      {
+        id: "match",
+        accessorFn: (row: OrgJobItem) => row.match_score,
+        header: ({ column }) => (
+          <CompactSortHeader column={column} label="Match" />
+        ),
+        cell: ({ row }) => <MatchBadge score={row.original.match_score} />,
+        sortingFn: scoreSortingFn,
+        meta: { width: "w-[3.5rem]" },
+      },
+      {
+        id: "title",
+        accessorFn: (row: OrgJobItem) => row.title,
+        header: ({ column }) => (
+          <CompactSortHeader column={column} label="Title" />
+        ),
+        cell: ({ row }) => (
+          <CompactCell value={row.original.title} className="font-medium" />
+        ),
+        meta: { width: "w-[14rem]" },
+      },
+      {
+        id: "company",
+        accessorFn: (row: OrgJobItem) => row.org_name ?? "",
+        header: ({ column }) => (
+          <CompactSortHeader column={column} label="Company" />
+        ),
+        cell: ({ row }) => {
+          const orgName: string | null = row.original.org_name;
+          if (!orgName) return <CompactCell value="—" />;
+          return (
+            <Link
+              href={`/graph?tab=organizations&search=${encodeURIComponent(orgName)}`}
+              className="block truncate text-xs text-primary hover:underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {orgName}
+            </Link>
+          );
+        },
+        meta: { width: "w-[8rem]" },
+      },
+      {
+        id: "location",
+        accessorFn: (row: OrgJobItem) => row.location ?? "",
+        header: ({ column }) => (
+          <CompactSortHeader column={column} label="Location" />
+        ),
+        cell: ({ row }) => {
+          const loc: string | null = row.original.location;
+          const remote: string | null = row.original.remote_status;
+          return (
+            <div className="flex items-center gap-1 truncate">
+              <CompactCell value={loc ?? "—"} />
+              {remote ? (
+                <Badge
+                  variant="secondary"
+                  className="shrink-0 px-1 py-0 text-[10px]"
+                >
+                  {remote}
+                </Badge>
+              ) : null}
+            </div>
+          );
+        },
+        meta: { width: "w-[8rem]" },
+      },
+      {
+        id: "salary",
+        accessorFn: (row: OrgJobItem) => row.salary_min ?? row.salary_max ?? 0,
+        header: ({ column }) => (
+          <CompactSortHeader column={column} label="Salary" />
+        ),
+        cell: ({ row }) => (
+          <CompactCell
+            value={
+              formatSalary(row.original.salary_min, row.original.salary_max) ??
+              "—"
+            }
+          />
+        ),
+        meta: { width: "w-[7rem]" },
+      },
+      {
+        id: "posted",
+        accessorFn: (row: OrgJobItem) => row.posted_at ?? row.first_seen_at,
+        header: ({ column }) => (
+          <CompactSortHeader column={column} label="Posted" />
+        ),
+        cell: ({ row }) => {
+          const dateStr: string | null =
+            row.original.posted_at ?? row.original.first_seen_at;
+          return <CompactCell value={dateStr ? formatRelativeTime(dateStr) : "—"} />;
+        },
+        meta: { width: "w-[4rem]" },
+      },
+      {
+        id: "actions",
+        header: "",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="flex items-center justify-end gap-1">
+            <button
+              type="button"
+              className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleBookmark(row.original.job_id);
+              }}
+              aria-label={
+                isBookmarked(row.original.job_id)
+                  ? "Remove bookmark"
+                  : "Bookmark"
+              }
+            >
+              <Bookmark
+                className={`size-3.5 ${isBookmarked(row.original.job_id) ? "fill-current text-foreground" : ""}`}
+              />
+            </button>
+            <a
+              href={row.original.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+              onClick={(e) => e.stopPropagation()}
+              aria-label="View posting"
+            >
+              <ExternalLink className="size-3.5" />
+            </a>
+          </div>
+        ),
+        meta: { width: "w-[3rem]", stickyRight: true },
+      },
+    ],
+    [toggleBookmark, isBookmarked],
+  );
 
-  const closeDetailPanel = (): void => {
-    setSelectedPersonId(null);
-    setIsDetailDirty(false);
-    setDiscardDialogOpen(false);
-  };
+  const table = useReactTable({
+    data: filteredJobs,
+    columns,
+    state: { sorting, globalFilter: search },
+    onSortingChange: setSorting,
+    onGlobalFilterChange: setSearch,
+    globalFilterFn: (row, _columnId, filterValue: string) => {
+      const query: string = filterValue.trim().toLowerCase();
+      if (!query) return true;
+      const job: OrgJobItem = row.original;
+      const haystack: string = [
+        job.title,
+        job.org_name,
+        job.location,
+        job.department,
+        job.remote_status,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(query);
+    },
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+  });
+
+  const selectedJob: OrgJobItem | undefined = (data?.jobs ?? []).find(
+    (j) => j.job_id === selectedJobId,
+  );
 
   const handleDownloadCsv = (): void => {
-    const allJobs: { company: string; job: OrgJobItem }[] = [];
-    for (const tile of orgTiles) {
-      for (const job of tile.jobs) {
-        allJobs.push({ company: tile.org_name, job });
-      }
-    }
+    const rows: OrgJobItem[] = table
+      .getSortedRowModel()
+      .rows.map((r) => r.original);
     const csv: string = buildCsv(
-      ["Company", "Title", "Location", "Department", "Remote", "Salary", "URL"],
-      allJobs.map(({ company, job }) => [
-        company,
+      ["Match", "Company", "Title", "Location", "Department", "Remote", "Salary", "URL"],
+      rows.map((job) => [
+        job.match_score !== null ? `${job.match_score}%` : "",
+        job.org_name ?? "",
         job.title,
         job.location ?? "",
         job.department ?? "",
@@ -453,416 +374,184 @@ function JobsListings() {
     downloadCsv(csvFilename("jobs"), csv);
   };
 
-  const handleDetailSheetOpenChange = (open: boolean): void => {
-    if (open) return;
-    if (isDetailDirty) {
-      setDiscardDialogOpen(true);
-      return;
-    }
-    closeDetailPanel();
-  };
-
-  const handleSaveAndClose = async (): Promise<void> => {
-    setIsClosingSave(true);
-    try {
-      const saved: boolean = (await detailPanelRef.current?.save()) ?? false;
-      if (saved) closeDetailPanel();
-    } finally {
-      setIsClosingSave(false);
-    }
-  };
+  const visibleCount: number = table.getRowModel().rows.length;
+  const totalCount: number = data?.total_jobs ?? 0;
 
   return (
-    <div className="space-y-4">
-      <div className="space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <h1 className="text-2xl font-semibold tracking-tight">Open Jobs</h1>
-            <p className="text-sm text-muted-foreground">
-              {loading
-                ? "Loading…"
-                : discoveryRunning
-                  ? `Scanning ${orgTiles.length} companies…`
-                  : `${totalShown} jobs across ${orgTiles.length} companies`}
-            </p>
-          </div>
-          <ResponsiveModal open={settingsOpen} onOpenChange={(open: boolean) => {
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold tracking-tight">Open Jobs</h1>
+          <p className="text-sm text-muted-foreground">
+            {loading
+              ? "Loading…"
+              : discoveryRunning
+                ? (discoveryStatusQuery.data?.progress_message ?? "Scanning…")
+                : `${visibleCount} of ${totalCount} jobs`}
+          </p>
+        </div>
+        <ResponsiveModal
+          open={settingsOpen}
+          onOpenChange={(open: boolean) => {
             if (!open && settingsDirty) {
               setSettingsDiscardOpen(true);
               return;
             }
             setSettingsOpen(open);
-          }}>
-            <ResponsiveModalTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                size="icon"
-                className="size-8 shrink-0"
-                aria-label="Jobs Settings"
-              >
-                <Settings className="size-4" />
-              </Button>
-            </ResponsiveModalTrigger>
-            <ResponsiveModalContent>
-              <ResponsiveModalHeader>
-                <ResponsiveModalTitle>Jobs Settings</ResponsiveModalTitle>
-                <ResponsiveModalDescription>
-                  Update your role preferences, location, and target companies.
-                </ResponsiveModalDescription>
-              </ResponsiveModalHeader>
-              <JobSetupCards compact onDirtyChange={setSettingsDirty} />
-            </ResponsiveModalContent>
-          </ResponsiveModal>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex h-8 items-center overflow-hidden rounded-md border text-xs">
-            {bookmarks.size > 0 ? (
-              <button
-                type="button"
-                className={`h-full px-3 transition-colors ${
-                  filter === "bookmarked"
-                    ? "bg-primary text-primary-foreground"
-                    : "hover:bg-muted"
-                }`}
-                onClick={() => setFilter("bookmarked")}
-              >
-                Bookmarked ({bookmarks.size})
-              </button>
-            ) : null}
-            {hasRelevance ? (
-              <button
-                type="button"
-                className={`h-full px-3 transition-colors ${bookmarks.size > 0 ? "border-l" : ""} ${
-                  filter === "relevant"
-                    ? "bg-primary text-primary-foreground"
-                    : "hover:bg-muted"
-                }`}
-                onClick={() => setFilter("relevant")}
-              >
-                Relevant ({data?.total_relevant ?? 0})
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className={`h-full border-l px-3 transition-colors ${
-                filter === "all"
-                  ? "bg-primary text-primary-foreground"
-                  : "hover:bg-muted"
-              }`}
-              onClick={() => setFilter("all")}
-            >
-              All ({data?.total_jobs ?? 0})
-            </button>
-          </div>
-          <div className="ml-auto flex items-center gap-2">
-            {discoveryRunning ? (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={cancelMutation.isPending}
-                onClick={() => cancelMutation.mutate()}
-              >
-                {cancelMutation.isPending ? (
-                  <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-                ) : (
-                  <XCircle className="mr-1.5 size-3.5" />
-                )}
-                Cancel
-              </Button>
-            ) : (
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={checkAllMutation.isPending}
-                onClick={() => checkAllMutation.mutate()}
-              >
-                {checkAllMutation.isPending ? (
-                  <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-                ) : (
-                  <RefreshCw className="mr-1.5 size-3.5" />
-                )}
-                Check all
-              </Button>
-            )}
+          }}
+        >
+          <ResponsiveModalTrigger asChild>
             <Button
               type="button"
               variant="outline"
-              size="sm"
-              onClick={handleDownloadCsv}
-              disabled={loading || totalShown === 0}
+              size="icon"
+              className="size-8 shrink-0"
+              aria-label="Jobs Settings"
             >
-              <Download className="mr-1.5 size-3.5" />
-              CSV
+              <Settings className="size-4" />
             </Button>
-          </div>
+          </ResponsiveModalTrigger>
+          <ResponsiveModalContent>
+            <ResponsiveModalHeader>
+              <ResponsiveModalTitle>Jobs Settings</ResponsiveModalTitle>
+              <ResponsiveModalDescription>
+                Update your role preferences, location, and target companies.
+              </ResponsiveModalDescription>
+            </ResponsiveModalHeader>
+            <JobSetupCards compact onDirtyChange={setSettingsDirty} />
+          </ResponsiveModalContent>
+        </ResponsiveModal>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchInput
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search jobs…"
+          className="h-8 w-48"
+        />
+
+        <div className="inline-flex h-8 items-center overflow-hidden rounded-md border text-xs">
+          {bookmarks.size > 0 ? (
+            <button
+              type="button"
+              className={`h-full px-3 transition-colors ${
+                filter === "bookmarked"
+                  ? "bg-primary text-primary-foreground"
+                  : "hover:bg-muted"
+              }`}
+              onClick={() => setFilter("bookmarked")}
+            >
+              Bookmarked ({bookmarks.size})
+            </button>
+          ) : null}
+          {hasScores ? (
+            <button
+              type="button"
+              className={`h-full px-3 transition-colors ${bookmarks.size > 0 ? "border-l" : ""} ${
+                filter === "relevant"
+                  ? "bg-primary text-primary-foreground"
+                  : "hover:bg-muted"
+              }`}
+              onClick={() => setFilter("relevant")}
+            >
+              Relevant ({data?.total_relevant ?? 0})
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={`h-full border-l px-3 transition-colors ${
+              filter === "all"
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-muted"
+            }`}
+            onClick={() => setFilter("all")}
+          >
+            All ({totalCount})
+          </button>
+        </div>
+
+        <div className="ml-auto flex items-center gap-2">
+          {discoveryRunning ? (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={cancelMutation.isPending}
+              onClick={() => cancelMutation.mutate()}
+            >
+              {cancelMutation.isPending ? (
+                <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+              ) : (
+                <XCircle className="mr-1.5 size-3.5" />
+              )}
+              Cancel
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={checkAllMutation.isPending}
+              onClick={() => checkAllMutation.mutate()}
+            >
+              {checkAllMutation.isPending ? (
+                <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-1.5 size-3.5" />
+              )}
+              Check all
+            </Button>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={handleDownloadCsv}
+            disabled={loading || visibleCount === 0}
+          >
+            <Download className="mr-1.5 size-3.5" />
+            CSV
+          </Button>
         </div>
       </div>
 
       {loading ? (
-        <div className="space-y-4">
-          <Skeleton className="h-32 w-full" />
-          <Skeleton className="h-32 w-full" />
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
+          <Skeleton className="h-8 w-full" />
         </div>
-      ) : null}
-
-      {!loading && orgTiles.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No companies starred. Go to{" "}
-          <Link
-            href="/graph?tab=organizations"
-            className="font-medium underline"
-          >
-            Organizations
-          </Link>{" "}
-          and star some companies to monitor for jobs.
-        </p>
       ) : (
-        orgTiles.map((tile) => {
-          const hiddenCount: number = tile.allJobs.length - tile.jobs.length;
-          const isChecking: boolean = checkingOrgs.has(tile.org_id);
-          const isOpen: boolean =
-            expandedOrgs.has(tile.org_id) ||
-            (tile.jobs.length > 0 && tile.jobs.length <= 5);
-          return (
-            <details
-              key={tile.org_id}
-              className="group rounded-lg border"
-              open={isOpen}
-              onToggle={(e) =>
-                handleToggle(
-                  tile.org_id,
-                  (e.target as HTMLDetailsElement).open,
-                )
-              }
-            >
-              <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-4 py-3 [&::-webkit-details-marker]:hidden">
-                <div className="flex items-center gap-2">
-                  <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <Link
-                        href={`/graph?tab=organizations&org=${encodeURIComponent(tile.org_id)}`}
-                        className="font-medium text-primary hover:underline"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {tile.org_name}
-                      </Link>
-                      {tile.primary_domain ? (
-                        <span className="text-xs text-muted-foreground">
-                          {tile.primary_domain}
-                        </span>
-                      ) : null}
-                      {tile.contact_count > 0 ? (
-                        <span className="flex items-center gap-0.5 text-xs text-muted-foreground">
-                          <Users className="size-3" />
-                          {tile.contact_count}
-                        </span>
-                      ) : null}
-                    </div>
-                    {tile.description ? (
-                      <p className="line-clamp-1 text-xs text-muted-foreground">
-                        {tile.description}
-                      </p>
-                    ) : null}
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                    {tile.status === "scanning" || isChecking ? (
-                      <>
-                        <Loader2 className="size-3.5 animate-spin" />
-                        Scanning…
-                      </>
-                    ) : tile.allJobs.length > 0 ? (
-                      <>
-                        <CheckCircle2 className="size-3.5 text-green-600" />
-                        {tile.jobs.length} job
-                        {tile.jobs.length !== 1 ? "s" : ""}
-                        {hiddenCount > 0 ? (
-                          <span className="text-muted-foreground/60">
-                            (+{hiddenCount} filtered)
-                          </span>
-                        ) : null}
-                      </>
-                    ) : (
-                      "No jobs found"
-                    )}
-                  </span>
-                  <button
-                    type="button"
-                    className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
-                    title="Check now"
-                    disabled={isChecking || discoveryRunning}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      e.preventDefault();
-                      void handleCheckOrg(tile.org_id);
-                    }}
-                  >
-                    {isChecking ? (
-                      <Loader2 className="size-3.5 animate-spin" />
-                    ) : (
-                      <RefreshCw className="size-3.5" />
-                    )}
-                  </button>
-                </div>
-              </summary>
-
-              <div className="space-y-3 px-4 pb-4 pt-3">
-                <div className="flex items-center justify-between">
-                  {tile.contact_count > 0 ? (
-                    <OrgContactsList
-                      orgId={tile.org_id}
-                      contactCount={tile.contact_count}
-                      onSelectPerson={setSelectedPersonId}
-                    />
-                  ) : (
-                    <span />
-                  )}
-                  {tile.last_checked_at ? (
-                    <span className="shrink-0 text-[10px] text-muted-foreground/60">
-                      Checked {formatRelativeTime(tile.last_checked_at)}
-                    </span>
-                  ) : null}
-                </div>
-
-                <div className="border-t" />
-
-                {tile.jobs.map((job) => {
-                  const salary: string | null = formatSalary(
-                    job.salary_min,
-                    job.salary_max,
-                  );
-                  return (
-                    <Card key={job.job_id}>
-                      <CardHeader className="pb-2">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <CardTitle className="text-base">
-                              {job.title}
-                            </CardTitle>
-                            <CardDescription>
-                              {[
-                                job.location,
-                                job.department,
-                                job.remote_status,
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")}
-                            </CardDescription>
-                          </div>
-                          <button
-                            type="button"
-                            className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
-                            onClick={() => toggleBookmark(job.job_id)}
-                            aria-label={isBookmarked(job.job_id) ? "Remove bookmark" : "Bookmark"}
-                          >
-                            <Bookmark
-                              className={`size-4 ${isBookmarked(job.job_id) ? "fill-current text-foreground" : ""}`}
-                            />
-                          </button>
-                        </div>
-                      </CardHeader>
-                      <CardContent className="space-y-2">
-                        {job.description_snippet ? (
-                          <p className="text-sm text-muted-foreground">
-                            {stripMarkdown(job.description_snippet)}
-                          </p>
-                        ) : null}
-                        {salary ? (
-                          <p className="text-sm font-medium">{salary}</p>
-                        ) : null}
-                        <Button
-                          variant="link"
-                          className="h-auto p-0"
-                          asChild
-                        >
-                          <a
-                            href={job.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            View posting
-                            <ExternalLink className="ml-1 size-3.5" />
-                          </a>
-                        </Button>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-
-                {hiddenCount > 0 && filter !== "all" ? (
-                  <button
-                    type="button"
-                    className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-                    onClick={() => setFilter("all")}
-                  >
-                    <ChevronDown className="size-3.5" />
-                    Show all {tile.allJobs.length} jobs ({hiddenCount} hidden by
-                    filter)
-                  </button>
-                ) : null}
-
-                {tile.jobs.length === 0 && hiddenCount === 0 ? (
-                  <p className="text-xs text-muted-foreground">
-                    {tile.status === "scanning" || isChecking
-                      ? "Scanning for open positions…"
-                      : "No open positions found yet."}
-                  </p>
-                ) : null}
-              </div>
-            </details>
-          );
-        })
+        <CompactTableShell
+          table={table}
+          columnCount={columns.length}
+          emptyMessage={
+            totalCount === 0
+              ? "No jobs found yet. Star companies and run Check All."
+              : "No jobs match the current filter."
+          }
+          onRowClick={(job: OrgJobItem) => setSelectedJobId(job.job_id)}
+          minWidth="44rem"
+        />
       )}
 
       <Sheet
-        open={selectedPersonId !== null}
-        onOpenChange={handleDetailSheetOpenChange}
+        open={selectedJobId !== null}
+        onOpenChange={(open: boolean) => {
+          if (!open) setSelectedJobId(null);
+        }}
       >
         <SheetContent className="flex w-full flex-col p-0 sm:max-w-xl">
-          <SheetHeader>
-            <SheetTitle>
-              {personDetailQuery.data?.display_name ?? "Contact"}
-            </SheetTitle>
+          <SheetHeader className="px-6 pt-6">
+            <SheetTitle>{selectedJob?.title ?? "Job"}</SheetTitle>
             <SheetDescription>
-              {personDetailQuery.data?.current_role ??
-                personDetailQuery.data?.org_name ??
-                "Contact details"}
+              {selectedJob?.org_name ?? "Job details"}
             </SheetDescription>
           </SheetHeader>
-          {personDetailQuery.isLoading ? (
-            <div className="space-y-3 px-6 py-4">
-              <Skeleton className="h-6 w-40" />
-              <Skeleton className="h-24 w-full" />
-            </div>
-          ) : personDetailQuery.data ? (
-            <PersonDetailPanel
-              ref={detailPanelRef}
-              key={`${selectedPersonId}-${personDetailQuery.dataUpdatedAt}`}
-              person={personDetailQuery.data}
-              onDirtyChange={setIsDetailDirty}
-            />
-          ) : personDetailQuery.error ? (
-            <div className="px-6 py-4">
-              <Alert variant="destructive">
-                <AlertDescription>
-                  {personDetailQuery.error.message}
-                </AlertDescription>
-              </Alert>
-            </div>
+          {selectedJobId ? (
+            <JobDetailPanel jobId={selectedJobId} />
           ) : null}
         </SheetContent>
       </Sheet>
-
-      <UnsavedChangesDialog
-        open={discardDialogOpen}
-        onOpenChange={setDiscardDialogOpen}
-        onSave={handleSaveAndClose}
-        onDiscard={closeDetailPanel}
-        isSaving={isClosingSave}
-      />
 
       <UnsavedChangesDialog
         open={settingsDiscardOpen}
@@ -913,5 +602,5 @@ export default function JobsPage() {
     return <JobSetupCards />;
   }
 
-  return <JobsListings />;
+  return <JobsTable />;
 }

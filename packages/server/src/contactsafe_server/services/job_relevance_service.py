@@ -1,8 +1,7 @@
-"""LLM-based job relevance classification service."""
+"""LLM-based job relevance scoring service."""
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from datetime import UTC, datetime
@@ -13,7 +12,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.config import Settings
-from contactsafe_server.db.models import OrgJob, User, UserJobRelevance
+from contactsafe_server.db.models import (
+    EmploymentClaim,
+    Org,
+    OrgJob,
+    Person,
+    PersonAttributeClaim,
+    User,
+    UserJobRelevance,
+)
 from contactsafe_server.services.openai_json import (
     content_from_chat_completion,
     parse_json_object,
@@ -22,26 +29,29 @@ from contactsafe_server.services.openai_json import (
 logger: logging.Logger = logging.getLogger(__name__)
 
 _BATCH_SIZE: int = 15
+_MATCH_SCORE_RELEVANT_THRESHOLD: int = 40
 
 _SYSTEM_PROMPT: str = """\
-You are a job relevance classifier. The user has described what kinds of roles they are \
-interested in. You will receive a batch of job postings and must classify each one as \
-relevant or not relevant to the user's stated interests.
+You are a job-match scoring engine. You will receive the candidate's professional profile \
+and a batch of job postings. Score each job on how well it matches the candidate.
 
-IMPORTANT: Err on the side of marking jobs as relevant. When in doubt, mark as relevant. \
-It is much worse to miss a desired job than to show an undesirable one.
+Consider:
+- Alignment between the candidate's experience/skills and the job requirements
+- Seniority level match
+- Industry/domain relevance
+- Location/remote compatibility
 
-User's job preferences:
 {preferences}
+
+{profile}
 
 Respond with a JSON object containing a "results" array. Each element must have:
 - "index": the 0-based index of the job in the input list
-- "relevant": boolean (true if the job matches their interests)
-- "confidence": float 0.0-1.0 (how confident you are)
-- "reason": brief 5-10 word explanation
+- "match_score": integer 0-100 (0 = completely irrelevant, 100 = perfect match)
+- "reason": brief 5-15 word explanation of the score
 
 Example response:
-{{"results": [{{"index": 0, "relevant": true, "confidence": 0.9, "reason": "Backend engineering role in Python"}}]}}
+{{"results": [{{"index": 0, "match_score": 85, "reason": "Strong backend fit, Python expertise matches requirements"}}]}}
 """
 
 _JOB_TEMPLATE: str = (
@@ -56,14 +66,13 @@ class JobRelevanceService:
         self._settings: Settings = settings
 
     async def classify_jobs_for_user(self, user_id: uuid.UUID) -> int:
-        """Classify all unclassified active jobs for the user. Returns count classified."""
+        """Score all unclassified active jobs for the user. Returns count scored."""
         user: User | None = await self._db.get(User, user_id)
         if user is None or not user.job_preferences_text:
             return 0
 
-        preferences: str = self._build_preferences_prompt(user)
-        if not preferences:
-            return 0
+        preferences_section: str = self._build_preferences_section(user)
+        profile_section: str = await self._build_profile_section(user)
 
         unclassified_jobs: list[OrgJob] = await self._get_unclassified_jobs(user_id)
         if not unclassified_jobs:
@@ -72,13 +81,15 @@ class JobRelevanceService:
         total_classified: int = 0
         for i in range(0, len(unclassified_jobs), _BATCH_SIZE):
             batch: list[OrgJob] = unclassified_jobs[i : i + _BATCH_SIZE]
-            classified: int = await self._classify_batch(user_id, preferences, batch)
+            classified: int = await self._classify_batch(
+                user_id, preferences_section, profile_section, batch,
+            )
             total_classified += classified
 
         return total_classified
 
     @staticmethod
-    def _build_preferences_prompt(user: User) -> str:
+    def _build_preferences_section(user: User) -> str:
         parts: list[str] = []
         role_text: str = (user.job_preferences_text or "").strip()
         if role_text:
@@ -87,19 +98,95 @@ class JobRelevanceService:
         loc_pref: str | None = user.job_location_pref
         loc_city: str | None = user.job_location_city
         if loc_pref == "remote":
-            parts.append("Location: REMOTE ONLY. Reject any job that requires in-person attendance unless it is also listed as remote.")
+            parts.append("Location: REMOTE ONLY. Penalize any job requiring in-person attendance unless also listed as remote.")
         elif loc_pref == "in_person" and loc_city:
             parts.append(
-                f"Location: Must be in or near {loc_city}. Reject remote-only jobs and jobs in cities far from {loc_city}."
+                f"Location: Must be in or near {loc_city}. Penalize remote-only jobs and jobs far from {loc_city}."
             )
         elif loc_pref == "either" and loc_city:
             parts.append(
-                f"Location: Prefers remote OR in/near {loc_city}. Reject jobs that require in-person attendance far from {loc_city}."
+                f"Location: Prefers remote OR in/near {loc_city}. Penalize jobs requiring in-person far from {loc_city}."
             )
         elif loc_city:
             parts.append(f"Location: Prefers jobs near {loc_city} or remote.")
 
-        return "\n".join(parts)
+        pref_text: str = "\n".join(parts) if parts else "No specific preferences stated."
+        return f"CANDIDATE PREFERENCES:\n{pref_text}"
+
+    async def _build_profile_section(self, user: User) -> str:
+        if user.person_id is None:
+            return "CANDIDATE PROFILE:\nNo profile available."
+
+        person: Person | None = await self._db.get(Person, user.person_id)
+        if person is None:
+            return "CANDIDATE PROFILE:\nNo profile available."
+
+        parts: list[str] = []
+
+        if person.canonical_name:
+            parts.append(f"Name: {person.canonical_name}")
+        if person.current_role:
+            parts.append(f"Current role: {person.current_role}")
+        if person.bio_summary:
+            parts.append(f"Summary: {person.bio_summary}")
+
+        headline_result = await self._db.execute(
+            select(PersonAttributeClaim.value).where(
+                PersonAttributeClaim.person_id == user.person_id,
+                PersonAttributeClaim.kind == "headline",
+            ).limit(1),
+        )
+        headline: str | None = headline_result.scalar_one_or_none()
+        if headline:
+            parts.append(f"Headline: {headline}")
+
+        emp_result = await self._db.execute(
+            select(EmploymentClaim, Org.canonical_name).join(
+                Org, EmploymentClaim.org_id == Org.id,
+            ).where(
+                EmploymentClaim.person_id == user.person_id,
+            ).order_by(
+                EmploymentClaim.is_current.desc(),
+                EmploymentClaim.started_at.desc().nullslast(),
+            ).limit(10),
+        )
+        experiences: list[str] = []
+        for emp, org_name in emp_result.all():
+            role: str = emp.role_title or "Unknown role"
+            period: str = ""
+            if emp.started_at:
+                start: str = emp.started_at.strftime("%Y")
+                end: str = emp.ended_at.strftime("%Y") if emp.ended_at else "present"
+                period = f" ({start}–{end})"
+            current_marker: str = " [current]" if emp.is_current else ""
+            experiences.append(f"- {role} at {org_name}{period}{current_marker}")
+        if experiences:
+            parts.append("Experience:\n" + "\n".join(experiences))
+
+        skills_result = await self._db.execute(
+            select(PersonAttributeClaim.value).where(
+                PersonAttributeClaim.person_id == user.person_id,
+                PersonAttributeClaim.kind == "skill",
+            ).limit(30),
+        )
+        skills: list[str] = [row[0] for row in skills_result.all()]
+        if skills:
+            parts.append(f"Skills: {', '.join(skills)}")
+
+        edu_result = await self._db.execute(
+            select(PersonAttributeClaim.value).where(
+                PersonAttributeClaim.person_id == user.person_id,
+                PersonAttributeClaim.kind == "education",
+            ).limit(5),
+        )
+        education: list[str] = [row[0] for row in edu_result.all()]
+        if education:
+            parts.append("Education:\n" + "\n".join(f"- {e}" for e in education))
+
+        if not parts:
+            return "CANDIDATE PROFILE:\nNo profile available."
+
+        return "CANDIDATE PROFILE:\n" + "\n".join(parts)
 
     async def _get_unclassified_jobs(self, user_id: uuid.UUID) -> list[OrgJob]:
         already_classified = (
@@ -119,7 +206,8 @@ class JobRelevanceService:
     async def _classify_batch(
         self,
         user_id: uuid.UUID,
-        preferences: str,
+        preferences_section: str,
+        profile_section: str,
         jobs: list[OrgJob],
     ) -> int:
         job_descriptions: list[str] = []
@@ -135,8 +223,11 @@ class JobRelevanceService:
                 ),
             )
 
-        system_prompt: str = _SYSTEM_PROMPT.format(preferences=preferences)
-        user_content: str = "Classify these jobs:\n\n" + "\n".join(job_descriptions)
+        system_prompt: str = _SYSTEM_PROMPT.format(
+            preferences=preferences_section,
+            profile=profile_section,
+        )
+        user_content: str = "Score these jobs:\n\n" + "\n".join(job_descriptions)
 
         results: list[dict[str, Any]] = await self._call_openai(system_prompt, user_content)
 
@@ -147,16 +238,17 @@ class JobRelevanceService:
             if idx < 0 or idx >= len(jobs):
                 continue
             job: OrgJob = jobs[idx]
-            is_relevant: bool = bool(item.get("relevant", True))
-            confidence: float = float(item.get("confidence", 0.5))
+            match_score: int = max(0, min(100, int(item.get("match_score", 50))))
+            is_relevant: bool = match_score >= _MATCH_SCORE_RELEVANT_THRESHOLD
             reason: str | None = item.get("reason")
 
             relevance = UserJobRelevance(
                 user_id=user_id,
                 job_id=job.id,
                 is_relevant=is_relevant,
-                confidence=confidence,
-                reason=reason if is_relevant else None,
+                confidence=match_score / 100.0,
+                match_score=match_score,
+                reason=reason,
                 classified_at=now,
             )
             self._db.add(relevance)

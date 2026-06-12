@@ -706,5 +706,6 @@ class UserJobRelevance(Base):
     )
     is_relevant: Mapped[bool] = mapped_column(Boolean, nullable=False)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     classified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

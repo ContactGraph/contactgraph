@@ -682,6 +682,8 @@ export interface OrgJobItem {
   external_job_id: string;
   source: string;
   title: string;
+  org_name: string | null;
+  org_id: string | null;
   location: string | null;
   department: string | null;
   url: string;
@@ -694,6 +696,7 @@ export interface OrgJobItem {
   last_seen_at: string;
   is_active: boolean;
   is_relevant: boolean | null;
+  match_score: number | null;
   relevance_reason: string | null;
 }
 
@@ -717,6 +720,22 @@ export interface ListOrgJobsResult {
   companies: OrgJobsByCompany[];
   total_jobs: number;
   total_relevant: number;
+  message: string;
+}
+
+export interface FlatJobListResult {
+  jobs: OrgJobItem[];
+  total_jobs: number;
+  total_relevant: number;
+  message: string;
+}
+
+export interface JobDetailResult {
+  job: OrgJobItem;
+  org_description: string | null;
+  org_primary_domain: string | null;
+  contacts: OrgPersonSummary[];
+  contact_count: number;
   message: string;
 }
 

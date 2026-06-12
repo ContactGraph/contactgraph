@@ -38,6 +38,8 @@ from contactsafe_core.contact_schemas import (
     ListPeopleRequest,
     ListPeopleResult,
     ListStrongTiesResult,
+    FlatJobListResult,
+    JobDetailResult,
     JobDiscoveryStatusResult,
     JobMonitorConfigResult,
     JobPreferencesResult,
@@ -791,6 +793,27 @@ async def api_list_org_jobs(
     body: _ListOrgJobsBody = _ListOrgJobsBody(),
 ) -> ListOrgJobsResult:
     return await actions.list_org_jobs(ctx, user_id, relevant_only=body.relevant_only)
+
+
+@router.post("/list-flat-jobs", response_model=FlatJobListResult)
+async def api_list_flat_jobs(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> FlatJobListResult:
+    return await actions.list_flat_jobs(ctx, user_id)
+
+
+class _GetJobDetailBody(BaseModel):
+    job_id: UUID
+
+
+@router.post("/get-job-detail", response_model=JobDetailResult)
+async def api_get_job_detail(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: _GetJobDetailBody,
+) -> JobDetailResult:
+    return await actions.get_job_detail(ctx, user_id, job_id=body.job_id)
 
 
 @router.post("/get-job-preferences", response_model=JobPreferencesResult)

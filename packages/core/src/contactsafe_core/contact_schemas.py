@@ -372,6 +372,8 @@ class OrgJobItem(BaseModel):
     external_job_id: str
     source: str
     title: str
+    org_name: str | None = None
+    org_id: UUID | None = None
     location: str | None = None
     department: str | None = None
     url: str
@@ -384,6 +386,7 @@ class OrgJobItem(BaseModel):
     last_seen_at: datetime
     is_active: bool = True
     is_relevant: bool | None = None
+    match_score: int | None = None
     relevance_reason: str | None = None
 
 
@@ -411,6 +414,22 @@ class ListOrgJobsResult(BaseModel):
     companies: list[OrgJobsByCompany] = Field(default_factory=list)
     total_jobs: int = 0
     total_relevant: int = 0
+    message: str
+
+
+class FlatJobListResult(BaseModel):
+    jobs: list[OrgJobItem] = Field(default_factory=list)
+    total_jobs: int = 0
+    total_relevant: int = 0
+    message: str
+
+
+class JobDetailResult(BaseModel):
+    job: OrgJobItem
+    org_description: str | None = None
+    org_primary_domain: str | None = None
+    contacts: list[OrgPersonSummary] = Field(default_factory=list)
+    contact_count: int = 0
     message: str
 
 

@@ -12,11 +12,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import (
+    FlatJobListResult,
+    JobDetailResult,
     JobDiscoveryStatusResult,
     JobMonitorConfigResult,
     ListOrgJobsResult,
     OrgJobItem,
     OrgJobsByCompany,
+    OrgPersonSummary,
     SetJobMonitorConfigRequest,
     StartJobDiscoveryResult,
     StartSingleOrgDiscoveryResult,
@@ -29,6 +32,7 @@ from contactsafe_server.db.models import (
     OrgJob,
     OrgList,
     OrgListMembership,
+    Person,
     User,
     UserJobRelevance,
 )
@@ -281,6 +285,155 @@ class JobDiscoveryService:
             else "No open jobs found yet. Run job discovery from Setup."
         )
         return ListOrgJobsResult(companies=companies, total_jobs=total_jobs, total_relevant=total_relevant, message=message)
+
+    async def list_flat_jobs_for_user(
+        self,
+        user_id: uuid.UUID,
+        *,
+        active_only: bool = True,
+    ) -> FlatJobListResult:
+        org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
+        if not org_ids:
+            return FlatJobListResult(jobs=[], total_jobs=0, total_relevant=0, message="No monitored organizations.")
+
+        orgs_result = await self._db.execute(
+            select(Org).where(Org.id.in_(org_ids)),
+        )
+        org_name_map: dict[uuid.UUID, str] = {
+            org.id: org.canonical_name for org in orgs_result.scalars().all()
+        }
+
+        jobs_query = select(OrgJob).where(OrgJob.org_id.in_(org_ids))
+        if active_only:
+            jobs_query = jobs_query.where(OrgJob.is_active.is_(True))
+        jobs_result = await self._db.execute(jobs_query)
+        jobs: list[OrgJob] = list(jobs_result.scalars().all())
+
+        relevance_result = await self._db.execute(
+            select(UserJobRelevance).where(UserJobRelevance.user_id == user_id),
+        )
+        relevance_map: dict[uuid.UUID, UserJobRelevance] = {
+            r.job_id: r for r in relevance_result.scalars().all()
+        }
+
+        job_items: list[OrgJobItem] = []
+        total_relevant: int = 0
+        for job in jobs:
+            rel: UserJobRelevance | None = relevance_map.get(job.id)
+            is_relevant: bool | None = rel.is_relevant if rel else None
+            match_score: int | None = rel.match_score if rel else None
+            reason: str | None = rel.reason if rel else None
+
+            if is_relevant is True:
+                total_relevant += 1
+
+            job_items.append(
+                OrgJobItem(
+                    job_id=job.id,
+                    external_job_id=job.external_job_id,
+                    source=job.source,
+                    title=job.title,
+                    org_name=org_name_map.get(job.org_id),
+                    org_id=job.org_id,
+                    location=job.location,
+                    department=job.department,
+                    url=job.url,
+                    description_snippet=job.description_snippet,
+                    salary_min=job.salary_min,
+                    salary_max=job.salary_max,
+                    remote_status=job.remote_status,
+                    posted_at=job.posted_at,
+                    first_seen_at=job.first_seen_at,
+                    last_seen_at=job.last_seen_at,
+                    is_active=job.is_active,
+                    is_relevant=is_relevant,
+                    match_score=match_score,
+                    relevance_reason=reason,
+                )
+            )
+
+        job_items.sort(
+            key=lambda j: (j.match_score if j.match_score is not None else -1),
+            reverse=True,
+        )
+
+        message: str = (
+            f"Found {len(job_items)} open job(s)."
+            if job_items
+            else "No open jobs found yet."
+        )
+        return FlatJobListResult(
+            jobs=job_items,
+            total_jobs=len(job_items),
+            total_relevant=total_relevant,
+            message=message,
+        )
+
+    async def get_job_detail(
+        self,
+        user_id: uuid.UUID,
+        job_id: uuid.UUID,
+    ) -> JobDetailResult | None:
+        job: OrgJob | None = await self._db.get(OrgJob, job_id)
+        if job is None:
+            return None
+
+        org: Org | None = await self._db.get(Org, job.org_id)
+
+        rel_result = await self._db.execute(
+            select(UserJobRelevance).where(
+                UserJobRelevance.user_id == user_id,
+                UserJobRelevance.job_id == job_id,
+            ),
+        )
+        rel: UserJobRelevance | None = rel_result.scalar_one_or_none()
+
+        people_result = await self._db.execute(
+            select(Person).where(
+                Person.current_org_id == job.org_id,
+            ).order_by(Person.canonical_name.asc()).limit(20),
+        )
+        contacts: list[OrgPersonSummary] = [
+            OrgPersonSummary(
+                person_id=p.id,
+                display_name=p.canonical_name,
+                primary_email=p.primary_email,
+                current_role=p.current_role,
+            )
+            for p in people_result.scalars().all()
+        ]
+
+        item = OrgJobItem(
+            job_id=job.id,
+            external_job_id=job.external_job_id,
+            source=job.source,
+            title=job.title,
+            org_name=org.canonical_name if org else None,
+            org_id=job.org_id,
+            location=job.location,
+            department=job.department,
+            url=job.url,
+            description_snippet=job.description_snippet,
+            salary_min=job.salary_min,
+            salary_max=job.salary_max,
+            remote_status=job.remote_status,
+            posted_at=job.posted_at,
+            first_seen_at=job.first_seen_at,
+            last_seen_at=job.last_seen_at,
+            is_active=job.is_active,
+            is_relevant=rel.is_relevant if rel else None,
+            match_score=rel.match_score if rel else None,
+            relevance_reason=rel.reason if rel else None,
+        )
+
+        return JobDetailResult(
+            job=item,
+            org_description=org.description if org else None,
+            org_primary_domain=org.primary_domain if org else None,
+            contacts=contacts,
+            contact_count=len(contacts),
+            message=f"Job detail for {job.title}.",
+        )
 
     async def run_discovery(self, user_id: uuid.UUID, run_id: uuid.UUID) -> None:
         run: JobDiscoveryRun | None = await self._db.get(JobDiscoveryRun, run_id)
