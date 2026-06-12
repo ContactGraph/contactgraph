@@ -100,11 +100,10 @@ def _pipeline_for_function(function_name: str) -> str | None:
 async def _worker_connected() -> bool:
     try:
         client = await get_redis_client()
-        async for _key in client.scan_iter(match="arq:worker:*", count=10):
-            return True
+        value: str | None = await client.get("arq:queue:health-check")
+        return value is not None
     except Exception:
         return False
-    return False
 
 
 async def get_worker_status(db: AsyncSession, settings: Settings) -> WorkerStatusResult:
