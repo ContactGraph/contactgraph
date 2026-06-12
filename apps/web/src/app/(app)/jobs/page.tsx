@@ -12,10 +12,8 @@ import {
 } from "@tanstack/react-table";
 import {
   Bookmark,
-  CheckCircle2,
   Download,
   ExternalLink,
-  Loader2,
   Settings,
 } from "lucide-react";
 import Link from "next/link";
@@ -26,6 +24,7 @@ import {
   CompactTableShell,
 } from "@/components/data-table/compact-table";
 import { JobDetailPanel } from "@/components/job-detail-panel";
+import { JobPipelineStatus } from "@/components/job-pipeline-status";
 import { OrgLogo } from "@/components/org-logo";
 import { JobSetupCards } from "@/components/setup/job-setup-cards";
 import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
@@ -79,10 +78,20 @@ function formatRelativeTime(iso: string): string {
   return `${days}d ago`;
 }
 
-function MatchBadge({ score }: { score: number | null }) {
+function MatchBadge({
+  score,
+  pending = false,
+}: {
+  score: number | null;
+  pending?: boolean;
+}) {
   if (score === null) {
     return (
-      <span className="text-xs text-muted-foreground/50">—</span>
+      <span
+        className={`text-xs text-muted-foreground/50 ${pending ? "animate-pulse" : ""}`}
+      >
+        —
+      </span>
     );
   }
   const color: string =
@@ -177,7 +186,12 @@ function JobsTable() {
         header: ({ column }) => (
           <CompactSortHeader column={column} label="Match" />
         ),
-        cell: ({ row }) => <MatchBadge score={row.original.match_score} />,
+        cell: ({ row }) => (
+          <MatchBadge
+            score={row.original.match_score}
+            pending={scoringActive && row.original.match_score === null}
+          />
+        ),
         meta: { width: "w-[3.5rem]" },
       },
       {
@@ -333,7 +347,7 @@ function JobsTable() {
         meta: { width: "w-[2rem]", stickyRight: true },
       },
     ],
-    [toggleBookmark, isBookmarked],
+    [toggleBookmark, isBookmarked, scoringActive],
   );
 
   const table = useReactTable({
@@ -390,38 +404,20 @@ function JobsTable() {
   const visibleCount: number = table.getRowModel().rows.length;
   const totalCount: number = data?.total_jobs ?? 0;
 
-  const scoringProgress = jobEvents.scoringProgress;
-  const scanComplete: boolean =
-    scanStatus !== undefined &&
-    scanStatus.total > 0 &&
-    scanStatus.scanned >= scanStatus.total;
-  const scanInProgress: boolean =
-    scanStatus !== undefined &&
-    scanStatus.total > 0 &&
-    scanStatus.scanned < scanStatus.total;
+  const jobsCountLabel: string = loading
+    ? "Loading…"
+    : `${visibleCount} of ${totalCount} jobs${
+        scoringActive && filter === "relevant"
+          ? " · more jobs are still being ranked"
+          : ""
+      }`;
 
   return (
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Open Jobs</h1>
-          <p className="text-sm text-muted-foreground">
-            {loading
-              ? "Loading…"
-              : `${visibleCount} of ${totalCount} jobs`}
-          </p>
-          {scanStatus !== undefined && scanStatus.total > 0 ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              {scanInProgress || scanStatus.scanning_active ? (
-                <Loader2 className="size-3.5 animate-spin text-primary" />
-              ) : scanComplete ? (
-                <CheckCircle2 className="size-3.5 text-green-600" />
-              ) : null}
-              <span>
-                {scanStatus.scanned} of {scanStatus.total} companies scanned today
-              </span>
-            </div>
-          ) : null}
+          <p className="text-sm text-muted-foreground">{jobsCountLabel}</p>
         </div>
         <ResponsiveModal
           open={settingsOpen}
@@ -518,17 +514,7 @@ function JobsTable() {
         </div>
       </div>
 
-      {scoringActive ? (
-        <div className="flex flex-col gap-1.5 rounded-lg border bg-muted/40 px-4 py-2.5">
-          <div className="flex items-center gap-2 text-sm">
-            <Loader2 className="size-3.5 animate-spin text-primary" />
-            <span className="font-medium">Scoring jobs</span>
-            <span className="text-muted-foreground">
-              ({scoringProgress?.scored ?? 0} of {scoringProgress?.total ?? totalCount})
-            </span>
-          </div>
-        </div>
-      ) : null}
+      <JobPipelineStatus scanStatus={scanStatus} jobEvents={jobEvents} />
 
       {loading ? (
         <div className="space-y-2">

@@ -21,6 +21,7 @@ export interface JobEventsState {
   discoveryProgress: DiscoveryProgressState | null;
   scoringActive: boolean;
   scoringProgress: ScoringProgressState | null;
+  currentScanOrgName: string | null;
 }
 
 const INITIAL_JOB_EVENTS_STATE: JobEventsState = {
@@ -28,6 +29,7 @@ const INITIAL_JOB_EVENTS_STATE: JobEventsState = {
   discoveryProgress: null,
   scoringActive: false,
   scoringProgress: null,
+  currentScanOrgName: null,
 };
 
 type JobEventPayload =
@@ -48,6 +50,7 @@ type JobEventPayload =
   | {
       type: "scan_progress";
       scanning_active: boolean;
+      current_org_name?: string | null;
     }
   | {
       type: "scoring_progress";
@@ -123,6 +126,15 @@ function handleJobEvent(queryClient: QueryClient, payload: JobEventPayload): voi
       invalidateJobQueries(queryClient);
       break;
     case "scan_progress":
+      broadcastState((current) => ({
+        ...current,
+        currentScanOrgName:
+          payload.scanning_active && payload.current_org_name
+            ? payload.current_org_name
+            : payload.scanning_active
+              ? current.currentScanOrgName
+              : null,
+      }));
       invalidateJobQueries(queryClient);
       break;
     case "scoring_progress":
