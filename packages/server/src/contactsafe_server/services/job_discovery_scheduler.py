@@ -29,16 +29,25 @@ def _set_global_scan_active(active: bool) -> None:
 
 async def _run_one_global_scan() -> None:
     from contactsafe_server.deps import build_app_context
+    from contactsafe_server.job_event_publishers import publish_scan_progress_for_users
     from contactsafe_server.services.job_discovery_service import JobDiscoveryService
 
     ctx = build_app_context()
     factory = get_session_factory(ctx.settings)
 
     _set_global_scan_active(True)
+    monitoring_user_ids: list[uuid.UUID] = []
     try:
         async with factory() as db:
             service = JobDiscoveryService(db, ctx.settings)
             org_ids: list[uuid.UUID] = await service.collect_all_monitored_org_ids()
+            monitoring_user_ids = await service.collect_all_monitoring_user_ids()
+
+        if monitoring_user_ids:
+            publish_scan_progress_for_users(
+                monitoring_user_ids,
+                scanning_active=True,
+            )
 
         for org_id in org_ids:
             async with factory() as db:
@@ -47,11 +56,22 @@ async def _run_one_global_scan() -> None:
                     continue
                 scrape_result = await service.scrape_org_global(org_id)
                 if scrape_result.scanned:
+                    user_ids: list[uuid.UUID] = await service.users_monitoring_org(org_id)
+                    if user_ids:
+                        publish_scan_progress_for_users(
+                            user_ids,
+                            scanning_active=True,
+                        )
                     await service.classify_for_all_monitoring_users(org_id)
     except Exception:
         logger.exception("Global job scan failed")
     finally:
         _set_global_scan_active(False)
+        if monitoring_user_ids:
+            publish_scan_progress_for_users(
+                monitoring_user_ids,
+                scanning_active=False,
+            )
 
 
 async def _global_scan_loop() -> None:

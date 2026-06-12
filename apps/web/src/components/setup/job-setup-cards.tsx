@@ -32,6 +32,7 @@ import type {
 } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
 import { useGraphEvents } from "@/lib/use-graph-events";
+import { useJobEvents } from "@/lib/use-job-events";
 import {
   findJobProspectsList,
   hasJobPreferences,
@@ -52,6 +53,7 @@ export function JobSetupCards({
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   useGraphEvents();
+  useJobEvents();
   const queryClient = useQueryClient();
   const autoStartedRef = useRef<boolean>(false);
   const [linkedinProfileDialogOpen, setLinkedinProfileDialogOpen] =
@@ -96,8 +98,6 @@ export function JobSetupCards({
     queryKey: ["job-scan-status"],
     queryFn: () => proxyPost<JobScanStatusResult>("get-job-scan-status"),
     enabled: jobMonitorConfigQuery.data?.enabled === true,
-    refetchInterval: (query) =>
-      query.state.data?.scanning_active ? 30_000 : false,
   });
 
   const setJobPreferencesMutation = useMutation({

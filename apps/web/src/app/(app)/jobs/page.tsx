@@ -146,8 +146,6 @@ function JobsTable() {
   const scanStatusQuery = useQuery({
     queryKey: ["job-scan-status"],
     queryFn: () => proxyPost<JobScanStatusResult>("get-job-scan-status"),
-    refetchInterval: (query) =>
-      query.state.data?.scanning_active ? 30_000 : 60_000,
   });
 
   const scanStatus: JobScanStatusResult | undefined = scanStatusQuery.data;

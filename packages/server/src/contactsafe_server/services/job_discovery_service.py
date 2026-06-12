@@ -172,6 +172,15 @@ class JobDiscoveryService:
         )
         return list(result.scalars().all())
 
+    async def collect_all_monitoring_user_ids(self) -> list[uuid.UUID]:
+        result = await self._db.execute(
+            select(User.id).where(
+                User.job_monitor_enabled.is_(True),
+                User.job_monitor_list_id.is_not(None),
+            ),
+        )
+        return list(result.scalars().all())
+
     async def was_recently_scraped(self, org_id: uuid.UUID) -> bool:
         cutoff: datetime = datetime.now(tz=UTC) - timedelta(
             hours=self._settings.job_scrape_cooldown_hours,
@@ -242,7 +251,7 @@ class JobDiscoveryService:
         )
 
     async def classify_for_all_monitoring_users(self, org_id: uuid.UUID) -> None:
-        user_ids: list[uuid.UUID] = await self._users_monitoring_org(org_id)
+        user_ids: list[uuid.UUID] = await self.users_monitoring_org(org_id)
         for user_id in user_ids:
             await self._classify_new_jobs(user_id)
 
@@ -570,6 +579,10 @@ class JobDiscoveryService:
                 ),
             )
 
+        from contactsafe_server.job_event_publishers import publish_scan_progress
+
+        publish_scan_progress(user_id, scanning_active=False)
+
         if result.new_jobs > 0:
             await self._classify_new_jobs(user_id)
 
@@ -772,7 +785,7 @@ class JobDiscoveryService:
         )
         return list(result.scalars().all())
 
-    async def _users_monitoring_org(self, org_id: uuid.UUID) -> list[uuid.UUID]:
+    async def users_monitoring_org(self, org_id: uuid.UUID) -> list[uuid.UUID]:
         result = await self._db.execute(
             select(User.id)
             .join(

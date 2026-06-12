@@ -781,7 +781,18 @@ async def api_job_events(
         queue = job_event_bus.register(user_id)
         try:
             async with ctx.session_factory() as db:
+                from contactsafe_server.services.job_discovery_service import JobDiscoveryService
                 from contactsafe_server.services.job_relevance_service import get_scoring_progress
+
+                discovery_service = JobDiscoveryService(db, ctx.settings)
+                scan_status = await discovery_service.get_scan_status(user_id)
+                if scan_status.scanning_active:
+                    yield _format_sse_event(
+                        {
+                            "type": "scan_progress",
+                            "scanning_active": True,
+                        },
+                    )
 
                 scoring_progress: tuple[int, int] | None = get_scoring_progress(user_id)
                 if scoring_progress is not None:
