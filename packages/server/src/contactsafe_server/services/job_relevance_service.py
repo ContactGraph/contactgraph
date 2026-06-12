@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -54,28 +55,32 @@ For each job, provide three independent sub-scores (each 0-100):
 1. **role_score** (job function alignment): Is this job in the SAME job function the \
 candidate requested? This is a categorical match, not a similarity judgment.
 
-Job functions are distinct career tracks. Examples of SEPARATE functions:
-- Engineering (software, hardware, release, QA, DevOps, SRE, ML engineering)
-- Product Management
-- Program / Project Management
-- Sales
-- Customer Success
-- Marketing
-- Design (UX, UI, graphic)
-- Data Science / Analytics
-- Finance / Legal / HR / Operations
+HOW TO DETERMINE JOB FUNCTION (follow in order):
+1. Read the job TITLE first — it is the primary signal.
+2. Use department only as a tiebreaker; department names are often misleading \
+(e.g. "Product Success Engineering" is an engineering org, NOT product management).
+3. Shared keywords (AI, cloud, platform, product) do NOT change the function.
+
+Job functions are distinct career tracks:
+- Engineering: software/hardware/release/QA/DevOps/SRE/ML/data engineering, \
+"Director of Software Engineering", "Solutions Engineer", "Product Success Engineering"
+- Product Management: "Product Manager", "Group PM", "Director of Product", "Head of Product"
+- Product Marketing / Marketing: "Product Marketing Manager", "Product Marketer" — NOT product management
+- Program / Project Management, Sales, Customer Success, Design, etc.
+
+COMMON MISTAKES TO AVOID:
+- "Director of Software Engineering" → Engineering, even if dept says "Product Success Engineering"
+- "Product Success Engineering" or "Solutions Engineering" → Engineering, NOT product management
+- "Product Marketing Manager" → Marketing, NOT product management
+- Candidate interest in AI/domain does NOT make an engineering role into product management
 
 SCORING RULES for role_score:
 - Same function as requested → 85-100 (e.g. "Product Manager" for a PM candidate)
 - Very close variant within function → 65-84 (e.g. "Group PM" or "Product Lead")
-- Adjacent with some overlap → 30-50 (e.g. "Technical Program Manager" for a PM candidate, \
-or "Sales" for a "Marketing" candidate, or "UX Designer" for a "Front-end Engineer" candidate)
-- Different function → 0-25 (e.g. ANY engineering title for a PM candidate, \
-or "Customer Success" for an "Engineering" candidate)
+- Adjacent with some overlap → 30-50 (e.g. "Technical Program Manager" for a PM candidate)
+- Different function → 0-25 (ANY engineering or marketing title for a PM candidate)
 
-Do NOT boost role_score because of shared domain, industry, or buzzwords. \
-"Director of AI Engineering" is still engineering, not product management. \
-"VP of Sales Engineering" is still engineering/sales, not product management.
+Do NOT boost role_score because of shared domain, industry, or buzzwords.
 
 2. **seniority_score**: How well the seniority/level matches. Senior ↔ Senior is good (80-100). \
 IC ↔ management mismatch or large level gaps should be penalized.
@@ -96,16 +101,43 @@ Respond with a JSON object containing a "results" array. Each element must have:
 - "location_reason": string (1 sentence)
 
 Example:
-{{"results": [{{"index": 0, "role_score": 10, "role_reason": "This is an engineering role \
-(release engineering). The candidate wants product management, which is a different function.", \
-"seniority_score": 85, "seniority_reason": "Both are senior-level individual contributor roles.", \
-"location_score": 60, "location_reason": "Santa Clara is about 45 minutes from San Francisco, \
-beyond the preferred 30-minute commute."}}]}}
+{{"results": [
+  {{"index": 0, "role_score": 12, "role_reason": "Director of Software Engineering is an engineering leadership role, not product management.", "seniority_score": 90, "seniority_reason": "Director level matches seniority.", "location_score": 60, "location_reason": "San Jose is within commute range but not ideal."}},
+  {{"index": 1, "role_score": 92, "role_reason": "Principal Product Manager matches the candidate's product management target.", "seniority_score": 88, "seniority_reason": "Principal level aligns with experience.", "location_score": 70, "location_reason": "Santa Clara is a reasonable commute."}}
+]}}
 """
 
 _JOB_TEMPLATE: str = (
     "#{index}: title={title} | dept={department} | location={location} | "
     "remote={remote} | snippet={snippet}"
+)
+
+_PM_PREFERENCE_RE: re.Pattern[str] = re.compile(
+    r"\b(product manager|product management|pm)\b",
+    re.IGNORECASE,
+)
+_PM_TITLE_RE: re.Pattern[str] = re.compile(
+    r"\b("
+    r"product manager|product management|group product manager|"
+    r"principal product manager|senior product manager|associate product manager|"
+    r"director[, ]+ product|head of product|product lead|vp[, ]+ product"
+    r")\b",
+    re.IGNORECASE,
+)
+_ENGINEERING_TITLE_RE: re.Pattern[str] = re.compile(
+    r"\b("
+    r"software engineer(?:ing)?|(?:^|[\W_])engineer(?:ing)?|developer|devops|sre|"
+    r"architect|release engineer|qa engineer|hardware engineer|"
+    r"ml engineer|machine learning engineer|data engineer|"
+    r"technical marketing engineer|solutions engineer|sales engineer|"
+    r"product success engineer(?:ing)?|field engineer|systems engineer|"
+    r"director[, ]+(?:of )?(?:software )?engineer"
+    r")\b",
+    re.IGNORECASE,
+)
+_MARKETING_TITLE_RE: re.Pattern[str] = re.compile(
+    r"\b(product marketing|marketing manager|product marketer)\b",
+    re.IGNORECASE,
 )
 
 
@@ -149,6 +181,36 @@ def _publish_scoring_cancelled(user_id: uuid.UUID, scored: int, total: int) -> N
     job_event_bus.publish(user_id, event)
 
 
+def _cap_role_score_for_function_mismatch(
+    preferences_text: str | None,
+    job: OrgJob,
+    role_score: int,
+    role_reason: str | None,
+) -> tuple[int, str | None]:
+    """Cap inflated role scores when the title clearly mismatches PM preferences."""
+    if preferences_text is None or not _PM_PREFERENCE_RE.search(preferences_text):
+        return role_score, role_reason
+
+    title: str = job.title
+    if _PM_TITLE_RE.search(title):
+        return role_score, role_reason
+
+    haystack: str = f"{title} {job.department or ''}"
+    if _ENGINEERING_TITLE_RE.search(haystack):
+        capped: int = min(role_score, 15)
+        if capped < role_score:
+            return capped, (
+                "The job title indicates engineering, not product management."
+            )
+    if _MARKETING_TITLE_RE.search(haystack):
+        capped = min(role_score, 20)
+        if capped < role_score:
+            return capped, (
+                "The job title indicates marketing, not product management."
+            )
+    return role_score, role_reason
+
+
 class JobRelevanceService:
     def __init__(self, db: AsyncSession, settings: Settings) -> None:
         self._db: AsyncSession = db
@@ -175,6 +237,7 @@ class JobRelevanceService:
 
         total_classified: int = 0
         cancelled: bool = False
+        preferences_text: str | None = user.job_preferences_text
         try:
             for i in range(0, len(unclassified_jobs), _BATCH_SIZE):
                 if user_id in _scoring_cancelled:
@@ -188,7 +251,11 @@ class JobRelevanceService:
                     break
                 batch: list[OrgJob] = unclassified_jobs[i : i + _BATCH_SIZE]
                 classified: int = await self._classify_batch(
-                    user_id, preferences_section, profile_section, batch,
+                    user_id,
+                    preferences_section,
+                    profile_section,
+                    batch,
+                    preferences_text=preferences_text,
                 )
                 total_classified += classified
                 _scoring_progress[user_id] = (total_classified, total_jobs)
@@ -220,7 +287,12 @@ class JobRelevanceService:
         parts: list[str] = []
         role_text: str = (user.job_preferences_text or "").strip()
         if role_text:
-            parts.append(f"Role interests: {role_text}")
+            parts.append(f"Target role / job function: {role_text}")
+            parts.append(
+                "Only score role_score above 65 if the job TITLE is clearly in this same function. "
+                "Engineering, marketing, and sales titles must score ≤25 unless they are explicit "
+                "product management titles."
+            )
 
         loc_pref: str | None = user.job_location_pref
         loc_city: str | None = user.job_location_city
@@ -346,6 +418,8 @@ class JobRelevanceService:
         preferences_section: str,
         profile_section: str,
         jobs: list[OrgJob],
+        *,
+        preferences_text: str | None = None,
     ) -> int:
         job_descriptions: list[str] = []
         for idx, job in enumerate(jobs):
@@ -380,6 +454,14 @@ class JobRelevanceService:
             seniority_score: int = max(0, min(100, int(item.get("seniority_score", 50))))
             location_score: int = max(0, min(100, int(item.get("location_score", 50))))
 
+            role_reason: str | None = item.get("role_reason")
+            role_score, role_reason = _cap_role_score_for_function_mismatch(
+                preferences_text,
+                job,
+                role_score,
+                role_reason,
+            )
+
             match_score: int = round(
                 role_score * _ROLE_WEIGHT
                 + seniority_score * _SENIORITY_WEIGHT
@@ -388,7 +470,6 @@ class JobRelevanceService:
             match_score = max(0, min(100, match_score))
             is_relevant: bool = match_score >= _MATCH_SCORE_RELEVANT_THRESHOLD
 
-            role_reason: str | None = item.get("role_reason")
             seniority_reason: str | None = item.get("seniority_reason")
             location_reason: str | None = item.get("location_reason")
 

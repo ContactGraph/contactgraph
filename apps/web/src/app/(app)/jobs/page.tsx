@@ -104,19 +104,6 @@ function MatchBadge({ score }: { score: number | null }) {
 
 type JobFilter = "bookmarked" | "relevant" | "all";
 
-function scoreSortingFn(
-  rowA: { getValue: (id: string) => unknown },
-  rowB: { getValue: (id: string) => unknown },
-  columnId: string,
-): number {
-  const a: number | null = rowA.getValue(columnId) as number | null;
-  const b: number | null = rowB.getValue(columnId) as number | null;
-  if (a === null && b === null) return 0;
-  if (a === null) return 1;
-  if (b === null) return -1;
-  return a - b;
-}
-
 function JobsTable() {
   const [search, setSearch] = useState<string>("");
   const [filter, setFilter] = useState<JobFilter>("relevant");
@@ -192,12 +179,11 @@ function JobsTable() {
     () => [
       {
         id: "match",
-        accessorFn: (row: OrgJobItem) => row.match_score,
+        accessorFn: (row: OrgJobItem) => row.match_score ?? 0,
         header: ({ column }) => (
           <CompactSortHeader column={column} label="Match" />
         ),
         cell: ({ row }) => <MatchBadge score={row.original.match_score} />,
-        sortingFn: scoreSortingFn,
         meta: { width: "w-[3.5rem]" },
       },
       {
