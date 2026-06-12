@@ -7,6 +7,9 @@ import logging
 import threading
 import uuid
 
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from contactsafe_server.db.connection import get_session_factory
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -14,6 +17,8 @@ logger: logging.Logger = logging.getLogger(__name__)
 _global_scan_lock: threading.Lock = threading.Lock()
 _global_scan_active: bool = False
 _periodic_task: asyncio.Task[None] | None = None
+
+_JOB_SCRAPE_LOCK_NAMESPACE: int = 0x635F_0002
 
 
 def is_global_scan_active() -> bool:
@@ -25,6 +30,20 @@ def _set_global_scan_active(active: bool) -> None:
     global _global_scan_active
     with _global_scan_lock:
         _global_scan_active = active
+
+
+async def _try_claim_org_scrape(db: AsyncSession, org_id: uuid.UUID) -> bool:
+    """Try to acquire a transaction-scoped advisory lock for scraping this org.
+
+    Returns True if the lock was acquired (no other instance is scraping it).
+    The lock is automatically released when the transaction/session closes.
+    """
+    key2: int = org_id.int % (2**31)
+    result = await db.execute(
+        text("SELECT pg_try_advisory_xact_lock(:ns, :key)"),
+        {"ns": _JOB_SCRAPE_LOCK_NAMESPACE, "key": key2},
+    )
+    return bool(result.scalar_one())
 
 
 async def _run_one_global_scan() -> None:
@@ -44,6 +63,9 @@ async def _run_one_global_scan() -> None:
             async with factory() as db:
                 service = JobDiscoveryService(db, ctx.settings)
                 if await service.was_recently_scraped(org_id):
+                    continue
+                if not await _try_claim_org_scrape(db, org_id):
+                    logger.debug("Skipping org %s — another instance is scraping it", org_id)
                     continue
                 scrape_result = await service.scrape_org_global(org_id)
                 if scrape_result.scanned:
