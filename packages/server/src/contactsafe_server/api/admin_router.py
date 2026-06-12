@@ -4,11 +4,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from contactsafe_core.contact_schemas import WorkerStatusResult
+from contactsafe_core.contact_schemas import AdminUsersResult, WorkerStatusResult
 from fastapi import APIRouter, Depends, HTTPException
 
 from contactsafe_server.api.router import AuthenticatedUser, Ctx, _authenticate
-from contactsafe_server.services.worker_status_service import get_worker_status
+from contactsafe_server.services.worker_status_service import (
+    get_admin_users,
+    get_worker_status,
+)
 
 router: APIRouter = APIRouter()
 
@@ -31,3 +34,12 @@ async def api_admin_worker_status(
 ) -> WorkerStatusResult:
     async with ctx.session_factory() as db:
         return await get_worker_status(db, ctx.settings)
+
+
+@router.post("/admin/users", response_model=AdminUsersResult)
+async def api_admin_users(
+    ctx: Ctx,
+    _admin: AdminUser,
+) -> AdminUsersResult:
+    async with ctx.session_factory() as db:
+        return await get_admin_users(db)

@@ -3,7 +3,12 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { PipelineDonut } from "@/components/admin/pipeline-donut";
-import type { PipelineStatus, WorkerStatusResult } from "@/lib/api-types";
+import type {
+  AdminUserItem,
+  AdminUsersResult,
+  PipelineStatus,
+  WorkerStatusResult,
+} from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
 
 const PIPELINE_LABELS: Record<string, string> = {
@@ -29,7 +34,11 @@ function formatRelativeTime(iso: string | null): string {
   if (diffHours < 24) {
     return `${diffHours}h ago`;
   }
-  return date.toLocaleString();
+  const diffDays: number = Math.floor(diffHours / 24);
+  if (diffDays < 7) {
+    return `${diffDays}d ago`;
+  }
+  return date.toLocaleDateString();
 }
 
 function PipelineCard({ pipeline }: { pipeline: PipelineStatus }) {
@@ -76,6 +85,69 @@ function PipelineCard({ pipeline }: { pipeline: PipelineStatus }) {
   );
 }
 
+function Badge({ active, label }: { active: boolean; label: string }) {
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+        active
+          ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+          : "bg-muted text-muted-foreground"
+      }`}
+    >
+      {label}
+    </span>
+  );
+}
+
+function UsersTable({ users }: { users: AdminUserItem[] }) {
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border bg-muted/50 text-left text-xs font-medium text-muted-foreground">
+            <th className="px-4 py-2">User</th>
+            <th className="px-4 py-2">Sources</th>
+            <th className="px-4 py-2 text-right">People</th>
+            <th className="px-4 py-2 text-right">Orgs</th>
+            <th className="px-4 py-2">First seen</th>
+            <th className="px-4 py-2">Last seen</th>
+          </tr>
+        </thead>
+        <tbody>
+          {users.map((user) => (
+            <tr key={user.user_id} className="border-b border-border last:border-0">
+              <td className="px-4 py-2">
+                <div className="font-medium">{user.display_name ?? user.email}</div>
+                {user.display_name ? (
+                  <div className="text-xs text-muted-foreground">{user.email}</div>
+                ) : null}
+              </td>
+              <td className="px-4 py-2">
+                <div className="flex gap-1.5">
+                  <Badge active={user.has_vcf} label="VCF" />
+                  <Badge active={user.has_linkedin} label="LinkedIn" />
+                </div>
+              </td>
+              <td className="px-4 py-2 text-right tabular-nums">
+                {user.person_count.toLocaleString()}
+              </td>
+              <td className="px-4 py-2 text-right tabular-nums">
+                {user.org_count.toLocaleString()}
+              </td>
+              <td className="px-4 py-2 text-muted-foreground">
+                {formatRelativeTime(user.first_seen_at)}
+              </td>
+              <td className="px-4 py-2 text-muted-foreground">
+                {formatRelativeTime(user.last_seen_at)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 export function AdminDashboard() {
   const statusQuery = useQuery({
     queryKey: ["admin-worker-status"],
@@ -83,10 +155,17 @@ export function AdminDashboard() {
     refetchInterval: 5000,
   });
 
+  const usersQuery = useQuery({
+    queryKey: ["admin-users"],
+    queryFn: () => proxyPost<AdminUsersResult>("admin/users"),
+    refetchInterval: 30000,
+  });
+
   const status: WorkerStatusResult | undefined = statusQuery.data;
+  const usersData: AdminUsersResult | undefined = usersQuery.data;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
         <p className="text-sm text-muted-foreground">
@@ -130,6 +209,22 @@ export function AdminDashboard() {
           ))}
         </div>
       ) : null}
+
+      <div className="space-y-3">
+        <h2 className="text-lg font-semibold tracking-tight">Users</h2>
+        {usersQuery.isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading users…</p>
+        ) : null}
+        {usersQuery.isError ? (
+          <p className="text-sm text-destructive">Failed to load users</p>
+        ) : null}
+        {usersData && usersData.users.length > 0 ? (
+          <UsersTable users={usersData.users} />
+        ) : null}
+        {usersData && usersData.users.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No users found.</p>
+        ) : null}
+      </div>
     </div>
   );
 }

@@ -7,7 +7,12 @@ from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from contactsafe_core.contact_schemas import PipelineStatus, WorkerStatusResult
+from contactsafe_core.contact_schemas import (
+    AdminUserItem,
+    AdminUsersResult,
+    PipelineStatus,
+    WorkerStatusResult,
+)
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,8 +23,12 @@ from contactsafe_server.db.models import (
     OrgJob,
     OrgListMembership,
     Person,
+    RefreshToken,
+    Source,
     User,
     UserJobRelevance,
+    UserOrgObservation,
+    UserPersonObservation,
 )
 from contactsafe_server.redis_state import get_redis_client, get_worker_last_run
 
@@ -248,3 +257,72 @@ async def get_worker_status(db: AsyncSession, settings: Settings) -> WorkerStatu
         redis_connected=redis_connected,
         message=message,
     )
+
+
+async def get_admin_users(db: AsyncSession) -> AdminUsersResult:
+    """Return summary of all users for the admin dashboard."""
+
+    users_result = await db.execute(select(User).order_by(User.created_at.asc()))
+    users: list[User] = list(users_result.scalars().all())
+
+    if not users:
+        return AdminUsersResult(users=[], message="No users found")
+
+    user_ids: list[Any] = [u.id for u in users]
+
+    # Source types per user
+    sources_result = await db.execute(
+        select(Source.user_id, Source.source_type).where(Source.user_id.in_(user_ids))
+    )
+    user_sources: dict[Any, set[str]] = defaultdict(set)
+    for row in sources_result:
+        user_sources[row.user_id].add(row.source_type)
+
+    # Person counts per user
+    person_counts_result = await db.execute(
+        select(UserPersonObservation.user_id, func.count())
+        .where(UserPersonObservation.user_id.in_(user_ids))
+        .group_by(UserPersonObservation.user_id)
+    )
+    person_counts: dict[Any, int] = dict(person_counts_result.all())
+
+    # Org counts per user
+    org_counts_result = await db.execute(
+        select(UserOrgObservation.user_id, func.count())
+        .where(UserOrgObservation.user_id.in_(user_ids))
+        .group_by(UserOrgObservation.user_id)
+    )
+    org_counts: dict[Any, int] = dict(org_counts_result.all())
+
+    # Last activity: most recent refresh token creation as proxy for last visit
+    last_activity_result = await db.execute(
+        select(RefreshToken.user_id, func.max(RefreshToken.created_at))
+        .where(RefreshToken.user_id.in_(user_ids))
+        .group_by(RefreshToken.user_id)
+    )
+    last_activity: dict[Any, datetime] = dict(last_activity_result.all())
+
+    items: list[AdminUserItem] = []
+    for user in users:
+        sources_set: set[str] = user_sources.get(user.id, set())
+        has_vcf: bool = "phone_contacts_upload" in sources_set
+        has_linkedin: bool = bool(
+            sources_set & {"linkedin_connections_upload", "linkedin_profile_upload"}
+        )
+        last_seen: datetime | None = last_activity.get(user.id) or user.updated_at
+
+        items.append(
+            AdminUserItem(
+                user_id=str(user.id),
+                email=user.email,
+                display_name=user.display_name or user.google_profile_name,
+                has_vcf=has_vcf,
+                has_linkedin=has_linkedin,
+                person_count=person_counts.get(user.id, 0),
+                org_count=org_counts.get(user.id, 0),
+                first_seen_at=user.created_at,
+                last_seen_at=last_seen,
+            )
+        )
+
+    return AdminUsersResult(users=items)

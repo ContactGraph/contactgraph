@@ -778,3 +778,20 @@ export interface WorkerStatusResult {
   redis_connected: boolean;
   message: string;
 }
+
+export interface AdminUserItem {
+  user_id: string;
+  email: string;
+  display_name: string | null;
+  has_vcf: boolean;
+  has_linkedin: boolean;
+  person_count: number;
+  org_count: number;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+}
+
+export interface AdminUsersResult {
+  users: AdminUserItem[];
+  message: string;
+}

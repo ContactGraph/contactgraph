@@ -484,3 +484,20 @@ class WorkerStatusResult(BaseModel):
     worker_connected: bool = False
     redis_connected: bool = False
     message: str = "OK"
+
+
+class AdminUserItem(BaseModel):
+    user_id: str
+    email: str
+    display_name: str | None = None
+    has_vcf: bool = False
+    has_linkedin: bool = False
+    person_count: int = 0
+    org_count: int = 0
+    first_seen_at: datetime | None = None
+    last_seen_at: datetime | None = None
+
+
+class AdminUsersResult(BaseModel):
+    users: list[AdminUserItem] = Field(default_factory=list)
+    message: str = "OK"
