@@ -522,16 +522,17 @@ class ImportService:
                 if not is_automation_or_generic_domain(email_domain):
                     domain = email_domain
             org = await resolver.resolve_org(domain=domain, name=contact.org_name)
-            await record_employment(
-                self._db,
-                person_id=person.id,
-                org_id=org.id,
-                role_title=contact.org_title,
-                contributor_user_id=user_id,
-                contributor_source_kind="google_contacts",
-                contributor_source_id=source_id,
-                confidence=0.5,
-            )
+            if org is not None:
+                await record_employment(
+                    self._db,
+                    person_id=person.id,
+                    org_id=org.id,
+                    role_title=contact.org_title,
+                    contributor_user_id=user_id,
+                    contributor_source_kind="google_contacts",
+                    contributor_source_id=source_id,
+                    confidence=0.5,
+                )
 
     async def _flush_ingest_progress(
         self,

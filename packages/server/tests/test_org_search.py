@@ -4,6 +4,9 @@ from contactsafe_server.services.org_search import (
     is_automation_domain,
     is_automation_or_generic_domain,
     is_non_company_domain,
+    is_placeholder_org_name,
+    normalize_org_name_key,
+    org_name_from_domain,
     org_name_from_email,
 )
 
@@ -85,3 +88,22 @@ def test_gov_edu_blocked_in_automation_or_generic() -> None:
 def test_org_name_from_email_gov_edu_returns_none() -> None:
     assert org_name_from_email("planning@cityofmillvalley.ca.gov") is None
     assert org_name_from_email("prof@stanford.edu") is None
+
+
+def test_normalize_org_name_key_collapses_punctuation() -> None:
+    assert normalize_org_name_key("Acme, Inc.") == "acme inc"
+    assert normalize_org_name_key("Self-Employed") == "self employed"
+
+
+def test_is_placeholder_org_name() -> None:
+    assert is_placeholder_org_name("Self Employed") is True
+    assert is_placeholder_org_name("self-employed") is True
+    assert is_placeholder_org_name("Stealth Startup") is True
+    assert is_placeholder_org_name("Stealth Mode AI") is True
+    assert is_placeholder_org_name("Freelance") is True
+    assert is_placeholder_org_name("Horizon Ventures") is False
+
+
+def test_org_name_from_domain() -> None:
+    assert org_name_from_domain("horizon.vc") == "Horizon VC"
+    assert org_name_from_domain("gmail.com") is None

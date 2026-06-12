@@ -388,16 +388,17 @@ class FileUploadImportService:
 
             if connection.company:
                 org = await resolver.resolve_org(domain=None, name=connection.company)
-                await record_employment(
-                    self._db,
-                    person_id=person.id,
-                    org_id=org.id,
-                    role_title=connection.position,
-                    contributor_user_id=source.user_id,
-                    contributor_source_kind="linkedin_connections_upload",
-                    contributor_source_id=source.id,
-                    confidence=0.8,
-                )
+                if org is not None:
+                    await record_employment(
+                        self._db,
+                        person_id=person.id,
+                        org_id=org.id,
+                        role_title=connection.position,
+                        contributor_user_id=source.user_id,
+                        contributor_source_kind="linkedin_connections_upload",
+                        contributor_source_id=source.id,
+                        confidence=0.8,
+                    )
 
             source.contacts_resolved += 1
             source.contacts_pending = max(0, total_connections - source.contacts_resolved)
@@ -456,6 +457,8 @@ class FileUploadImportService:
 
         for exp in profile.experiences:
             org = await resolver.resolve_org(domain=None, name=exp.company)
+            if org is None:
+                continue
             await record_employment(
                 self._db,
                 person_id=person.id,
