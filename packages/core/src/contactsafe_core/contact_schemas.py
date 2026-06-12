@@ -457,12 +457,23 @@ class SetJobPreferencesRequest(BaseModel):
     commute_note: str | None = None
 
 
+class JobTargetScope(BaseModel):
+    industry_tags: list[str] = Field(default_factory=list)
+    sharer_names: list[str] = Field(default_factory=list)
+    size_bands: list[str] = Field(default_factory=list)
+
+
+class SetJobTargetScopeRequest(BaseModel):
+    target_scope: JobTargetScope
+
+
 class JobPreferencesResult(BaseModel):
     text: str | None = None
     location_pref: str | None = None
     location_city: str | None = None
     commute_max_minutes: int | None = None
     commute_note: str | None = None
+    target_scope: JobTargetScope | None = None
     classified_job_count: int = 0
     message: str
 

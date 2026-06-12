@@ -528,7 +528,7 @@ function JobsTable() {
           columnCount={columns.length}
           emptyMessage={
             totalCount === 0
-              ? "No jobs found yet. Star companies and run Check All."
+              ? "No jobs found yet. Select companies and jobs will appear automatically once scanned."
               : "No jobs match the current filter."
           }
           onRowClick={(job: OrgJobItem) => setSelectedJobId(job.job_id)}

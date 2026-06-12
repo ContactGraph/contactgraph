@@ -1,13 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Loader2, Plus } from "lucide-react";
-import Link from "next/link";
+import { Loader2, Plus } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { LinkedInProfileUploadDialog } from "@/components/setup/linkedin-profile-upload-dialog";
 import { SetupStepStatusIcon } from "@/components/setup/setup-step-status-icon";
+import { JobTargetCompaniesCard } from "@/components/target-selection/job-target-companies-card";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -39,9 +39,7 @@ import {
   hasTargetCompanies,
   isLinkedInProfileComplete,
   isOrgEnrichmentBlocking,
-  isOrgEnrichmentComplete,
   isSourceStepInProgress,
-  jobProspectsStarredCount,
   sourceForType,
 } from "@/lib/setup-utils";
 
@@ -160,7 +158,6 @@ export function JobSetupCards({
   const jobProspectsList: OrgListSummary | undefined =
     findJobProspectsList(orgLists);
 
-  const starredCount: number = jobProspectsStarredCount(orgLists);
   const targetComplete: boolean = hasTargetCompanies(orgLists);
   const profileComplete: boolean = isLinkedInProfileComplete(sources);
   const preferencesComplete: boolean = hasJobPreferences(jobPreferencesQuery.data);
@@ -336,52 +333,11 @@ export function JobSetupCards({
         </div>
       ) : null}
 
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-4">
-          <div className="flex gap-3">
-            <div className="mt-0.5 shrink-0">
-              <SetupStepStatusIcon
-                complete={targetComplete}
-                inProgress={enrichmentInProgress && !targetComplete}
-              />
-            </div>
-            <div className="space-y-1">
-              <CardTitle className="text-base">
-                Select organizations for jobs
-              </CardTitle>
-              <CardDescription>
-                Star companies in your network that you would like to work at.
-              </CardDescription>
-              {enrichmentInProgress ? (
-                <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="size-3.5 animate-spin" />
-                  {enrichmentProgressLabel}
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {starredCount === 0
-                    ? "0 organizations selected for job search"
-                    : `${starredCount.toLocaleString()} organization${starredCount === 1 ? "" : "s"} selected for job search`}
-                </p>
-              )}
-            </div>
-          </div>
-          {!enrichmentInProgress ? (
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/graph?tab=organizations">
-                {starredCount === 0 ? (
-                  <>
-                    Go to Organizations tab
-                    <ArrowRight className="size-4" />
-                  </>
-                ) : (
-                  "Edit"
-                )}
-              </Link>
-            </Button>
-          ) : null}
-        </CardHeader>
-      </Card>
+      <JobTargetCompaniesCard
+        targetComplete={targetComplete}
+        enrichmentInProgress={enrichmentInProgress}
+        enrichmentProgressLabel={enrichmentProgressLabel}
+      />
 
       <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-4">
