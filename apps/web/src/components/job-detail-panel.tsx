@@ -49,8 +49,16 @@ function formatSalary(min: number | null, max: number | null): string | null {
   return `Up to $${max!.toLocaleString()}`;
 }
 
-function stripMarkdown(text: string): string {
-  return text
+function stripFormatting(text: string): string {
+  let cleaned: string = text
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+  cleaned = cleaned
     .replace(/#{1,6}\s+/g, "")
     .replace(/\*\*(.+?)\*\*/g, "$1")
     .replace(/__(.+?)__/g, "$1")
@@ -60,8 +68,8 @@ function stripMarkdown(text: string): string {
     .replace(/`(.+?)`/g, "$1")
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
     .replace(/^[-*+]\s+/gm, "• ")
-    .replace(/^\d+\.\s+/gm, "")
-    .trim();
+    .replace(/^\d+\.\s+/gm, "");
+  return cleaned.replace(/\s{2,}/g, " ").trim();
 }
 
 function SubScoreRow({
@@ -217,7 +225,7 @@ export function JobDetailPanel({
         <div className="space-y-1">
           <h3 className="text-sm font-medium">Description</h3>
           <p className="whitespace-pre-line text-sm text-muted-foreground">
-            {stripMarkdown(job.description_snippet)}
+            {stripFormatting(job.description_snippet)}
           </p>
         </div>
       ) : null}

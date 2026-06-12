@@ -15,7 +15,7 @@ from contactsafe_server.services.job_discovery_types import DiscoveredJob
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-_DESCRIPTION_SNIPPET_MAX: int = 500
+_DESCRIPTION_SNIPPET_MAX: int = 2000
 
 
 class TheirStackClient:
