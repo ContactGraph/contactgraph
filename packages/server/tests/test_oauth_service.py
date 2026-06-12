@@ -195,7 +195,7 @@ class TestCreateConnectSession:
         assert result.status == SessionStatus.PENDING
         assert result.already_connected is False
 
-    async def test_existing_user_with_valid_cred_returns_already_connected(self, db_session: AsyncSession) -> None:
+    async def test_existing_cred_requires_auth_owner(self, db_session: AsyncSession) -> None:
         user: User = await _seed_user(db_session)
         await _seed_credential(db_session, user.id)
         await _seed_source(db_session, user.id)
@@ -203,10 +203,51 @@ class TestCreateConnectSession:
         svc: OAuthService = _build_service(db_session)
         result: ConnectSourceResult = await svc.create_connect_session(user_token="alice@example.com")
 
+        assert result.already_connected is False
+        assert result.status == SessionStatus.PENDING
+        assert result.email is None
+        assert result.source_id is None
+
+        row: ConnectSession | None = await db_session.get(ConnectSession, result.connect_session_id)
+        assert row is not None
+        assert row.user_id is None
+
+    async def test_existing_cred_returns_connected_for_owner(self, db_session: AsyncSession) -> None:
+        user: User = await _seed_user(db_session)
+        await _seed_credential(db_session, user.id)
+        await _seed_source(db_session, user.id)
+
+        svc: OAuthService = _build_service(db_session)
+        result: ConnectSourceResult = await svc.create_connect_session(
+            user_token="alice@example.com",
+            authenticated_user_id=user.id,
+        )
+
         assert result.already_connected is True
         assert result.status == SessionStatus.CONNECTED
         assert result.email == "alice@example.com"
         assert result.source_id is not None
+
+    async def test_existing_cred_rejects_mismatched_user(self, db_session: AsyncSession) -> None:
+        victim: User = await _seed_user(db_session)
+        attacker: User = await _seed_user(db_session, email="attacker@example.com")
+        await _seed_credential(db_session, victim.id)
+        await _seed_source(db_session, victim.id)
+
+        svc: OAuthService = _build_service(db_session)
+        result: ConnectSourceResult = await svc.create_connect_session(
+            user_token="alice@example.com",
+            authenticated_user_id=attacker.id,
+        )
+
+        assert result.already_connected is False
+        assert result.status == SessionStatus.PENDING
+        assert result.email is None
+        assert result.source_id is None
+
+        row: ConnectSession | None = await db_session.get(ConnectSession, result.connect_session_id)
+        assert row is not None
+        assert row.user_id == attacker.id
 
     async def test_existing_user_with_invalid_cred_creates_new_session(self, db_session: AsyncSession) -> None:
         user: User = await _seed_user(db_session)
@@ -252,7 +293,8 @@ class TestCreateConnectSession:
 
         svc: OAuthService = _build_service(db_session)
         result: ConnectSourceResult = await svc.create_connect_session(
-            user_token="  Bob@Example.COM  "
+            user_token="  Bob@Example.COM  ",
+            authenticated_user_id=user.id,
         )
 
         assert result.already_connected is True
@@ -523,7 +565,10 @@ class TestCheckExistingByEmail:
         user: User = await _seed_user(db_session, email="nocred@example.com")
 
         svc: OAuthService = _build_service(db_session)
-        result: ConnectSourceResult | None = await svc._check_existing_by_email("nocred@example.com")
+        result: ConnectSourceResult | None = await svc._check_existing_by_email(
+            "nocred@example.com",
+            authenticated_user_id=user.id,
+        )
 
         assert result is None
 
@@ -532,7 +577,10 @@ class TestCheckExistingByEmail:
         await _seed_credential(db_session, user.id, email="invalidcred@example.com", is_valid=False)
 
         svc: OAuthService = _build_service(db_session)
-        result: ConnectSourceResult | None = await svc._check_existing_by_email("invalidcred@example.com")
+        result: ConnectSourceResult | None = await svc._check_existing_by_email(
+            "invalidcred@example.com",
+            authenticated_user_id=user.id,
+        )
 
         assert result is None
 
@@ -541,12 +589,28 @@ class TestCheckExistingByEmail:
         await _seed_credential(db_session, user.id, email="valid@example.com")
 
         svc: OAuthService = _build_service(db_session)
-        result: ConnectSourceResult | None = await svc._check_existing_by_email("valid@example.com")
+        result: ConnectSourceResult | None = await svc._check_existing_by_email(
+            "valid@example.com",
+            authenticated_user_id=user.id,
+        )
 
         assert result is not None
         assert result.already_connected is True
         assert result.status == SessionStatus.CONNECTED
         assert result.email == "valid@example.com"
+
+    async def test_returns_none_for_mismatched_user(self, db_session: AsyncSession) -> None:
+        victim: User = await _seed_user(db_session, email="victim@example.com")
+        attacker: User = await _seed_user(db_session, email="attacker2@example.com")
+        await _seed_credential(db_session, victim.id, email="victim@example.com")
+
+        svc: OAuthService = _build_service(db_session)
+        result: ConnectSourceResult | None = await svc._check_existing_by_email(
+            "victim@example.com",
+            authenticated_user_id=attacker.id,
+        )
+
+        assert result is None
 
     async def test_triggers_sync_for_pending_source(self, db_session: AsyncSession) -> None:
         user: User = await _seed_user(db_session, email="sync@example.com")
@@ -559,7 +623,7 @@ class TestCheckExistingByEmail:
         svc: OAuthService = _build_service(db_session)
 
         with patch.object(svc._sources, "request_sync", new_callable=AsyncMock) as mock_sync:
-            await svc._check_existing_by_email("sync@example.com")
+            await svc._check_existing_by_email("sync@example.com", authenticated_user_id=user.id)
             mock_sync.assert_awaited_once_with(source.id)
 
     async def test_triggers_sync_for_failed_source(self, db_session: AsyncSession) -> None:
@@ -573,7 +637,7 @@ class TestCheckExistingByEmail:
         svc: OAuthService = _build_service(db_session)
 
         with patch.object(svc._sources, "request_sync", new_callable=AsyncMock) as mock_sync:
-            await svc._check_existing_by_email("failed@example.com")
+            await svc._check_existing_by_email("failed@example.com", authenticated_user_id=user.id)
             mock_sync.assert_awaited_once_with(source.id)
 
     async def test_triggers_sync_when_source_has_sync_error(self, db_session: AsyncSession) -> None:
@@ -588,7 +652,7 @@ class TestCheckExistingByEmail:
         svc: OAuthService = _build_service(db_session)
 
         with patch.object(svc._sources, "request_sync", new_callable=AsyncMock) as mock_sync:
-            await svc._check_existing_by_email("errored@example.com")
+            await svc._check_existing_by_email("errored@example.com", authenticated_user_id=user.id)
             mock_sync.assert_awaited_once()
 
     async def test_no_sync_for_complete_healthy_source(self, db_session: AsyncSession) -> None:
@@ -602,7 +666,7 @@ class TestCheckExistingByEmail:
         svc: OAuthService = _build_service(db_session)
 
         with patch.object(svc._sources, "request_sync", new_callable=AsyncMock) as mock_sync:
-            await svc._check_existing_by_email("healthy@example.com")
+            await svc._check_existing_by_email("healthy@example.com", authenticated_user_id=user.id)
             mock_sync.assert_not_awaited()
 
 
