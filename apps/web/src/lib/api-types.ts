@@ -684,6 +684,7 @@ export interface OrgJobItem {
   title: string;
   org_name: string | null;
   org_id: string | null;
+  org_primary_domain: string | null;
   location: string | null;
   department: string | null;
   url: string;
