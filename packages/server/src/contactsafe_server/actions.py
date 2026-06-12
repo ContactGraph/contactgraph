@@ -633,6 +633,10 @@ async def save_user_experience(
         person = await ensure_user_person(db, user)
         resolver = EntityResolver(db)
         org = await resolver.resolve_org(domain=None, name=company.strip())
+        if org is None:
+            return UserProfileResult(
+                message="That company name is not a real organization (e.g. Self Employed, Stealth Startup).",
+            )
 
         if experience_id is not None:
             claim: EmploymentClaim | None = await db.get(EmploymentClaim, experience_id)

@@ -15,6 +15,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.db.models import Org, OrgAlias, Person, PersonAlias
 from contactsafe_server.services.email_normalization import normalize_gmail
+from contactsafe_server.services.org_search import (
+    is_placeholder_org_name,
+    normalize_org_name_key,
+    org_name_from_domain,
+)
 from contactsafe_server.services.phone_normalization import normalize_phone
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -34,6 +39,20 @@ _WWW_PREFIX_RE: re.Pattern[str] = re.compile(r"^(https?://)www\.", re.IGNORECASE
 def _normalize_linkedin_url(url: str) -> str:
     """Canonical form: strip www. prefix, lowercase, drop trailing slash."""
     return _WWW_PREFIX_RE.sub(r"\1", url.strip()).lower().rstrip("/")
+
+
+def _company_name_from_linkedin_url(url: str) -> str | None:
+    match: re.Match[str] | None = re.search(
+        r"/company/([^/?#]+)",
+        _normalize_linkedin_url(url),
+    )
+    if match is None:
+        return None
+    slug: str = match.group(1).replace("-", " ")
+    words: list[str] = [part for part in slug.split() if part]
+    if not words:
+        return None
+    return " ".join(part.capitalize() for part in words)
 
 
 def _extract_first_name(canonical_name: str) -> str:
@@ -413,15 +432,21 @@ class EntityResolver:
         domain: str | None = None,
         name: str | None = None,
         linkedin_url: str | None = None,
-    ) -> Org:
-        """Return an existing org or create a new one."""
+    ) -> Org | None:
+        """Return an existing org, create a new one, or None for placeholder names."""
+        domain_value: str | None = domain.lower().strip() if domain else None
+        name_value: str | None = name.strip() if name else None
+        linkedin_value: str | None = (
+            _normalize_linkedin_url(linkedin_url) if linkedin_url else None
+        )
+
         candidates: list[tuple[str, str]] = []
-        if linkedin_url:
-            candidates.append(("linkedin_url", _normalize_linkedin_url(linkedin_url)))
-        if domain:
-            candidates.append(("domain", domain.lower().strip()))
-        if name:
-            candidates.append(("name", name.lower().strip()))
+        if linkedin_value:
+            candidates.append(("linkedin_url", linkedin_value))
+        if domain_value:
+            candidates.append(("domain", domain_value))
+        if name_value and not is_placeholder_org_name(name_value):
+            candidates.append(("name", normalize_org_name_key(name_value)))
 
         for kind, value in candidates:
             if self._org_alias_cache is not None:
@@ -443,10 +468,24 @@ class EntityResolver:
                     if org_hit is not None:
                         return org_hit
 
-        canonical: str = name or (domain or "Unknown")
+        has_strong_identifier: bool = domain_value is not None or linkedin_value is not None
+        if name_value and is_placeholder_org_name(name_value) and not has_strong_identifier:
+            return None
+
+        canonical: str | None = None
+        if name_value and not is_placeholder_org_name(name_value):
+            canonical = name_value
+        elif domain_value:
+            canonical = org_name_from_domain(domain_value) or domain_value
+        elif linkedin_value:
+            canonical = _company_name_from_linkedin_url(linkedin_value)
+
+        if canonical is None:
+            return None
+
         org = Org(
             canonical_name=canonical,
-            primary_domain=domain,
+            primary_domain=domain_value,
         )
         self._session.add(org)
         await self._session.flush()

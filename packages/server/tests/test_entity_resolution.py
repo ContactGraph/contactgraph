@@ -111,6 +111,34 @@ async def test_resolve_org_by_name_only(db_session: AsyncSession) -> None:
     resolver = EntityResolver(db_session)
     org1 = await resolver.resolve_org(name="Acme Corp")
     org2 = await resolver.resolve_org(name="Acme Corp")
+    assert org1 is not None
+    assert org2 is not None
+    assert org1.id == org2.id
+
+
+async def test_resolve_org_rejects_placeholder_name(db_session: AsyncSession) -> None:
+    resolver = EntityResolver(db_session)
+    assert await resolver.resolve_org(name="Self Employed") is None
+    assert await resolver.resolve_org(name="Stealth Startup") is None
+    assert await resolver.resolve_org(name="Self-Employed") is None
+
+
+async def test_resolve_org_placeholder_with_domain_uses_domain(
+    db_session: AsyncSession,
+) -> None:
+    resolver = EntityResolver(db_session)
+    org = await resolver.resolve_org(domain="horizon.vc", name="Self Employed")
+    assert org is not None
+    assert org.primary_domain == "horizon.vc"
+    assert org.canonical_name == "Horizon VC"
+
+
+async def test_resolve_org_name_alias_normalization(db_session: AsyncSession) -> None:
+    resolver = EntityResolver(db_session)
+    org1 = await resolver.resolve_org(name="Acme, Inc.")
+    org2 = await resolver.resolve_org(name="Acme Inc")
+    assert org1 is not None
+    assert org2 is not None
     assert org1.id == org2.id
 
 

@@ -117,18 +117,19 @@ async def apply_scraped_profile(
 
     if not profile.experiences and profile.current_company:
         org = await resolver.resolve_org(domain=None, name=profile.current_company)
-        await record_employment(
-            session,
-            person_id=person.id,
-            org_id=org.id,
-            role_title=profile.current_title,
-            is_current=True,
-            contributor_user_id=user_id,
-            contributor_source_kind=SOURCE_KIND,
-            confidence=0.9,
-            evidence={"headline": profile.headline, "source": "scrapingdog"},
-        )
-        applied = True
+        if org is not None:
+            await record_employment(
+                session,
+                person_id=person.id,
+                org_id=org.id,
+                role_title=profile.current_title,
+                is_current=True,
+                contributor_user_id=user_id,
+                contributor_source_kind=SOURCE_KIND,
+                confidence=0.9,
+                evidence={"headline": profile.headline, "source": "scrapingdog"},
+            )
+            applied = True
 
     return applied
 
@@ -142,6 +143,8 @@ async def _record_experience(
     resolver: EntityResolver,
 ) -> None:
     org = await resolver.resolve_org(domain=None, name=experience.company)
+    if org is None:
+        return
     await record_employment(
         session,
         person_id=person.id,

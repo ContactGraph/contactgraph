@@ -536,22 +536,23 @@ class ContactsService:
         if body.org_name is not None:
             org_name: str = body.org_name.strip()
             if org_name:
-                org: Org = await resolver.resolve_org(domain=None, name=org_name)
-                role_title: str | None = (
-                    body.current_role.strip()
-                    if body.current_role is not None and body.current_role.strip()
-                    else person.current_role
-                )
-                await record_employment(
-                    self._db,
-                    person_id=person.id,
-                    org_id=org.id,
-                    role_title=role_title,
-                    is_current=True,
-                    contributor_user_id=user_id,
-                    contributor_source_kind=_MANUAL_SOURCE_KIND,
-                    confidence=_MANUAL_CONFIDENCE,
-                )
+                org: Org | None = await resolver.resolve_org(domain=None, name=org_name)
+                if org is not None:
+                    role_title: str | None = (
+                        body.current_role.strip()
+                        if body.current_role is not None and body.current_role.strip()
+                        else person.current_role
+                    )
+                    await record_employment(
+                        self._db,
+                        person_id=person.id,
+                        org_id=org.id,
+                        role_title=role_title,
+                        is_current=True,
+                        contributor_user_id=user_id,
+                        contributor_source_kind=_MANUAL_SOURCE_KIND,
+                        confidence=_MANUAL_CONFIDENCE,
+                    )
             else:
                 current_claims = await self._db.execute(
                     select(EmploymentClaim).where(
