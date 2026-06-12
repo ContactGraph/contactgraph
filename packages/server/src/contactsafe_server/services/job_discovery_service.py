@@ -41,6 +41,7 @@ from contactsafe_server.db.models import (
     Person,
     User,
     UserJobRelevance,
+    UserPersonObservation,
 )
 from contactsafe_server.services.ats_detection import apply_ats_detection_to_org
 from contactsafe_server.services.ats_job_clients import AtsJobClient
@@ -192,6 +193,14 @@ class JobDiscoveryService:
             )
 
         await self._db.commit()
+        _publish_discovery_progress(
+            user_id,
+            orgs_processed=0,
+            orgs_total=len(org_ids),
+            jobs_found=0,
+            new_jobs=0,
+            progress_message=run.progress_message,
+        )
         return StartJobDiscoveryResult(
             scheduled=True,
             state="running",
@@ -361,6 +370,11 @@ class JobDiscoveryService:
             r.job_id: r for r in relevance_result.scalars().all()
         }
 
+        unique_org_ids: list[uuid.UUID] = list({job.org_id for job in jobs})
+        contact_summaries: dict[uuid.UUID, tuple[str, int]] = (
+            await self._load_user_contact_summaries_by_org(user_id, unique_org_ids)
+        )
+
         job_items: list[OrgJobItem] = []
         total_relevant: int = 0
         for job in jobs:
@@ -371,6 +385,10 @@ class JobDiscoveryService:
 
             if is_relevant is True:
                 total_relevant += 1
+
+            contact_summary: tuple[str, int] | None = contact_summaries.get(job.org_id)
+            primary_contact_name: str | None = contact_summary[0] if contact_summary else None
+            contact_count: int = contact_summary[1] if contact_summary else 0
 
             job_items.append(
                 OrgJobItem(
@@ -400,6 +418,8 @@ class JobDiscoveryService:
                     seniority_reason=rel.seniority_reason if rel else None,
                     location_score=rel.location_score if rel else None,
                     location_reason=rel.location_reason if rel else None,
+                    contact_count=contact_count,
+                    primary_contact_name=primary_contact_name,
                 )
             )
 
@@ -439,10 +459,23 @@ class JobDiscoveryService:
         )
         rel: UserJobRelevance | None = rel_result.scalar_one_or_none()
 
+        contact_summaries: dict[uuid.UUID, tuple[str, int]] = (
+            await self._load_user_contact_summaries_by_org(user_id, [job.org_id])
+        )
+        contact_summary: tuple[str, int] | None = contact_summaries.get(job.org_id)
+        primary_contact_name: str | None = contact_summary[0] if contact_summary else None
+        contact_count: int = contact_summary[1] if contact_summary else 0
+
         people_result = await self._db.execute(
-            select(Person).where(
-                Person.current_org_id == job.org_id,
-            ).order_by(Person.canonical_name.asc()).limit(20),
+            select(Person)
+            .join(
+                UserPersonObservation,
+                (UserPersonObservation.person_id == Person.id)
+                & (UserPersonObservation.user_id == user_id),
+            )
+            .where(Person.current_org_id == job.org_id)
+            .order_by(Person.canonical_name.asc())
+            .limit(20),
         )
         contacts: list[OrgPersonSummary] = [
             OrgPersonSummary(
@@ -481,6 +514,8 @@ class JobDiscoveryService:
             seniority_reason=rel.seniority_reason if rel else None,
             location_score=rel.location_score if rel else None,
             location_reason=rel.location_reason if rel else None,
+            contact_count=contact_count,
+            primary_contact_name=primary_contact_name,
         )
 
         return JobDetailResult(
@@ -780,6 +815,38 @@ class JobDiscoveryService:
                 logger.info("Classified %d jobs for user %s", count, user_id)
         except Exception:
             logger.exception("Job classification failed for user %s", user_id)
+
+    async def _load_user_contact_summaries_by_org(
+        self,
+        user_id: uuid.UUID,
+        org_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, tuple[str, int]]:
+        if not org_ids:
+            return {}
+
+        result = await self._db.execute(
+            select(Person.current_org_id, Person.canonical_name)
+            .join(
+                UserPersonObservation,
+                (UserPersonObservation.person_id == Person.id)
+                & (UserPersonObservation.user_id == user_id),
+            )
+            .where(Person.current_org_id.in_(org_ids))
+            .order_by(Person.current_org_id, Person.canonical_name.asc()),
+        )
+
+        summaries: dict[uuid.UUID, tuple[str, int]] = {}
+        org_id: uuid.UUID | None
+        name: str
+        for org_id, name in result.all():
+            if org_id is None:
+                continue
+            if org_id not in summaries:
+                summaries[org_id] = (name, 1)
+            else:
+                first_name, count = summaries[org_id]
+                summaries[org_id] = (first_name, count + 1)
+        return summaries
 
     async def _list_monitored_org_ids(self, user_id: uuid.UUID) -> list[uuid.UUID]:
         user: User | None = await self._db.get(User, user_id)

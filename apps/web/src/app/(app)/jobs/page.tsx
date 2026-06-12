@@ -104,6 +104,28 @@ function MatchBadge({ score }: { score: number | null }) {
 
 type JobFilter = "bookmarked" | "relevant" | "all";
 
+function formatMyContactsLabel(
+  primaryContactName: string | null | undefined,
+  contactCount: number | null | undefined,
+): string {
+  const count: number =
+    typeof contactCount === "number" && Number.isFinite(contactCount)
+      ? contactCount
+      : 0;
+  const name: string | null =
+    typeof primaryContactName === "string" && primaryContactName.trim() !== ""
+      ? primaryContactName.trim()
+      : null;
+  if (count === 0 || name === null) {
+    return "—";
+  }
+  if (count === 1) {
+    return name;
+  }
+  const othersCount: number = count - 1;
+  return `${name} and ${othersCount} ${othersCount === 1 ? "other" : "others"}`;
+}
+
 function JobsTable() {
   const [search, setSearch] = useState<string>("");
   const [filter, setFilter] = useState<JobFilter>("relevant");
@@ -133,9 +155,46 @@ function JobsTable() {
   const checkAllMutation = useMutation({
     mutationFn: () =>
       proxyPost<StartJobDiscoveryResult>("start-job-discovery"),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
-      void queryClient.invalidateQueries({ queryKey: ["flat-jobs"] });
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: ["job-discovery-status"] });
+      queryClient.setQueryData<JobDiscoveryStatusResult>(
+        ["job-discovery-status"],
+        (prev) => ({
+          state: "running",
+          orgs_total: prev?.orgs_total ?? 0,
+          orgs_processed: 0,
+          jobs_found: 0,
+          new_jobs: 0,
+          progress_message: "Starting job discovery…",
+          error: null,
+          message: "Starting job discovery…",
+        }),
+      );
+    },
+    onSuccess: async (result: StartJobDiscoveryResult) => {
+      if (!result.scheduled && result.state !== "running") {
+        await queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
+        return;
+      }
+      queryClient.setQueryData<JobDiscoveryStatusResult>(
+        ["job-discovery-status"],
+        (prev) => ({
+          state: "running",
+          orgs_total: prev?.orgs_total ?? 0,
+          orgs_processed: prev?.orgs_processed ?? 0,
+          jobs_found: prev?.jobs_found ?? 0,
+          new_jobs: prev?.new_jobs ?? 0,
+          progress_message:
+            prev?.progress_message ?? "Scanning organizations…",
+          error: null,
+          message: result.message,
+        }),
+      );
+      await queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
+      await queryClient.invalidateQueries({ queryKey: ["flat-jobs"] });
+    },
+    onError: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
     },
   });
 
@@ -217,6 +276,24 @@ function JobsTable() {
           );
         },
         meta: { width: "w-[8rem]" },
+      },
+      {
+        id: "contacts",
+        accessorFn: (row: OrgJobItem) => row.primary_contact_name ?? "",
+        header: () => (
+          <span className="truncate text-xs font-medium">Contacts</span>
+        ),
+        enableSorting: false,
+        cell: ({ row }) => (
+          <CompactCell
+            className="text-xs"
+            value={formatMyContactsLabel(
+              row.original.primary_contact_name,
+              row.original.contact_count,
+            )}
+          />
+        ),
+        meta: { width: "w-[7rem]" },
       },
       {
         id: "location",

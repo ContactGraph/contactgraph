@@ -394,6 +394,8 @@ class OrgJobItem(BaseModel):
     seniority_reason: str | None = None
     location_score: int | None = None
     location_reason: str | None = None
+    contact_count: int = 0
+    primary_contact_name: str | None = None
 
 
 class OrgJobsByCompany(BaseModel):

@@ -704,6 +704,8 @@ export interface OrgJobItem {
   seniority_reason: string | null;
   location_score: number | null;
   location_reason: string | null;
+  contact_count: number;
+  primary_contact_name: string | null;
 }
 
 export interface OrgJobsByCompany {
