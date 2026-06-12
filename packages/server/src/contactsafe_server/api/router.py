@@ -791,6 +791,7 @@ async def api_job_events(
                         {
                             "type": "scan_progress",
                             "scanning_active": True,
+                            "current_org_name": None,
                         },
                     )
 

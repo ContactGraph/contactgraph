@@ -48,6 +48,7 @@ class ScoringCancelledEvent(TypedDict):
 class ScanProgressEvent(TypedDict):
     type: Literal["scan_progress"]
     scanning_active: bool
+    current_org_name: str | None
 
 
 JobEvent = (

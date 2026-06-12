@@ -54,14 +54,26 @@ async def _run_one_global_scan() -> None:
                 service = JobDiscoveryService(db, ctx.settings)
                 if await service.was_recently_scraped(org_id):
                     continue
+
+                from contactsafe_server.db.models import Org
+
+                org: Org | None = await db.get(Org, org_id)
+                org_name: str | None = org.canonical_name if org is not None else None
+                user_ids: list[uuid.UUID] = await service.users_monitoring_org(org_id)
+                if user_ids:
+                    publish_scan_progress_for_users(
+                        user_ids,
+                        scanning_active=True,
+                        current_org_name=org_name,
+                    )
+
                 scrape_result = await service.scrape_org_global(org_id)
-                if scrape_result.scanned:
-                    user_ids: list[uuid.UUID] = await service.users_monitoring_org(org_id)
-                    if user_ids:
-                        publish_scan_progress_for_users(
-                            user_ids,
-                            scanning_active=True,
-                        )
+                if scrape_result.scanned and user_ids:
+                    publish_scan_progress_for_users(
+                        user_ids,
+                        scanning_active=True,
+                        current_org_name=org_name,
+                    )
                     await service.classify_for_all_monitoring_users(org_id)
     except Exception:
         logger.exception("Global job scan failed")
