@@ -41,18 +41,27 @@ def create_app() -> FastAPI:
         from contactsafe_server.services.job_discovery_scheduler import (
             schedule_initial_job_discovery_delay,
         )
+        from contactsafe_server.services.org_enrichment_scheduler import (
+            schedule_initial_org_enrichment_delay,
+        )
 
-        periodic_task = asyncio.create_task(
+        job_discovery_task = asyncio.create_task(
             schedule_initial_job_discovery_delay(),
             name="job-discovery-startup",
         )
+        org_enrichment_task = asyncio.create_task(
+            schedule_initial_org_enrichment_delay(),
+            name="org-enrichment-startup",
+        )
         async with mcp_server.session_manager.run():
             yield
-        periodic_task.cancel()
-        try:
-            await periodic_task
-        except asyncio.CancelledError:
-            pass
+        job_discovery_task.cancel()
+        org_enrichment_task.cancel()
+        for periodic_task in (job_discovery_task, org_enrichment_task):
+            try:
+                await periodic_task
+            except asyncio.CancelledError:
+                pass
         await shutdown_db()
 
     app: FastAPI = FastAPI(

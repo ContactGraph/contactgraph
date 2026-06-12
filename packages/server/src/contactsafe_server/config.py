@@ -257,6 +257,15 @@ class Settings(BaseSettings):
         description="How often the global job scanner checks for orgs needing a scrape",
     )
 
+    org_enrichment_cooldown_days: int = Field(
+        default=30,
+        description="Skip re-enriching an org if it was successfully enriched within this window",
+    )
+    org_enrichment_scan_poll_interval_minutes: int = Field(
+        default=10,
+        description="How often the global org enrichment scanner checks for orgs needing enrichment",
+    )
+
     @field_validator("database_url", mode="before")
     @classmethod
     def ensure_asyncpg_driver(cls, value: str) -> str:

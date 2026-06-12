@@ -315,6 +315,10 @@ class Org(Base):
     employment_claims: Mapped[list["EmploymentClaim"]] = relationship(back_populates="org", cascade="all, delete-orphan")
     jobs: Mapped[list["OrgJob"]] = relationship(back_populates="org", cascade="all, delete-orphan")
     job_scrape_runs: Mapped[list["JobScrapeRun"]] = relationship(back_populates="org", cascade="all, delete-orphan")
+    enrichment_scrape_runs: Mapped[list["OrgEnrichmentScrapeRun"]] = relationship(
+        back_populates="org",
+        cascade="all, delete-orphan",
+    )
 
 
 class OrgJob(Base):
@@ -358,6 +362,20 @@ class JobScrapeRun(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     org: Mapped["Org"] = relationship(back_populates="job_scrape_runs")
+
+
+class OrgEnrichmentScrapeRun(Base):
+    __tablename__ = "org_enrichment_scrape_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="CASCADE"), nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fields_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    org: Mapped["Org"] = relationship(back_populates="enrichment_scrape_runs")
 
 
 class JobDiscoveryRun(Base):
