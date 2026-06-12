@@ -367,6 +367,13 @@ class JobDiscoveryStatusResult(BaseModel):
     message: str
 
 
+class JobScanStatusResult(BaseModel):
+    scanned: int = 0
+    total: int = 0
+    scanning_active: bool = False
+    message: str
+
+
 class OrgJobItem(BaseModel):
     job_id: UUID
     external_job_id: str

@@ -248,6 +248,14 @@ class Settings(BaseSettings):
     )
 
     job_discovery_request_timeout_seconds: float = Field(default=30.0)
+    job_scrape_cooldown_hours: int = Field(
+        default=24,
+        description="Skip re-scraping an org if it was successfully checked within this window",
+    )
+    job_scan_poll_interval_minutes: int = Field(
+        default=5,
+        description="How often the global job scanner checks for orgs needing a scrape",
+    )
 
     @field_validator("database_url", mode="before")
     @classmethod

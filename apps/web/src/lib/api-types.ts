@@ -658,22 +658,10 @@ export interface SetJobMonitorConfigRequest {
   enabled?: boolean;
 }
 
-export type JobDiscoveryState = "pending" | "running" | "complete" | "failed" | "cancelled";
-
-export interface StartJobDiscoveryResult {
-  scheduled: boolean;
-  state: JobDiscoveryState;
-  message: string;
-}
-
-export interface JobDiscoveryStatusResult {
-  state: JobDiscoveryState;
-  orgs_total: number;
-  orgs_processed: number;
-  jobs_found: number;
-  new_jobs: number;
-  progress_message: string | null;
-  error: string | null;
+export interface JobScanStatusResult {
+  scanned: number;
+  total: number;
+  scanning_active: boolean;
   message: string;
 }
 

@@ -42,8 +42,8 @@ from contactsafe_core.contact_schemas import (
     ListStrongTiesResult,
     FlatJobListResult,
     JobDetailResult,
-    JobDiscoveryStatusResult,
     JobMonitorConfigResult,
+    JobScanStatusResult,
     JobPreferencesResult,
     ListOrgJobsResult,
     ModifyOrgListMembershipRequest,
@@ -51,7 +51,6 @@ from contactsafe_core.contact_schemas import (
     NetworkStatusResult,
     SetJobMonitorConfigRequest,
     SetJobPreferencesRequest,
-    StartJobDiscoveryResult,
     StartSingleOrgDiscoveryRequest,
     StartSingleOrgDiscoveryResult,
     OrgDetailResult,
@@ -748,12 +747,12 @@ async def api_set_job_monitor_config(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.post("/start-job-discovery", response_model=StartJobDiscoveryResult)
-async def api_start_job_discovery(
+@router.post("/get-job-scan-status", response_model=JobScanStatusResult)
+async def api_get_job_scan_status(
     ctx: Ctx,
     user_id: EffectiveUser,
-) -> StartJobDiscoveryResult:
-    return await actions.start_job_discovery(ctx, user_id)
+) -> JobScanStatusResult:
+    return await actions.get_job_scan_status(ctx, user_id)
 
 
 @router.post(
@@ -766,23 +765,6 @@ async def api_start_single_org_job_discovery(
     body: StartSingleOrgDiscoveryRequest,
 ) -> StartSingleOrgDiscoveryResult:
     return await actions.start_single_org_job_discovery(ctx, user_id, org_id=body.org_id)
-
-
-@router.post("/cancel-job-discovery")
-async def api_cancel_job_discovery(
-    ctx: Ctx,
-    user_id: EffectiveUser,
-) -> dict[str, bool]:
-    await actions.cancel_job_discovery(ctx, user_id)
-    return {"ok": True}
-
-
-@router.post("/get-job-discovery-status", response_model=JobDiscoveryStatusResult)
-async def api_get_job_discovery_status(
-    ctx: Ctx,
-    user_id: EffectiveUser,
-) -> JobDiscoveryStatusResult:
-    return await actions.get_job_discovery_status(ctx, user_id)
 
 
 def _format_sse_event(event: JobEvent | GraphEvent) -> str:
@@ -799,22 +781,7 @@ async def api_job_events(
         queue = job_event_bus.register(user_id)
         try:
             async with ctx.session_factory() as db:
-                from contactsafe_server.services.job_discovery_service import JobDiscoveryService
                 from contactsafe_server.services.job_relevance_service import get_scoring_progress
-
-                discovery_service = JobDiscoveryService(db, ctx.settings)
-                status: JobDiscoveryStatusResult = await discovery_service.get_status(user_id)
-                if status.state == "running":
-                    yield _format_sse_event(
-                        {
-                            "type": "discovery_progress",
-                            "orgs_processed": status.orgs_processed,
-                            "orgs_total": status.orgs_total,
-                            "jobs_found": status.jobs_found,
-                            "new_jobs": status.new_jobs,
-                            "progress_message": status.progress_message,
-                        },
-                    )
 
                 scoring_progress: tuple[int, int] | None = get_scoring_progress(user_id)
                 if scoring_progress is not None:

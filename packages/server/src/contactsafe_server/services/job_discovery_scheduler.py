@@ -1,4 +1,4 @@
-"""Background scheduling for job discovery runs."""
+"""Background scheduling for global job discovery."""
 
 from __future__ import annotations
 
@@ -6,127 +6,81 @@ import asyncio
 import logging
 import threading
 import uuid
-from datetime import UTC, datetime, timedelta
-
-from sqlalchemy import select
 
 from contactsafe_server.db.connection import get_session_factory
-from contactsafe_server.db.models import JobDiscoveryRun, User
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-_active_job_discovery_user_ids: set[uuid.UUID] = set()
-_scheduling_lock: threading.Lock = threading.Lock()
+_global_scan_lock: threading.Lock = threading.Lock()
+_global_scan_active: bool = False
 _periodic_task: asyncio.Task[None] | None = None
 
-_DAILY_INTERVAL_SECONDS: int = 24 * 60 * 60
+
+def is_global_scan_active() -> bool:
+    with _global_scan_lock:
+        return _global_scan_active
 
 
-def schedule_job_discovery(user_id: uuid.UUID, run_id: uuid.UUID) -> bool:
-    with _scheduling_lock:
-        if user_id in _active_job_discovery_user_ids:
-            return False
-        _active_job_discovery_user_ids.add(user_id)
-    asyncio.create_task(
-        _run_job_discovery_task(user_id, run_id),
-        name=f"job-discovery-{user_id}",
-    )
-    return True
+def _set_global_scan_active(active: bool) -> None:
+    global _global_scan_active
+    with _global_scan_lock:
+        _global_scan_active = active
 
 
-def is_job_discovery_running(user_id: uuid.UUID) -> bool:
-    with _scheduling_lock:
-        return user_id in _active_job_discovery_user_ids
-
-
-def release_job_discovery_lock(user_id: uuid.UUID) -> None:
-    with _scheduling_lock:
-        _active_job_discovery_user_ids.discard(user_id)
-
-
-async def _run_job_discovery_task(user_id: uuid.UUID, run_id: uuid.UUID) -> None:
+async def _run_one_global_scan() -> None:
     from contactsafe_server.deps import build_app_context
+    from contactsafe_server.services.job_discovery_service import JobDiscoveryService
 
     ctx = build_app_context()
     factory = get_session_factory(ctx.settings)
+
+    _set_global_scan_active(True)
     try:
         async with factory() as db:
-            from contactsafe_server.services.job_discovery_service import JobDiscoveryService
-
             service = JobDiscoveryService(db, ctx.settings)
-            await service.run_discovery(user_id, run_id)
-    except Exception as exc:
-        logger.exception("Background job discovery failed for user %s", user_id)
-        try:
+            org_ids: list[uuid.UUID] = await service.collect_all_monitored_org_ids()
+
+        for org_id in org_ids:
             async with factory() as db:
-                run: JobDiscoveryRun | None = await db.get(JobDiscoveryRun, run_id)
-                if run is not None:
-                    run.state = "failed"
-                    run.error = str(exc)[:500]
-                    run.completed_at = datetime.now(tz=UTC)
-                    run.progress_message = None
-                    await db.commit()
-        except Exception:
-            logger.exception("Failed to mark job discovery run %s as failed", run_id)
+                service = JobDiscoveryService(db, ctx.settings)
+                if await service.was_recently_scraped(org_id):
+                    continue
+                scrape_result = await service.scrape_org_global(org_id)
+                if scrape_result.scanned:
+                    await service.classify_for_all_monitoring_users(org_id)
+    except Exception:
+        logger.exception("Global job scan failed")
     finally:
-        release_job_discovery_lock(user_id)
+        _set_global_scan_active(False)
 
 
-def start_periodic_job_discovery() -> None:
+async def _global_scan_loop() -> None:
+    from contactsafe_server.deps import build_app_context
+
+    ctx = build_app_context()
+    poll_interval_seconds: int = ctx.settings.job_scan_poll_interval_minutes * 60
+
+    while True:
+        try:
+            await _run_one_global_scan()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Global scan loop error")
+        await asyncio.sleep(poll_interval_seconds)
+
+
+def start_global_job_scanner() -> None:
     global _periodic_task
     if _periodic_task is not None and not _periodic_task.done():
         return
     _periodic_task = asyncio.create_task(
-        _periodic_job_discovery_loop(),
-        name="job-discovery-periodic",
+        _global_scan_loop(),
+        name="global-job-scan",
     )
 
 
-async def _periodic_job_discovery_loop() -> None:
-    from contactsafe_server.deps import build_app_context
-
-    while True:
-        try:
-            await asyncio.sleep(_DAILY_INTERVAL_SECONDS)
-            ctx = build_app_context()
-            factory = get_session_factory(ctx.settings)
-            async with factory() as db:
-                result = await db.execute(
-                    select(User.id).where(
-                        User.job_monitor_enabled.is_(True),
-                        User.job_monitor_list_id.is_not(None),
-                    ),
-                )
-                user_ids: list[uuid.UUID] = list(result.scalars().all())
-                for user_id in user_ids:
-                    async with factory() as enrichment_db:
-                        from contactsafe_server.services.org_enrichment_service import (
-                            OrgEnrichmentService,
-                        )
-
-                        enrichment_service = OrgEnrichmentService(enrichment_db, ctx.settings)
-                        enrich_result = await enrichment_service.start_enrichment(user_id)
-                        if enrich_result.scheduled:
-                            logger.info(
-                                "Daily org enrichment for user %s: %s",
-                                user_id,
-                                enrich_result.message,
-                            )
-
-                    async with factory() as db:
-                        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
-
-                        service = JobDiscoveryService(db, ctx.settings)
-                        scheduled: bool = await service.maybe_start_scheduled_discovery(user_id)
-                    if scheduled:
-                        logger.info("Scheduled daily job discovery for user %s", user_id)
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Periodic job discovery loop error")
-
-
 async def schedule_initial_job_discovery_delay() -> None:
-    """Run first periodic check after a short delay so the server can start."""
+    """Run first global scan after a short delay so the server can start."""
     await asyncio.sleep(60)
-    start_periodic_job_discovery()
+    start_global_job_scanner()
