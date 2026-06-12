@@ -400,7 +400,7 @@ async def _load_user_person_fields(
         select(PersonAlias.value).where(
             PersonAlias.person_id == person_id,
             PersonAlias.kind == "linkedin_url",
-        ).limit(1)
+        ).order_by(PersonAlias.first_seen_at.desc()).limit(1)
     )
     linkedin_url: str | None = alias_result.scalar_one_or_none()
     if linkedin_url is None:
@@ -553,6 +553,19 @@ async def update_user_profile(
 
             if body.linkedin_url is not None:
                 linkedin: str = body.linkedin_url.strip().rstrip("/")
+                await db.execute(
+                    delete(PersonAlias).where(
+                        PersonAlias.person_id == person.id,
+                        PersonAlias.kind == "linkedin_url",
+                    )
+                )
+                await db.execute(
+                    delete(PersonAttributeClaim).where(
+                        PersonAttributeClaim.person_id == person.id,
+                        PersonAttributeClaim.kind == "social_profile.linkedin",
+                        PersonAttributeClaim.contributor_source_kind == _MANUAL_SOURCE_KIND,
+                    )
+                )
                 if linkedin:
                     await record_person_attribute(
                         db,
