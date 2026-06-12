@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -481,6 +481,15 @@ class JobPreferencesResult(BaseModel):
     commute_note: str | None = None
     target_scope: JobTargetScope | None = None
     classified_job_count: int = 0
+    message: str
+
+
+class SetNotificationPreferencesRequest(BaseModel):
+    job_digest_frequency: Literal["daily", "weekly", "off"]
+
+
+class NotificationPreferencesResult(BaseModel):
+    job_digest_frequency: Literal["daily", "weekly", "off"]
     message: str
 
 
