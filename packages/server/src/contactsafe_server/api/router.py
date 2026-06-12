@@ -45,12 +45,14 @@ from contactsafe_core.contact_schemas import (
     JobMonitorConfigResult,
     JobScanStatusResult,
     JobPreferencesResult,
+    JobTargetScope,
     ListOrgJobsResult,
     ModifyOrgListMembershipRequest,
     ModifyOrgListMembershipResult,
     NetworkStatusResult,
     SetJobMonitorConfigRequest,
     SetJobPreferencesRequest,
+    SetJobTargetScopeRequest,
     StartSingleOrgDiscoveryRequest,
     StartSingleOrgDiscoveryResult,
     OrgDetailResult,
@@ -958,6 +960,15 @@ async def api_set_job_preferences(
         commute_max_minutes=body.commute_max_minutes,
         commute_note=body.commute_note,
     )
+
+
+@router.post("/set-job-target-scope", response_model=JobPreferencesResult)
+async def api_set_job_target_scope(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: SetJobTargetScopeRequest,
+) -> JobPreferencesResult:
+    return await actions.set_job_target_scope(ctx, user_id, body.target_scope)
 
 
 @router.post("/webhooks/theirstack")

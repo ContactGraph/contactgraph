@@ -750,12 +750,23 @@ export interface SetJobPreferencesRequest {
   commute_note: string | null;
 }
 
+export interface JobTargetScopePayload {
+  industry_tags: string[];
+  sharer_names: string[];
+  size_bands: string[];
+}
+
+export interface SetJobTargetScopeRequest {
+  target_scope: JobTargetScopePayload;
+}
+
 export interface JobPreferencesResult {
   text: string | null;
   location_pref: string | null;
   location_city: string | null;
   commute_max_minutes: number | null;
   commute_note: string | null;
+  target_scope: JobTargetScopePayload | null;
   classified_job_count: number;
   message: string;
 }
