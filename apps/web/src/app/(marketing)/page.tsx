@@ -82,7 +82,7 @@ const STEPS: readonly Step[] = [
 
 function SectionHeading({ children }: { children: React.ReactNode }) {
   return (
-    <h2 className="mb-8 max-w-xl text-2xl font-semibold tracking-tight sm:text-3xl">
+    <h2 className="mb-8 max-w-xl text-2xl font-bold tracking-tight sm:text-3xl">
       {children}
     </h2>
   );
@@ -112,7 +112,7 @@ function SampleSearchPanel() {
           {SAMPLE_CONNECTIONS.map((person: SampleConnection) => (
             <li key={person.name} className="px-4 py-3">
               <div className="flex items-baseline justify-between gap-3">
-                <span className="font-medium">{person.name}</span>
+                <span className="font-semibold">{person.name}</span>
                 <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
                   {person.source}
                 </span>
@@ -122,7 +122,7 @@ function SampleSearchPanel() {
           ))}
         </ul>
         <div className="border-t border-border bg-secondary px-4 py-3">
-          <p className="text-sm font-medium">
+          <p className="text-sm font-semibold">
             4 open roles at Stripe match &ldquo;product manager&rdquo; &rarr;
           </p>
         </div>
@@ -145,7 +145,7 @@ export default function HomePage() {
           <p className="mb-4 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
             Warm-path job search
           </p>
-          <h1 className="text-3xl font-semibold leading-tight tracking-tight sm:text-[2.75rem] sm:leading-[1.1]">
+          <h1 className="text-3xl font-bold leading-tight tracking-tight sm:text-[2.75rem] sm:leading-[1.1]">
             You already know someone at your next job.
           </h1>
           <p className="mt-5 max-w-md text-base leading-relaxed text-muted-foreground">
@@ -183,7 +183,7 @@ export default function HomePage() {
                 <p className="font-mono text-[11px] text-muted-foreground">
                   {step.number}
                 </p>
-                <h3 className="mt-3 font-semibold">{step.title}</h3>
+                <h3 className="mt-3 font-bold">{step.title}</h3>
                 <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                   {step.body}
                 </p>
@@ -199,15 +199,23 @@ export default function HomePage() {
           <SectionHeading>Couldn&rsquo;t I just search LinkedIn?</SectionHeading>
           <div className="max-w-xl space-y-4 text-base leading-relaxed text-muted-foreground">
             <p>
-              You could try. But LinkedIn won&rsquo;t search your phone
-              contacts, its own-connection search barely works, and job boards
-              have no idea who you know.
+              LinkedIn messaging is cold, weak outreach — it lands in an inbox
+              full of recruiter spam, and most people never open it. Worse, your
+              1,000+ connections all look the same. Who would actually take
+              your call, and who did you meet for two minutes at an event five
+              years ago?
             </p>
             <p>
-              Your network is real — it&rsquo;s just split across apps that
-              don&rsquo;t talk to each other. ContactGraph is the one place
-              where all of it is searchable at once, with current employers
-              filled in even for the people whose details went stale years ago.
+              Job listings on LinkedIn are incomplete, too. Many companies
+              never post their openings there at all.
+            </p>
+            <p>
+              ContactGraph focuses on your <strong>real</strong> contacts —
+              people in your phone with numbers you can text today. You reach
+              them <strong>directly</strong>, not through a platform
+              they&rsquo;ll ignore. And you see <strong>all</strong>{" "}
+              open roles we find, wherever they&rsquo;re posted, not just
+              what&rsquo;s on LinkedIn.
             </p>
           </div>
         </div>
@@ -226,7 +234,7 @@ export default function HomePage() {
           </p>
           <div className="grid gap-px border border-border bg-border sm:grid-cols-3">
             <div className="bg-background p-6">
-              <h3 className="font-semibold">Private by default</h3>
+              <h3 className="font-bold">Private by default</h3>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                 Your graph is visible only to you. ContactGraph never emails,
                 messages, or notifies anyone in it — and never sells your data.
@@ -234,7 +242,7 @@ export default function HomePage() {
               </p>
             </div>
             <div className="bg-background p-6">
-              <h3 className="font-semibold">Open source</h3>
+              <h3 className="font-bold">Open source</h3>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                 Don&rsquo;t take our word for it. The entire codebase is{" "}
                 <a href={GITHUB_REPO_URL}>on GitHub</a> — read exactly what
@@ -242,7 +250,7 @@ export default function HomePage() {
               </p>
             </div>
             <div className="bg-background p-6">
-              <h3 className="font-semibold">Free for personal use</h3>
+              <h3 className="font-bold">Free for personal use</h3>
               <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
                 No trial, no card, no paywall on the core product. Built for
                 people mid-job-search, not against them.
@@ -269,7 +277,7 @@ export default function HomePage() {
       {/* FINAL CTA */}
       <section className="border-t border-border">
         <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
-          <h2 className="max-w-xl text-2xl font-semibold tracking-tight sm:text-3xl">
+          <h2 className="max-w-xl text-2xl font-bold tracking-tight sm:text-3xl">
             Ten minutes from now, you&rsquo;ll know exactly who to ask.
           </h2>
           <div className="mt-7 flex flex-wrap items-center gap-4">

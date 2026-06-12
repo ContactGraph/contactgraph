@@ -119,7 +119,7 @@ export function SiteHeader({
       <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-4 sm:gap-6">
           <Link
-            href={email ? "/graph" : "/"}
+            href="/"
             className="text-lg font-bold tracking-tight text-foreground no-underline hover:no-underline hover:opacity-80"
           >
             ContactGraph
