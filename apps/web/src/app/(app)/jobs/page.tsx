@@ -134,7 +134,10 @@ function JobsTable() {
     queryFn: () => proxyPost<FlatJobListResult>("list-flat-jobs"),
     refetchInterval: (query) => {
       const data = query.state.data;
-      return data !== undefined && data.total_jobs === 0 ? 5000 : false;
+      if (data === undefined) return false;
+      if (data.total_jobs === 0) return 5000;
+      const hasUnscored: boolean = data.jobs.some((j) => j.match_score === null);
+      return hasUnscored ? 3000 : false;
     },
   });
 
@@ -549,9 +552,9 @@ function JobsTable() {
           {unscoredCount > 0 ? (
             <div className="flex items-center gap-2 text-sm">
               <Loader2 className="size-3.5 animate-spin text-primary" />
-              <span className="font-medium">Scoring</span>
+              <span className="font-medium">Classifying jobs</span>
               <span className="text-muted-foreground">
-                {unscoredCount} job{unscoredCount !== 1 ? "s" : ""} awaiting match scoring
+                ({totalCount - unscoredCount} of {totalCount})
               </span>
             </div>
           ) : null}
