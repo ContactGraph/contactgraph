@@ -15,7 +15,7 @@ export default async function AppLayout({
   }
 
   return (
-    <AppShell email={session.email} masqueradeAs={session.masqueradeAs}>
+    <AppShell email={session.email} masqueradeAs={session.masqueradeAs} isAdmin={session.isAdmin === true}>
       {children}
     </AppShell>
   );

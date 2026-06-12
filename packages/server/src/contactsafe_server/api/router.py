@@ -782,7 +782,9 @@ async def api_job_events(
         try:
             async with ctx.session_factory() as db:
                 from contactsafe_server.services.job_discovery_service import JobDiscoveryService
-                from contactsafe_server.services.job_relevance_service import get_scoring_progress
+                from contactsafe_server.services.job_relevance_service import (
+                    get_scoring_progress_async,
+                )
 
                 discovery_service = JobDiscoveryService(db, ctx.settings)
                 scan_status = await discovery_service.get_scan_status(user_id)
@@ -795,7 +797,9 @@ async def api_job_events(
                         },
                     )
 
-                scoring_progress: tuple[int, int] | None = get_scoring_progress(user_id)
+                scoring_progress: tuple[int, int] | None = await get_scoring_progress_async(
+                    user_id,
+                )
                 if scoring_progress is not None:
                     scored, total = scoring_progress
                     yield _format_sse_event(

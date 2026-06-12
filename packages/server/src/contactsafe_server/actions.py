@@ -1767,14 +1767,26 @@ async def set_job_preferences(
 
     cancel_scoring(user_id)
 
-    async def _reclassify_background() -> None:
-        async with ctx.session_factory() as bg_db:
-            from contactsafe_server.services.job_relevance_service import JobRelevanceService
+    from contactsafe_server.config import get_settings
+    from contactsafe_server.queue import enqueue_background_job
 
-            svc = JobRelevanceService(bg_db, ctx.settings)
-            await svc.reclassify_all(user_id)
+    if get_settings().use_arq_worker:
+        await enqueue_background_job(
+            "score_jobs_for_user",
+            str(user_id),
+            reclassify=True,
+            _job_id=f"score-user-{user_id}",
+        )
+    else:
 
-    asyncio.ensure_future(_reclassify_background())
+        async def _reclassify_background() -> None:
+            async with ctx.session_factory() as bg_db:
+                from contactsafe_server.services.job_relevance_service import JobRelevanceService
+
+                svc = JobRelevanceService(bg_db, ctx.settings)
+                await svc.reclassify_all(user_id)
+
+        asyncio.ensure_future(_reclassify_background())
 
     return JobPreferencesResult(
         text=text.strip() or None,

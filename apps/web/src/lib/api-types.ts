@@ -759,3 +759,22 @@ export interface JobPreferencesResult {
   classified_job_count: number;
   message: string;
 }
+
+export interface PipelineStatus {
+  name: string;
+  queued: number;
+  active: number;
+  completed_24h: number;
+  failed_24h: number;
+  last_run_at: string | null;
+  last_run_duration_ms: number | null;
+  items_processed: number | null;
+  items_total: number | null;
+}
+
+export interface WorkerStatusResult {
+  pipelines: PipelineStatus[];
+  worker_connected: boolean;
+  redis_connected: boolean;
+  message: string;
+}

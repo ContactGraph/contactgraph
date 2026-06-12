@@ -356,6 +356,28 @@ class OrgEnrichmentService:
         )
         return [row[0] for row in result.all()]
 
+    async def collect_orgs_needing_enrichment(self) -> list[uuid.UUID]:
+        """Orgs linked to a person that are outside the enrichment cooldown window."""
+        cutoff: datetime = datetime.now(tz=UTC) - timedelta(
+            days=self._settings.org_enrichment_cooldown_days,
+        )
+        recently_enriched = (
+            select(OrgEnrichmentScrapeRun.org_id)
+            .where(
+                OrgEnrichmentScrapeRun.completed_at >= cutoff,
+                OrgEnrichmentScrapeRun.error.is_(None),
+            )
+            .distinct()
+        )
+        result = await self._db.execute(
+            select(Org.id)
+            .join(Person, Person.current_org_id == Org.id)
+            .where(Org.id.not_in(recently_enriched))
+            .group_by(Org.id)
+            .order_by(Org.canonical_name.asc()),
+        )
+        return [row[0] for row in result.all()]
+
     async def was_recently_enriched(self, org_id: uuid.UUID) -> bool:
         cutoff: datetime = datetime.now(tz=UTC) - timedelta(
             days=self._settings.org_enrichment_cooldown_days,
@@ -876,6 +898,26 @@ def _normalize_company_name(value: str) -> str:
 
 
 def schedule_org_enrichment(user_id: uuid.UUID, run_id: uuid.UUID) -> bool:
+    from contactsafe_server.config import get_settings
+
+    if get_settings().use_arq_worker:
+
+        async def _enqueue() -> None:
+            from contactsafe_server.queue import enqueue_background_job
+
+            await enqueue_background_job(
+                "enrich_user_orgs",
+                str(user_id),
+                str(run_id),
+                _job_id=f"enrich-user-orgs-{user_id}",
+            )
+
+        asyncio.create_task(
+            _enqueue(),
+            name=f"org-enrichment-enqueue-{user_id}",
+        )
+        return True
+
     with _scheduling_lock:
         if user_id in _active_org_enrichment_user_ids:
             return False
