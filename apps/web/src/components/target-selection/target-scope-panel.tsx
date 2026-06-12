@@ -18,6 +18,7 @@ import {
   presetTagsForSelection,
 } from "./industry-scope-presets";
 import { MINE_SHARER_KEY, type TargetScope } from "./types";
+import { useDefaultTrustScope } from "@/lib/use-default-trust-scope";
 
 interface TargetScopePanelProps {
   scope: TargetScope;
@@ -51,6 +52,8 @@ export function TargetScopePanel({
       .map((member) => member.name ?? member.email)
       .sort((left, right) => left.localeCompare(right));
   }, [trustQuery.data?.members]);
+
+  useDefaultTrustScope(scope, availableSharers, onScopeChange);
 
   const availableSizeBands: string[] = useMemo(() => {
     const bands = new Set<string>();

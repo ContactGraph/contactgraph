@@ -37,6 +37,7 @@ from contactsafe_server.db.models import (
 )
 from contactsafe_server.services.ats_detection import apply_ats_detection_to_org
 from contactsafe_server.services.ats_job_clients import AtsJobClient
+from contactsafe_server.services.contacts_service import ContactsService
 from contactsafe_server.services.job_discovery_scheduler import is_global_scan_active
 from contactsafe_server.services.job_discovery_types import DiscoveredJob
 from contactsafe_server.services.theirstack_client import TheirStackClient
@@ -423,6 +424,13 @@ class JobDiscoveryService:
         contact_summaries: dict[uuid.UUID, tuple[str, int]] = (
             await self._load_user_contact_summaries_by_org(user_id, unique_org_ids)
         )
+        contacts_service = ContactsService(self._db)
+        shared_summaries: dict[uuid.UUID, tuple[str, str, int]] = (
+            await contacts_service.load_shared_contact_summaries_by_org(
+                user_id,
+                unique_org_ids,
+            )
+        )
 
         job_items: list[OrgJobItem] = []
         total_relevant: int = 0
@@ -438,6 +446,14 @@ class JobDiscoveryService:
             contact_summary: tuple[str, int] | None = contact_summaries.get(job.org_id)
             primary_contact_name: str | None = contact_summary[0] if contact_summary else None
             contact_count: int = contact_summary[1] if contact_summary else 0
+            shared_summary: tuple[str, str, int] | None = shared_summaries.get(job.org_id)
+            shared_primary_contact_name: str | None = (
+                shared_summary[0] if shared_summary else None
+            )
+            shared_primary_bridge_name: str | None = (
+                shared_summary[1] if shared_summary else None
+            )
+            shared_contact_count: int = shared_summary[2] if shared_summary else 0
 
             job_items.append(
                 OrgJobItem(
@@ -470,6 +486,9 @@ class JobDiscoveryService:
                     location_reason=rel.location_reason if rel else None,
                     contact_count=contact_count,
                     primary_contact_name=primary_contact_name,
+                    shared_contact_count=shared_contact_count,
+                    shared_primary_contact_name=shared_primary_contact_name,
+                    shared_primary_bridge_name=shared_primary_bridge_name,
                 )
             )
 
@@ -516,6 +535,22 @@ class JobDiscoveryService:
         primary_contact_name: str | None = contact_summary[0] if contact_summary else None
         contact_count: int = contact_summary[1] if contact_summary else 0
 
+        contacts_service = ContactsService(self._db)
+        shared_summaries: dict[uuid.UUID, tuple[str, str, int]] = (
+            await contacts_service.load_shared_contact_summaries_by_org(
+                user_id,
+                [job.org_id],
+            )
+        )
+        shared_summary: tuple[str, str, int] | None = shared_summaries.get(job.org_id)
+        shared_primary_contact_name: str | None = (
+            shared_summary[0] if shared_summary else None
+        )
+        shared_primary_bridge_name: str | None = (
+            shared_summary[1] if shared_summary else None
+        )
+        shared_contact_count: int = shared_summary[2] if shared_summary else 0
+
         people_result = await self._db.execute(
             select(Person)
             .join(
@@ -527,6 +562,8 @@ class JobDiscoveryService:
             .order_by(Person.canonical_name.asc())
             .limit(20),
         )
+        own_people: list[Person] = list(people_result.scalars().all())
+        own_person_ids: set[uuid.UUID] = {person.id for person in own_people}
         contacts: list[OrgPersonSummary] = [
             OrgPersonSummary(
                 person_id=p.id,
@@ -534,8 +571,14 @@ class JobDiscoveryService:
                 primary_email=p.primary_email,
                 current_role=p.current_role,
             )
-            for p in people_result.scalars().all()
+            for p in own_people
         ]
+        shared_contacts: list[OrgPersonSummary] = await contacts_service._load_shared_org_people(
+            user_id,
+            job.org_id,
+            own_person_ids,
+        )
+        contacts.extend(shared_contacts[:20 - len(contacts)])
 
         item = OrgJobItem(
             job_id=job.id,
@@ -567,6 +610,9 @@ class JobDiscoveryService:
             location_reason=rel.location_reason if rel else None,
             contact_count=contact_count,
             primary_contact_name=primary_contact_name,
+            shared_contact_count=shared_contact_count,
+            shared_primary_contact_name=shared_primary_contact_name,
+            shared_primary_bridge_name=shared_primary_bridge_name,
         )
 
         return JobDetailResult(
@@ -574,7 +620,7 @@ class JobDiscoveryService:
             org_description=org.description if org else None,
             org_primary_domain=org.primary_domain if org else None,
             contacts=contacts,
-            contact_count=len(contacts),
+            contact_count=contact_count,
             message=f"Job detail for {job.title}.",
         )
 

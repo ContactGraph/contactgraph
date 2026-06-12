@@ -189,8 +189,11 @@ class OrgListItem(BaseModel):
     employee_count: int | None = None
     company_size_band: str | None = None
     contact_count: int = 0
+    primary_contact_name: str | None = None
     shared_from: list[str] = Field(default_factory=list)
     shared_contact_count: int = 0
+    shared_primary_contact_name: str | None = None
+    shared_primary_bridge_name: str | None = None
 
 
 class ListOrgsResult(BaseModel):
@@ -404,6 +407,9 @@ class OrgJobItem(BaseModel):
     location_reason: str | None = None
     contact_count: int = 0
     primary_contact_name: str | None = None
+    shared_contact_count: int = 0
+    shared_primary_contact_name: str | None = None
+    shared_primary_bridge_name: str | None = None
 
 
 class OrgJobsByCompany(BaseModel):

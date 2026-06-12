@@ -469,8 +469,11 @@ export interface OrgListItem {
   employee_count: number | null;
   company_size_band: string | null;
   contact_count: number;
+  primary_contact_name: string | null;
   shared_from: string[];
   shared_contact_count: number;
+  shared_primary_contact_name: string | null;
+  shared_primary_bridge_name: string | null;
 }
 
 export interface ListOrgsResult {
@@ -695,6 +698,9 @@ export interface OrgJobItem {
   location_reason: string | null;
   contact_count: number;
   primary_contact_name: string | null;
+  shared_contact_count: number;
+  shared_primary_contact_name: string | null;
+  shared_primary_bridge_name: string | null;
 }
 
 export interface OrgJobsByCompany {
