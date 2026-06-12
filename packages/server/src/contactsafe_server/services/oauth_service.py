@@ -154,7 +154,11 @@ class OAuthService:
             requested_scopes=list(cred.scopes),
             completed_at=datetime.now(tz=UTC),
         )
-        poll_secret: str = assign_poll_secret(session)
+        # Already-connected lookups are reachable before authentication when a
+        # caller supplies an email as ``user_token``. Keep the response
+        # informational only: do not create a poll secret that could be used to
+        # redeem this shortcut session for bearer tokens. Authenticated callers
+        # that own the source are issued tokens by ``actions.connect_source``.
         self._db.add(session)
         await self._db.flush()
 
@@ -177,7 +181,6 @@ class OAuthService:
             email=user.email,
             scopes=list(cred.scopes),
             source_id=target_source.id,
-            poll_secret=poll_secret,
         )
 
     async def _find_user_by_email(self, email: str) -> User | None:
