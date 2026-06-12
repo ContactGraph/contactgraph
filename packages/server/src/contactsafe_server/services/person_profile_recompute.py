@@ -9,18 +9,21 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from datetime import datetime
 
-from sqlalchemy import bindparam, func, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.config import Settings, get_settings
 from contactsafe_server.db.models import (
     EmploymentClaim,
     Person,
+    PersonAlias,
     PersonAttributeClaim,
     UserPersonObservation,
 )
 from contactsafe_server.services.category_inference import infer_categories_from_contact
+from contactsafe_server.services.phone_normalization import normalize_phone
 from contactsafe_server.services.employment_ranking import (
     employment_recency_window_days,
     normalize_employment_claims,
@@ -41,6 +44,17 @@ def sanitize_display_name(name: str) -> str:
     return _STRIP_QUOTE_RE.sub("", name)
 
 
+def _manual_attrs(attrs: list[PersonAttributeClaim], kind: str) -> list[PersonAttributeClaim]:
+    return [attr for attr in attrs if attr.kind == kind and attr.contributor_source_kind == "user_manual"]
+
+
+def _attrs_for_kind(attrs: list[PersonAttributeClaim], kind: str) -> list[PersonAttributeClaim]:
+    manual: list[PersonAttributeClaim] = _manual_attrs(attrs, kind)
+    if manual:
+        return manual
+    return [attr for attr in attrs if attr.kind == kind]
+
+
 class PersonProfileRecompute:
     def __init__(self, session: AsyncSession, settings: Settings | None = None) -> None:
         self._session: AsyncSession = session
@@ -48,6 +62,13 @@ class PersonProfileRecompute:
         self._recency_days: int = employment_recency_window_days(
             configured_days=self._settings.employment_recency_days,
         )
+        self._emp_cache: dict[uuid.UUID, list[EmploymentClaim]] = {}
+        self._attr_cache: dict[uuid.UUID, list[PersonAttributeClaim]] = {}
+        self._phone_alias_cache: dict[uuid.UUID, list[str]] = {}
+        self._interaction_cache: dict[uuid.UUID, datetime | None] = {}
+        self._person_cache: dict[uuid.UUID, Person] = {}
+        self._org_name_cache: dict[uuid.UUID, str] = {}
+        self._preloaded: bool = False
 
     async def recompute_for_user(self, user_id: uuid.UUID) -> int:
         """Recompute derived person columns for every person observed by *user_id*.
@@ -62,6 +83,8 @@ class PersonProfileRecompute:
         if not person_ids:
             return 0
 
+        await self._bulk_preload(person_ids)
+
         count: int = 0
         for pid in person_ids:
             await self._recompute_person(pid)
@@ -70,8 +93,67 @@ class PersonProfileRecompute:
         logger.info("Recomputed %d person profiles for user %s", count, user_id)
         return count
 
+    async def _bulk_preload(self, person_ids: list[uuid.UUID]) -> None:
+        """Pre-load all data needed for recompute into in-memory caches."""
+        from contactsafe_server.db.models import Org
+
+        emp_result = await self._session.execute(
+            select(EmploymentClaim).where(EmploymentClaim.person_id.in_(person_ids)),
+        )
+        for claim in emp_result.scalars().all():
+            self._emp_cache.setdefault(claim.person_id, []).append(claim)
+
+        attr_result = await self._session.execute(
+            select(PersonAttributeClaim).where(PersonAttributeClaim.person_id.in_(person_ids)),
+        )
+        for attr in attr_result.scalars().all():
+            self._attr_cache.setdefault(attr.person_id, []).append(attr)
+
+        alias_result = await self._session.execute(
+            select(PersonAlias).where(
+                PersonAlias.person_id.in_(person_ids),
+                PersonAlias.kind == "phone",
+            ),
+        )
+        for alias in alias_result.scalars().all():
+            self._phone_alias_cache.setdefault(alias.person_id, []).append(alias.value)
+
+        interaction_stmt = (
+            select(
+                UserPersonObservation.person_id,
+                func.max(UserPersonObservation.last_genuine_interaction_at),
+            )
+            .where(UserPersonObservation.person_id.in_(person_ids))
+            .group_by(UserPersonObservation.person_id)
+        )
+        interaction_result = await self._session.execute(interaction_stmt)
+        for row in interaction_result:
+            self._interaction_cache[row[0]] = row[1]
+
+        person_result = await self._session.execute(
+            select(Person).where(Person.id.in_(person_ids)),
+        )
+        for person in person_result.scalars().all():
+            self._person_cache[person.id] = person
+
+        org_ids: set[uuid.UUID] = set()
+        for claims in self._emp_cache.values():
+            for c in claims:
+                if c.org_id:
+                    org_ids.add(c.org_id)
+        if org_ids:
+            org_result = await self._session.execute(
+                select(Org.id, Org.canonical_name).where(Org.id.in_(org_ids)),
+            )
+            for row in org_result:
+                self._org_name_cache[row[0]] = row[1]
+
+        self._preloaded = True
+
     async def recompute_persons(self, person_ids: list[uuid.UUID]) -> int:
         """Recompute derived columns for a specific set of person IDs."""
+        if not self._preloaded:
+            await self._bulk_preload(person_ids)
         count: int = 0
         for pid in person_ids:
             await self._recompute_person(pid)
@@ -79,14 +161,9 @@ class PersonProfileRecompute:
         return count
 
     async def _recompute_person(self, person_id: uuid.UUID) -> None:
-        # --- Employment: normalize claims and pick authoritative current ---
-        emp_stmt = select(EmploymentClaim).where(
-            EmploymentClaim.person_id == person_id,
-        )
-        emp_result = await self._session.execute(emp_stmt)
-        all_claims: list[EmploymentClaim] = list(emp_result.scalars().all())
+        all_claims: list[EmploymentClaim] = self._emp_cache.get(person_id, [])
 
-        last_interaction: datetime | None = await self._latest_genuine_interaction(person_id)
+        last_interaction: datetime | None = self._interaction_cache.get(person_id)
         best_emp: EmploymentClaim | None = normalize_employment_claims(
             all_claims,
             last_genuine_interaction_at=last_interaction,
@@ -100,51 +177,65 @@ class PersonProfileRecompute:
             current_role = None
 
         if best_emp and best_emp.org_id:
-            from contactsafe_server.db.models import Org
+            current_org_name = self._org_name_cache.get(best_emp.org_id)
 
-            org_stmt = select(Org.canonical_name).where(Org.id == best_emp.org_id)
-            org_result = await self._session.execute(org_stmt)
-            current_org_name = org_result.scalar_one_or_none()
-
-        # --- Attribute claims ---
-        attr_stmt = select(PersonAttributeClaim).where(
-            PersonAttributeClaim.person_id == person_id,
-        )
-        attr_result = await self._session.execute(attr_stmt)
-        attrs: list[PersonAttributeClaim] = list(attr_result.scalars().all())
+        attrs: list[PersonAttributeClaim] = self._attr_cache.get(person_id, [])
 
         social_profiles: dict[str, str] = {}
         categories: list[str] = []
         descriptive_tags: list[str] = []
         bio_summary: str | None = None
         location: str | None = None
-        phone_numbers: list[str] = []
+        claim_phones: list[str] = []
 
         best_bio_len: int = 0
         for attr in attrs:
-            if attr.kind.startswith("social_profile."):
-                platform: str = attr.kind.removeprefix("social_profile.")
-                social_profiles[platform] = attr.value
-            elif attr.kind == "category":
+            if attr.kind == "category":
                 if attr.value not in categories:
                     categories.append(attr.value)
             elif attr.kind == "descriptive_tag":
                 if attr.value not in descriptive_tags:
                     descriptive_tags.append(attr.value)
-            elif attr.kind == "bio_summary":
-                if len(attr.value) > best_bio_len:
-                    bio_summary = attr.value
-                    best_bio_len = len(attr.value)
-            elif attr.kind == "location":
-                location = attr.value
-            elif attr.kind == "phone":
-                if attr.value not in phone_numbers:
-                    phone_numbers.append(attr.value)
 
-        # Re-infer categories from the now-resolved person data so that
-        # contacts whose org/role was only populated after initial heuristic
-        # enrichment still get properly categorized.
-        person_row: Person | None = await self._session.get(Person, person_id)
+        for attr in attrs:
+            if not attr.kind.startswith("social_profile."):
+                continue
+            platform: str = attr.kind.removeprefix("social_profile.")
+            if attr.contributor_source_kind == "user_manual":
+                social_profiles[platform] = attr.value
+
+        for attr in attrs:
+            if attr.kind.startswith("social_profile."):
+                platform = attr.kind.removeprefix("social_profile.")
+                if platform not in social_profiles:
+                    social_profiles[platform] = attr.value
+
+        for attr in _attrs_for_kind(attrs, "bio_summary"):
+            if len(attr.value) > best_bio_len:
+                bio_summary = attr.value
+                best_bio_len = len(attr.value)
+
+        location_attrs: list[PersonAttributeClaim] = _attrs_for_kind(attrs, "location")
+        if location_attrs:
+            location = location_attrs[-1].value
+
+        for attr in _attrs_for_kind(attrs, "phone"):
+            if attr.value not in claim_phones:
+                claim_phones.append(attr.value)
+
+        person_row: Person | None = self._person_cache.get(person_id)
+        seen_phones: set[str] = set()
+        phone_numbers: list[str] = []
+        for raw_phone in [
+            *(person_row.phone_numbers or [] if person_row is not None else []),
+            *self._phone_alias_cache.get(person_id, []),
+            *claim_phones,
+        ]:
+            normalized: str = normalize_phone(raw_phone)
+            if normalized not in seen_phones:
+                seen_phones.add(normalized)
+                phone_numbers.append(normalized)
+
         if person_row is not None:
             sanitized_name: str = sanitize_display_name(person_row.canonical_name or "")
             if sanitized_name and sanitized_name != person_row.canonical_name:
@@ -176,8 +267,8 @@ class PersonProfileRecompute:
                     categories.append(cat)
 
         if current_role is None:
-            for attr in attrs:
-                if attr.kind == "role" and attr.value.strip():
+            for attr in _attrs_for_kind(attrs, "role"):
+                if attr.value.strip():
                     candidate_role: str = attr.value.strip()
                     if candidate_role.lower() not in _INVALID_ROLE_VALUES:
                         current_role = candidate_role
@@ -189,7 +280,7 @@ class PersonProfileRecompute:
             .values(
                 current_org_id=current_org_id,
                 current_org_name=current_org_name,
-                current_role=bindparam("recomputed_current_role"),
+                current_role=current_role,
                 bio_summary=bio_summary,
                 social_profiles=social_profiles,
                 inferred_categories=categories,
@@ -197,12 +288,4 @@ class PersonProfileRecompute:
                 phone_numbers=phone_numbers,
                 location=location,
             ),
-            {"recomputed_current_role": current_role},
         )
-
-    async def _latest_genuine_interaction(self, person_id: uuid.UUID) -> datetime | None:
-        stmt = select(func.max(UserPersonObservation.last_genuine_interaction_at)).where(
-            UserPersonObservation.person_id == person_id,
-        )
-        result = await self._session.execute(stmt)
-        return result.scalar_one_or_none()

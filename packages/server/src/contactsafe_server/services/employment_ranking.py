@@ -13,16 +13,18 @@ DEFAULT_EMPLOYMENT_RECENCY_DAYS: Final[int] = 365
 
 # Base tier by contributor_source_kind (lower = higher priority).
 _SOURCE_BASE_TIER: Final[dict[str, int]] = {
+    "user_manual": 0,
+    "scrapingdog_linkedin": 1,
     "gmail_signature": 1,
     "linkedin_profile_upload": 2,
     "linkedin_connections_upload": 2,
     "exa": 3,
     "tavily": 3,
     "serper": 3,
-    "google_contacts": 4,
-    "phone_contacts_upload": 4,
     "gmail_domain": 5,
     "heuristic": 5,
+    "google_contacts": 6,
+    "phone_contacts_upload": 6,
 }
 
 # Stale signature drops to roughly web tier.
@@ -68,15 +70,10 @@ def _freshness_anchor(
     last_genuine_interaction_at: datetime | None,
 ) -> datetime | None:
     source_kind: str = claim.contributor_source_kind
+    observed: datetime | None = claim.observed_at or _utc_now()
     if source_kind == "gmail_signature":
-        return last_genuine_interaction_at or claim.observed_at
-    if source_kind in {"linkedin_profile_upload", "linkedin_connections_upload"}:
-        return claim.observed_at
-    if source_kind in _WEB_SOURCE_KINDS:
-        return claim.observed_at
-    if source_kind in {"google_contacts", "phone_contacts_upload", "heuristic", "gmail_domain"}:
-        return claim.observed_at
-    return claim.observed_at
+        return last_genuine_interaction_at or observed
+    return observed
 
 
 def _is_fresh(

@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     database_ssl: bool | None = Field(default=None)
     # macOS uv Python often lacks system CA certs; set false for local Supabase dev if needed
     database_ssl_verify: bool = Field(default=True)
+    database_pool_size: int = Field(
+        default=3,
+        description="SQLAlchemy pool size per process (keep low for Supabase session pooler)",
+    )
+    database_max_overflow: int = Field(
+        default=2,
+        description="Extra connections beyond pool_size under burst load",
+    )
 
     token_encryption_key: str = Field(
         description="Fernet key for encrypting OAuth tokens at rest"
@@ -179,6 +187,109 @@ class Settings(BaseSettings):
         default=365,
         description="Max age (days) for a signal to count as current employment",
     )
+    enrichment_worker_concurrency: int = Field(
+        default=3,
+        description="Max concurrent per-contact enrichment workers",
+    )
+    enrichment_confidence_threshold: float = Field(
+        default=0.7,
+        description="Stop enrichment strategies when confidence reaches this score",
+    )
+    enrichment_max_retries: int = Field(
+        default=3,
+        description="Max attempts before marking a queue item failed",
+    )
+    enrichment_backoff_base_seconds: int = Field(
+        default=300,
+        description="Base backoff seconds between enrichment retries (exponential)",
+    )
+    enrichment_queue_poll_interval_seconds: float = Field(
+        default=10.0,
+        description="How often the enrichment poller checks for pending work",
+    )
+    enrichment_max_strategies_per_contact: int = Field(
+        default=8,
+        description="Max strategies to run per contact per attempt",
+    )
+    enrichment_email_domain_freshness_days: int = Field(
+        default=180,
+        description="Only trust email domain as current employer if seen within this window",
+    )
+
+    scrapingdog_api_key: str | None = Field(
+        default=None,
+        description="ScrapingDog API key for LinkedIn profile scraping",
+    )
+    scrapingdog_base_url: str = Field(default="https://api.scrapingdog.com")
+    scrapingdog_request_timeout_seconds: float = Field(default=30.0)
+    scrapingdog_retry_delay_seconds: float = Field(
+        default=180.0,
+        description="Delay before retrying a 202 (accepted, not yet scraped) response",
+    )
+    scrapingdog_concurrency: int = Field(
+        default=1,
+        description="Max concurrent ScrapingDog requests (plan-dependent)",
+    )
+    scrapingdog_request_delay_seconds: float = Field(
+        default=2.0,
+        description="Minimum delay between ScrapingDog requests for rate limiting",
+    )
+
+    theirstack_api_key: str | None = Field(
+        default=None,
+        description="TheirStack API key for aggregated job discovery",
+    )
+    theirstack_webhook_secret: str | None = Field(
+        default=None,
+        description="HMAC signing secret for TheirStack webhook verification",
+    )
+
+    admin_emails: list[str] = Field(
+        default_factory=list,
+        description="Email addresses that automatically receive contactsafe:admin scope on login",
+    )
+    theirstack_base_url: str = Field(default="https://api.theirstack.com")
+    theirstack_request_timeout_seconds: float = Field(default=90.0)
+    theirstack_job_max_age_days: int = Field(
+        default=30,
+        description="Max age of job postings returned by TheirStack searches",
+    )
+
+    job_discovery_request_timeout_seconds: float = Field(default=30.0)
+    job_scrape_cooldown_hours: int = Field(
+        default=24,
+        description="Skip re-scraping an org if it was successfully checked within this window",
+    )
+    job_scan_poll_interval_minutes: int = Field(
+        default=5,
+        description="How often the global job scanner checks for orgs needing a scrape",
+    )
+
+    org_enrichment_cooldown_days: int = Field(
+        default=30,
+        description="Skip re-enriching an org if it was successfully enriched within this window",
+    )
+    org_enrichment_scan_poll_interval_minutes: int = Field(
+        default=10,
+        description="How often the global org enrichment scanner checks for orgs needing enrichment",
+    )
+
+    redis_url: str = Field(
+        default="redis://localhost:6379",
+        description="Redis URL for arq task queue and cross-process event pub/sub",
+    )
+    use_arq_worker: bool = Field(
+        default=False,
+        description="When true, background work is enqueued to arq instead of in-process asyncio tasks",
+    )
+    arq_max_jobs: int = Field(
+        default=3,
+        description="Max concurrent jobs per arq worker process",
+    )
+    arq_job_timeout_seconds: int = Field(
+        default=600,
+        description="Default arq job timeout in seconds",
+    )
 
     @field_validator("database_url", mode="before")
     @classmethod
@@ -214,7 +325,7 @@ class Settings(BaseSettings):
         return (self.web_base_url or self.base_url).rstrip("/")
 
     def upload_url_for_source(self, source_id: object) -> str:
-        return f"{self.effective_web_base_url}/sources/upload/{source_id}"
+        return f"{self.effective_web_base_url}/setup/upload/{source_id}"
 
     @property
     def upload_max_file_size_bytes(self) -> int:

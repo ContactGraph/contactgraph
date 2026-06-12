@@ -282,16 +282,17 @@ class GoogleContactsImportService:
             domain: str = contact.emails[0].rsplit("@", 1)[-1].lower()
             if not is_automation_or_generic_domain(domain):
                 org = await resolver.resolve_org(domain=domain, name=contact.org_name)
-                await record_employment(
-                    self._db,
-                    person_id=person.id,
-                    org_id=org.id,
-                    role_title=contact.org_title,
-                    contributor_user_id=user_id,
-                    contributor_source_kind="google_contacts",
-                    contributor_source_id=source_id,
-                    confidence=0.8,
-                )
+                if org is not None:
+                    await record_employment(
+                        self._db,
+                        person_id=person.id,
+                        org_id=org.id,
+                        role_title=contact.org_title,
+                        contributor_user_id=user_id,
+                        contributor_source_kind="google_contacts",
+                        contributor_source_id=source_id,
+                        confidence=0.8,
+                    )
 
     async def _get_credential_for_source(self, source: Source) -> OAuthCredential | None:
         result = await self._db.execute(

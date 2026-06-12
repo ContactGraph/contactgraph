@@ -1,5 +1,6 @@
 import { env } from "@/lib/env";
 import type { OAuthTokenResponse } from "@/lib/api-types";
+import { applyAuthTokensToSession } from "@/lib/session-auth";
 import { getSession } from "@/lib/session";
 
 export class ApiError extends Error {
@@ -41,11 +42,10 @@ async function refreshAccessToken(): Promise<boolean> {
   }
 
   const data: OAuthTokenResponse = (await response.json()) as OAuthTokenResponse;
-  session.accessToken = data.access_token;
-  if (data.refresh_token) {
-    session.refreshToken = data.refresh_token;
-  }
-  session.isLoggedIn = true;
+  applyAuthTokensToSession(session, {
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
+  });
   await session.save();
   return true;
 }
@@ -86,6 +86,11 @@ export async function apiFetch<T>(
     const headers: HeadersInit = {
       Authorization: `Bearer ${bearerToken}`,
     };
+
+    const masqueradeAs: string | undefined = session.masqueradeAs;
+    if (masqueradeAs !== undefined) {
+      headers["X-On-Behalf-Of"] = masqueradeAs;
+    }
 
     let requestBody: string | undefined;
     if (options.body !== undefined) {

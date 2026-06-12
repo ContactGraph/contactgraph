@@ -39,7 +39,6 @@ from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.upload_payload_crypto import build_upload_payload
 from contactsafe_server.services.import_scheduler import (
     is_source_sync_running,
-    is_user_sync_running,
     release_sync_lock,
     schedule_source_sync,
 )
@@ -205,6 +204,9 @@ class SourceService:
             existing.connection_status = SourceConnectionStatus.CONNECTED.value
             existing.sync_state = SyncState.PENDING.value
             existing.sync_error = None
+            existing.contacts_found = 0
+            existing.contacts_resolved = 0
+            existing.contacts_pending = 0
             await self._db.flush()
             return existing
 
@@ -491,26 +493,29 @@ class SourceService:
         await self._recover_orphaned_sync(source)
 
         if self._sync_in_progress(source, user_id):
+            logger.info("request_sync blocked: sync in progress for source %s / user %s", source.id, user_id)
             await self._db.refresh(source)
             return SyncSourceResult(
                 source_id=source.id,
                 scheduled=False,
                 sync_state=SyncState(source.sync_state),
                 email=email,
-                message="Sync is already running for this user. Poll get_source_status.",
+                message="Sync is already running for this source. Poll get_source_status.",
             )
 
         if not schedule_source_sync(source.id, user_id):
+            logger.info("request_sync blocked: schedule_source_sync returned False for source %s", source.id)
             return SyncSourceResult(
                 source_id=source.id,
                 scheduled=False,
                 sync_state=SyncState(source.sync_state),
                 email=email,
-                message="Sync is already running for this user. Poll get_source_status.",
+                message="Sync is already running for this source. Poll get_source_status.",
             )
 
         claimed: bool = await self._try_claim_sync(source)
         if not claimed:
+            logger.info("request_sync blocked: _try_claim_sync failed for source %s (sync_state=%s)", source.id, source.sync_state)
             release_sync_lock(source.id, user_id)
             await self._db.refresh(source)
             return SyncSourceResult(
@@ -518,7 +523,7 @@ class SourceService:
                 scheduled=False,
                 sync_state=SyncState(source.sync_state),
                 email=email,
-                message="Sync is already running for this user. Poll get_source_status.",
+                message="Sync is already running for this source. Poll get_source_status.",
             )
 
         return SyncSourceResult(
@@ -592,13 +597,14 @@ class SourceService:
 
     @staticmethod
     def _sync_in_progress(source: Source, user_id: uuid.UUID) -> bool:
-        return is_user_sync_running(user_id) or is_source_sync_running(source.id)
+        del user_id
+        return is_source_sync_running(source.id)
 
     async def _recover_orphaned_sync(self, source: Source) -> None:
         """Mark sync failed when DB says syncing but no background task is running."""
         if source.sync_state != SyncState.SYNCING.value:
             return
-        if is_user_sync_running(source.user_id) or is_source_sync_running(source.id):
+        if is_source_sync_running(source.id):
             return
         source.sync_state = SyncState.FAILED.value
         source.sync_error = (
@@ -627,21 +633,12 @@ class SourceService:
         return source
 
     async def _try_claim_sync(self, source: Source) -> bool:
-        """Atomically mark a source syncing; only one sync per user at a time."""
-        user_syncing = (
-            select(Source.id)
-            .where(
-                Source.user_id == source.user_id,
-                Source.sync_state == SyncState.SYNCING.value,
-            )
-            .exists()
-        )
+        """Atomically mark this source syncing."""
         result = await self._db.execute(
             update(Source)
             .where(
                 Source.id == source.id,
                 Source.sync_state != SyncState.SYNCING.value,
-                ~user_syncing,
             )
             .values(
                 sync_state=SyncState.SYNCING.value,
@@ -700,6 +697,7 @@ class SourceService:
             contacts_found=source.contacts_found,
             contacts_resolved=source.contacts_resolved,
             contacts_pending=source.contacts_pending,
+            sync_error=source.sync_error,
         )
 
     @staticmethod

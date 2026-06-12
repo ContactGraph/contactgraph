@@ -85,6 +85,25 @@ def test_heuristic_parse_no_sections() -> None:
     assert result.education == []
 
 
+def test_heuristic_parse_linkedin_company_first_format() -> None:
+    text: str = (
+        "Jane Doe\nEngineer\n\n"
+        "Experience\n"
+        "BigCo · Full-time\n"
+        "Senior Engineer\n"
+        "Mar 2021 - Present\n"
+        "San Francisco, CA\n\n"
+        "BigCo · Full-time\n"
+        "Engineer\n"
+        "Jan 2018 - Feb 2021\n"
+    )
+    result: ParsedLinkedInProfile = _heuristic_parse(text)
+    assert len(result.experiences) == 2
+    assert result.experiences[0].company == "BigCo"
+    assert result.experiences[0].title == "Senior Engineer"
+    assert result.experiences[1].title == "Engineer"
+
+
 def test_heuristic_parse_experience_dates() -> None:
     text: str = (
         "Jane Doe\nEngineer\n\n"

@@ -5,9 +5,15 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from contactsafe_core.enums import EnrichmentRunState, SourceType, SyncState
-from contactsafe_core.schemas import EnrichmentStatusResult, StartEnrichmentResult
-from contactsafe_server.db.models import EnrichmentRun, Source, UserPersonObservation
+from contactsafe_core.enums import EnrichmentQueueStatus, EnrichmentRunState, SourceType, SyncState
+from contactsafe_core.schemas import (
+    ContactEnrichmentQueueItemResult,
+    EnrichmentStatusResult,
+    ListContactEnrichmentStatusResult,
+    StartEnrichmentResult,
+)
+from contactsafe_server.config import get_settings
+from contactsafe_server.db.models import EnrichmentQueueItem, EnrichmentRun, Source, UserPersonObservation
 from contactsafe_server.services.enrichment_scheduler import (
     is_enrichment_running,
     schedule_enrichment,
@@ -117,6 +123,36 @@ class EnrichmentService:
             progress_message=run.progress_message,
             error=run.error,
             message=self._status_message(run),
+        )
+
+    async def list_contact_enrichment_status(
+        self,
+        user_id: uuid.UUID,
+        *,
+        limit: int = 100,
+    ) -> ListContactEnrichmentStatusResult:
+        from contactsafe_server.services.enrichment_queue_service import EnrichmentQueueService
+
+        queue_service = EnrichmentQueueService(self._db, get_settings())
+        items: list[EnrichmentQueueItem] = await queue_service.list_user_queue_status(
+            user_id,
+            limit=limit,
+        )
+        return ListContactEnrichmentStatusResult(
+            items=[
+                ContactEnrichmentQueueItemResult(
+                    person_id=item.person_id,
+                    status=EnrichmentQueueStatus(item.status),
+                    result_confidence=item.result_confidence,
+                    strategies_attempted=list(item.strategies_attempted or []),
+                    strategies_remaining=list(item.strategies_remaining or []),
+                    priority=item.priority,
+                    error=item.error,
+                    updated_at=item.updated_at,
+                )
+                for item in items
+            ],
+            message=f"Showing up to {limit} recent enrichment queue items.",
         )
 
     async def _user_has_imported_contacts(self, user_id: uuid.UUID) -> bool:

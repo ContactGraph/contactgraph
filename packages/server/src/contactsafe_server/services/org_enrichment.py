@@ -83,6 +83,8 @@ def should_apply_enrichment_org(*, primary_email: str, proposed_org: str | None)
         if domain_org is not None and org_names_equivalent(domain_org, proposed_org):
             return False
         return False
+    if "@" not in primary_email:
+        return proposed_org is not None
     _, domain = primary_email.rsplit("@", 1)
     if is_generic_personal_domain(domain):
         return True

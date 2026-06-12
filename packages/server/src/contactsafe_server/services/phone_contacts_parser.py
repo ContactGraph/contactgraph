@@ -6,15 +6,40 @@ import csv
 import io
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import vobject
+
+_FieldLookup = Callable[..., str | None]
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 _LINKEDIN_URL_RE: re.Pattern[str] = re.compile(
     r"linkedin\.com/in/", re.IGNORECASE
 )
+
+_VCARD_PARAM_SPACE_RE: re.Pattern[str] = re.compile(
+    r"^([A-Za-z][A-Za-z0-9-]*;)([^:]+)(:.*)",
+    re.MULTILINE,
+)
+
+
+def _sanitize_vcard_content(content: str) -> str:
+    """Fix malformed vCard lines produced by some Android phones.
+
+    Android may export custom TEL type params with spaces (e.g.
+    ``TEL;X-Linda Cell:207-552-1552``).  Spaces in parameter names are
+    illegal per RFC 6350 / RFC 2426 and cause vobject to throw ParseError.
+    Replace spaces in the parameter portion with dashes.
+    """
+    def _fix_params(m: re.Match[str]) -> str:
+        prop: str = m.group(1)
+        params: str = m.group(2).replace(" ", "-")
+        value: str = m.group(3)
+        return f"{prop}{params}{value}"
+
+    return _VCARD_PARAM_SPACE_RE.sub(_fix_params, content)
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,8 +76,14 @@ def parse_phone_contacts_upload(content: str, filename: str) -> list[ParsedPhone
 
 
 def _parse_vcard(content: str) -> list[ParsedPhoneContact]:
+    sanitized: str = _sanitize_vcard_content(content)
     contacts: list[ParsedPhoneContact] = []
-    for component in vobject.readComponents(content):
+    try:
+        components = list(vobject.readComponents(sanitized))
+    except Exception:
+        logger.warning("vobject failed to parse vCard stream, attempting line-level recovery", exc_info=True)
+        components = list(_resilient_read_components(sanitized))
+    for component in components:
         if component.name.upper() != "VCARD":
             continue
         try:
@@ -64,6 +95,22 @@ def _parse_vcard(content: str) -> list[ParsedPhoneContact]:
     return contacts
 
 
+def _resilient_read_components(content: str) -> list[vobject.base.Component]:
+    """Parse individual vCard blocks independently so one bad entry doesn't kill the whole file."""
+    blocks: list[str] = re.split(r"(?m)^(?=BEGIN:VCARD)", content)
+    components: list[vobject.base.Component] = []
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        try:
+            for comp in vobject.readComponents(block):
+                components.append(comp)
+        except Exception:
+            logger.debug("Skipping unparseable vCard block", exc_info=True)
+    return components
+
+
 def _vcard_to_contact(component: vobject.base.Component) -> ParsedPhoneContact | None:
     display_name: str = _vcard_display_name(component)
     emails: list[str] = _vcard_emails(component)
@@ -73,10 +120,8 @@ def _vcard_to_contact(component: vobject.base.Component) -> ParsedPhoneContact |
     urls: list[str] = _vcard_urls(component)
     address: str | None = _vcard_address(component)
 
-    if not display_name and not emails and not phones:
-        return None
     if not display_name:
-        display_name = emails[0] if emails else (phones[0] if phones else "Unknown")
+        return None
 
     return ParsedPhoneContact(
         display_name=display_name,
@@ -95,9 +140,15 @@ def _vcard_display_name(component: vobject.base.Component) -> str:
         if value:
             return value
     if hasattr(component, "n"):
-        parts: list[str] = [str(part).strip() for part in component.n.value]
-        family: str = parts[0] if parts else ""
-        given: str = parts[1] if len(parts) > 1 else ""
+        n_value = component.n.value
+        if hasattr(n_value, "given") and hasattr(n_value, "family"):
+            given: str = str(n_value.given).strip()
+            family: str = str(n_value.family).strip()
+        elif isinstance(n_value, (list, tuple)):
+            family = str(n_value[0]).strip() if n_value else ""
+            given = str(n_value[1]).strip() if len(n_value) > 1 else ""
+        else:
+            return str(n_value).strip()
         combined: str = f"{given} {family}".strip()
         if combined:
             return combined
@@ -193,6 +244,11 @@ def _parse_csv(content: str) -> list[ParsedPhoneContact]:
                 return normalized_fields[key]
         return None
 
+    is_google_csv: bool = field("given name") is not None
+
+    if is_google_csv:
+        return _parse_google_csv(reader, field)
+
     name_col: str | None = field("name", "display name", "full name")
     email_col: str | None = field("email", "e-mail", "email address")
     phone_col: str | None = field("phone", "mobile", "telephone", "phone number")
@@ -204,15 +260,75 @@ def _parse_csv(content: str) -> list[ParsedPhoneContact]:
         phone_raw: str = (row.get(phone_col or "", "") or "").strip()
         emails: tuple[str, ...] = (email_raw,) if email_raw else ()
         phones: tuple[str, ...] = (phone_raw,) if phone_raw else ()
-        if not display_name and not emails and not phones:
-            continue
         if not display_name:
-            display_name = email_raw or phone_raw or "Unknown"
+            continue
         contacts.append(
             ParsedPhoneContact(
                 display_name=display_name,
                 emails=emails,
                 phone_numbers=phones,
+            )
+        )
+    return contacts
+
+
+def _parse_google_csv(
+    reader: csv.DictReader[str],
+    field: _FieldLookup,
+) -> list[ParsedPhoneContact]:
+    """Parse Google Contacts CSV export format.
+
+    Google CSV uses structured column names like 'Given Name', 'Family Name',
+    'Phone 1 - Value', 'E-mail 1 - Value', etc.
+    """
+    given_col: str | None = field("given name")
+    family_col: str | None = field("family name")
+    name_col: str | None = field("name", "display name", "full name")
+    org_col: str | None = field("organization 1 - name")
+    title_col: str | None = field("organization 1 - title")
+
+    all_fields: set[str] = set(reader.fieldnames or [])
+    email_cols: list[str] = sorted(
+        col for col in all_fields
+        if col.lower().startswith("e-mail") and col.lower().endswith("- value")
+    )
+    phone_cols: list[str] = sorted(
+        col for col in all_fields
+        if col.lower().startswith("phone") and col.lower().endswith("- value")
+    )
+
+    contacts: list[ParsedPhoneContact] = []
+    for row in reader:
+        given: str = (row.get(given_col or "", "") or "").strip()
+        family: str = (row.get(family_col or "", "") or "").strip()
+        display_name: str = f"{given} {family}".strip()
+        if not display_name and name_col:
+            display_name = (row.get(name_col, "") or "").strip()
+        if not display_name:
+            continue
+
+        emails: list[str] = []
+        for col in email_cols:
+            val: str = (row.get(col, "") or "").strip().lower()
+            if val and val not in emails:
+                emails.append(val)
+
+        phones: list[str] = []
+        for col in phone_cols:
+            val = (row.get(col, "") or "").strip()
+            if val and val not in phones:
+                phones.append(val)
+
+        org_name: str | None = (row.get(org_col or "", "") or "").strip() or None
+        org_title: str | None = (row.get(title_col or "", "") or "").strip() or None
+
+        contacts.append(
+            ParsedPhoneContact(
+                display_name=display_name,
+                emails=tuple(emails),
+                phone_numbers=tuple(phones),
+                org_name=org_name,
+                org_title=org_title,
             )
         )
     return contacts

@@ -7,6 +7,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.db.models import Org, OrgEdge, Person, PersonEdge, PersonOrgEdge
+from contactsafe_server.services.org_industry_taxonomy import is_investor_industry_tag
 
 
 class OrgEdgeService:
@@ -85,7 +86,7 @@ def _infer_org_relationship_types(org: Org, contact_count: int) -> list[str]:
         types.append("nonprofit")
     if domain.endswith(".gov"):
         types.append("government")
-    if any(cat in org.categories for cat in ("vc", "investor")):
+    if any(is_investor_industry_tag(cat) or cat in ("vc", "investor") for cat in org.categories):
         types.append("investor")
     if contact_count >= 3:
         types.append("community")

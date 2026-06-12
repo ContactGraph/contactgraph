@@ -13,11 +13,41 @@ from uuid import UUID
 from datetime import UTC, datetime
 
 from contactsafe_core.contact_schemas import (
+    CancelOrgEnrichmentResult,
+    CreateOrgListRequest,
+    CreateOrgListResult,
     DedupPersonsResult,
+    DeleteOrgListRequest,
+    DeleteOrgListResult,
+    EnrichOrgsResult,
+    EnrichPersonResult,
+    EnrichStrongTiesResult,
+    ListOrgListsResult,
     ListOrgsResult,
     ListPeopleResult,
+    ListStrongTiesResult,
+    ModifyOrgListMembershipRequest,
+    ModifyOrgListMembershipResult,
+    NetworkStatusResult,
     OrgDetailResult,
+    OrgEnrichmentStatusResult,
     PersonDetailResult,
+    RenameOrgListRequest,
+    RenameOrgListResult,
+    ScrapingDogEnrichmentStatusResult,
+    StrongTieCompaniesResult,
+    StrongTieCountResult,
+    FlatJobListResult,
+    JobDetailResult,
+    JobMonitorConfigResult,
+    JobScanStatusResult,
+    JobPreferencesResult,
+    JobTargetScope,
+    ListOrgJobsResult,
+    SetJobMonitorConfigRequest,
+    SetJobTargetScopeRequest,
+    UpdateOrgRequest,
+    UpdatePersonRequest,
 )
 from datetime import date
 
@@ -27,6 +57,7 @@ from contactsafe_core.schemas import (
     DescribeGraphResult,
     EditTrustedUsersResult,
     EnrichmentStatusResult,
+    ListContactEnrichmentStatusResult,
     ListSourcesResult,
     PersonMatch,
     PollConnectResult,
@@ -45,16 +76,19 @@ from contactsafe_core.schemas import (
     UploadSourceResult,
     UserExperience,
     UserProfileResult,
+    DeleteUserAccountResult,
     ViewTrustedUsersResult,
 )
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from contactsafe_server.db.models import ConnectSession, EmploymentClaim, Org, PersonAttributeClaim, Source, User
-from contactsafe_server.services.claim_writer import record_employment
+from contactsafe_server.db.models import ConnectSession, EmploymentClaim, Org, Person, PersonAlias, PersonAttributeClaim, Source, User
+from contactsafe_server.services.claim_writer import record_employment, record_person_attribute
+from contactsafe_server.services.contacts_service import normalize_social_platform
 from contactsafe_server.services.entity_resolution import EntityResolver
 from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
+from contactsafe_server.services.phone_normalization import normalize_phone
 from contactsafe_server.services.user_person_service import ensure_user_person
 from contactsafe_server.deps import (
     AppContext,
@@ -64,6 +98,8 @@ from contactsafe_server.deps import (
     build_source_service,
 )
 from contactsafe_server.services.contacts_service import ContactsService
+from contactsafe_server.services.org_list_service import OrgListService
+from contactsafe_server.services.strong_tie_api_service import StrongTieApiService
 from contactsafe_server.services.graph_summary_service import GraphSummaryService
 from contactsafe_server.services.network_query_service import NetworkQueryService
 from contactsafe_server.services.person_dedup_service import PersonDedupService
@@ -141,7 +177,7 @@ async def connect_source(
             resolved_uid: UUID = await sources.resolve_user_id(source_id=result.source_id)
             if user_id is not None and resolved_uid == user_id:
                 token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
-                    resolved_uid
+                    resolved_uid, email=result.email
                 )
                 result = result.model_copy(
                     update={
@@ -162,6 +198,40 @@ async def connect_source(
         return result
 
 
+async def cancel_sync(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    source_id: str,
+) -> "CancelSyncResult":
+    from contactsafe_core.schemas import CancelSyncResult
+    from contactsafe_core.enums import SyncState
+    from contactsafe_server.services.import_scheduler import release_sync_lock
+
+    if user_id is None:
+        return CancelSyncResult(cancelled=False, message="Not authenticated.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.db.models import Source
+        from sqlalchemy import select
+
+        result = await db.execute(
+            select(Source).where(Source.id == UUID(source_id), Source.user_id == user_id),
+        )
+        source: Source | None = result.scalar_one_or_none()
+        if source is None:
+            return CancelSyncResult(cancelled=False, message="Source not found.")
+        if source.sync_state not in (SyncState.SYNCING.value, SyncState.PENDING.value):
+            return CancelSyncResult(cancelled=False, message="No import in progress.")
+        source.sync_state = SyncState.FAILED.value
+        source.sync_error = "Import cancelled by user."
+        await db.commit()
+        from contactsafe_server.graph_event_publishers import publish_source_sync_update
+
+        publish_source_sync_update(source)
+        release_sync_lock(source.id, source.user_id)
+        return CancelSyncResult(cancelled=True, message="Import cancelled.")
+
+
 async def list_sources(
     ctx: AppContext,
     user_id: UUID | None,
@@ -176,7 +246,9 @@ async def list_sources(
         )
     async with ctx.session_factory() as db:
         sources: SourceService = build_source_service(db)
-        return await sources.list_sources_for_user(user_id)
+        result: ListSourcesResult = await sources.list_sources_for_user(user_id)
+        await db.commit()
+        return result
 
 
 async def get_source_status(
@@ -256,6 +328,24 @@ async def get_enrichment_status(
         return result
 
 
+async def list_contact_enrichment_status(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    limit: int = 100,
+) -> ListContactEnrichmentStatusResult:
+    if user_id is None:
+        return ListContactEnrichmentStatusResult(
+            items=[],
+            message="Authentication required. Provide a Bearer token.",
+        )
+    async with ctx.session_factory() as db:
+        enrichment = build_enrichment_service(db)
+        result = await enrichment.list_contact_enrichment_status(user_id, limit=limit)
+        await db.commit()
+        return result
+
+
 async def _load_user_experiences(
     db: AsyncSession,
     user: User,
@@ -300,6 +390,36 @@ async def _load_user_headline(
     return row
 
 
+async def _load_user_person_fields(
+    db: AsyncSession,
+    person_id: UUID,
+) -> dict[str, object]:
+    """Load phone, linkedin_url, bio_summary, social_profiles from the user's Person."""
+    person: Person | None = await db.get(Person, person_id)
+    if person is None:
+        return {}
+
+    phones: list[str] = list(dict.fromkeys(person.phone_numbers or []))
+    social_profiles: dict[str, str] = dict(person.social_profiles or {})
+
+    alias_result = await db.execute(
+        select(PersonAlias.value).where(
+            PersonAlias.person_id == person_id,
+            PersonAlias.kind == "linkedin_url",
+        ).order_by(PersonAlias.first_seen_at.desc()).limit(1)
+    )
+    linkedin_url: str | None = alias_result.scalar_one_or_none()
+    if linkedin_url is None:
+        linkedin_url = social_profiles.get("linkedin")
+
+    return {
+        "phone": phones[0] if phones else None,
+        "linkedin_url": linkedin_url,
+        "bio_summary": person.bio_summary,
+        "social_profiles": social_profiles,
+    }
+
+
 async def get_user_profile(
     ctx: AppContext,
     user_id: UUID | None,
@@ -312,23 +432,93 @@ async def get_user_profile(
             return UserProfileResult(message="User not found.")
         experiences: list[UserExperience] = await _load_user_experiences(db, user)
         headline: str | None = await _load_user_headline(db, user)
+
+        person_fields: dict[str, object] = {}
+        if user.person_id is not None:
+            person_fields = await _load_user_person_fields(db, user.person_id)
+
         return UserProfileResult(
             email=user.email,
             display_name=user.display_name or user.google_profile_name,
             headline=headline,
             location=user.location,
             google_profile_name=user.google_profile_name,
+            google_profile_picture=user.google_profile_picture,
+            phone=person_fields.get("phone"),  # type: ignore[arg-type]
+            linkedin_url=person_fields.get("linkedin_url"),  # type: ignore[arg-type]
+            bio_summary=person_fields.get("bio_summary"),  # type: ignore[arg-type]
+            social_profiles=person_fields.get("social_profiles", {}),  # type: ignore[arg-type]
             experiences=experiences,
             message="User profile loaded.",
+        )
+
+
+_MANUAL_SOURCE_KIND: str = "user_manual"
+_MANUAL_CONFIDENCE: float = 1.0
+
+
+async def _apply_user_person_attribute(
+    db: AsyncSession,
+    *,
+    person_id: UUID,
+    user_id: UUID,
+    kind: str,
+    value: str | None,
+) -> None:
+    if value is None:
+        return
+    cleaned: str = value.strip()
+    if not cleaned:
+        return
+    await record_person_attribute(
+        db,
+        person_id=person_id,
+        kind=kind,
+        value=cleaned,
+        contributor_user_id=user_id,
+        contributor_source_kind=_MANUAL_SOURCE_KIND,
+        confidence=_MANUAL_CONFIDENCE,
+    )
+
+
+async def _sync_user_social_profiles(
+    db: AsyncSession,
+    *,
+    person_id: UUID,
+    user_id: UUID,
+    profiles: dict[str, str],
+) -> None:
+    await db.execute(
+        delete(PersonAttributeClaim).where(
+            PersonAttributeClaim.person_id == person_id,
+            PersonAttributeClaim.kind.like("social_profile.%"),
+            PersonAttributeClaim.kind != "social_profile.linkedin",
+        )
+    )
+    seen_platforms: set[str] = set()
+    for raw_platform, raw_url in profiles.items():
+        platform: str | None = normalize_social_platform(raw_platform)
+        if platform is None or platform in seen_platforms:
+            continue
+        url: str = raw_url.strip().rstrip("/")
+        if not url:
+            continue
+        seen_platforms.add(platform)
+        await record_person_attribute(
+            db,
+            person_id=person_id,
+            kind=f"social_profile.{platform}",
+            value=url,
+            contributor_user_id=user_id,
+            contributor_source_kind=_MANUAL_SOURCE_KIND,
+            confidence=_MANUAL_CONFIDENCE,
         )
 
 
 async def update_user_profile(
     ctx: AppContext,
     user_id: UUID | None,
-    *,
-    display_name: str | None = None,
-    location: str | None = None,
+    body: UpdateUserProfileRequest,
 ) -> UserProfileResult:
     if user_id is None:
         return UserProfileResult(message="Authentication required. Provide a Bearer token.")
@@ -336,19 +526,91 @@ async def update_user_profile(
         user: User | None = await db.get(User, user_id)
         if user is None:
             return UserProfileResult(message="User not found.")
-        if display_name is not None:
-            cleaned_name: str = display_name.strip()
+        if body.display_name is not None:
+            cleaned_name: str = body.display_name.strip()
             user.display_name = cleaned_name or None
-        if location is not None:
-            cleaned_location: str = location.strip()
+        if body.location is not None:
+            cleaned_location: str = body.location.strip()
             user.location = cleaned_location or None
+
+        has_person_fields: bool = any(
+            getattr(body, f) is not None
+            for f in ("phone", "linkedin_url", "bio_summary", "social_profiles")
+        )
+        if has_person_fields:
+            person: Person = await ensure_user_person(db, user)
+            resolver: EntityResolver = EntityResolver(db)
+
+            await _apply_user_person_attribute(
+                db, person_id=person.id, user_id=user.id, kind="phone", value=body.phone,
+            )
+            if body.phone is not None and body.phone.strip():
+                normalized_phone: str = normalize_phone(body.phone.strip())
+                await resolver.add_person_alias(
+                    person_id=person.id, kind="phone", value=normalized_phone, confidence=_MANUAL_CONFIDENCE,
+                )
+
+            await _apply_user_person_attribute(
+                db, person_id=person.id, user_id=user.id, kind="bio_summary", value=body.bio_summary,
+            )
+            await _apply_user_person_attribute(
+                db, person_id=person.id, user_id=user.id, kind="location", value=body.location,
+            )
+
+            if body.linkedin_url is not None:
+                linkedin: str = body.linkedin_url.strip().rstrip("/")
+                # Remove stale linkedin aliases/claims so the new value wins
+                await db.execute(
+                    delete(PersonAlias).where(
+                        PersonAlias.person_id == person.id,
+                        PersonAlias.kind == "linkedin_url",
+                    )
+                )
+                await db.execute(
+                    delete(PersonAttributeClaim).where(
+                        PersonAttributeClaim.person_id == person.id,
+                        PersonAttributeClaim.kind == "social_profile.linkedin",
+                        PersonAttributeClaim.contributor_source_kind == _MANUAL_SOURCE_KIND,
+                    )
+                )
+                if linkedin:
+                    await record_person_attribute(
+                        db,
+                        person_id=person.id,
+                        kind="social_profile.linkedin",
+                        value=linkedin,
+                        contributor_user_id=user.id,
+                        contributor_source_kind=_MANUAL_SOURCE_KIND,
+                        confidence=_MANUAL_CONFIDENCE,
+                    )
+                    await resolver.add_person_alias(
+                        person_id=person.id, kind="linkedin_url", value=linkedin, confidence=_MANUAL_CONFIDENCE,
+                    )
+
+            if body.social_profiles is not None:
+                await _sync_user_social_profiles(
+                    db, person_id=person.id, user_id=user.id, profiles=body.social_profiles,
+                )
+
+            recompute: PersonProfileRecompute = PersonProfileRecompute(db)
+            await recompute.recompute_persons([person.id])
+
         await db.commit()
         await db.refresh(user)
+
+        person_fields: dict[str, object] = {}
+        if user.person_id is not None:
+            person_fields = await _load_user_person_fields(db, user.person_id)
+
         return UserProfileResult(
             email=user.email,
             display_name=user.display_name or user.google_profile_name,
             location=user.location,
             google_profile_name=user.google_profile_name,
+            phone=person_fields.get("phone"),  # type: ignore[arg-type]
+            linkedin_url=person_fields.get("linkedin_url"),  # type: ignore[arg-type]
+            bio_summary=person_fields.get("bio_summary"),  # type: ignore[arg-type]
+            social_profiles=person_fields.get("social_profiles", {}),  # type: ignore[arg-type]
             message="Profile updated.",
         )
 
@@ -373,6 +635,10 @@ async def save_user_experience(
         person = await ensure_user_person(db, user)
         resolver = EntityResolver(db)
         org = await resolver.resolve_org(domain=None, name=company.strip())
+        if org is None:
+            return UserProfileResult(
+                message="That company name is not a real organization (e.g. Self Employed, Stealth Startup).",
+            )
 
         if experience_id is not None:
             claim: EmploymentClaim | None = await db.get(EmploymentClaim, experience_id)
@@ -453,6 +719,70 @@ async def delete_user_experience(
             experiences=experiences,
             message="Experience deleted.",
         )
+
+
+async def delete_user_account(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> DeleteUserAccountResult:
+    import asyncio
+    from sqlalchemy import select
+    from sqlalchemy.exc import DBAPIError
+    from contactsafe_server.db.models import Source
+    from contactsafe_server.services.import_scheduler import (
+        is_source_sync_running,
+        release_sync_lock,
+    )
+
+    if user_id is None:
+        return DeleteUserAccountResult(
+            deleted=False,
+            message="Authentication required. Provide a Bearer token.",
+        )
+
+    # Cancel all running syncs, enrichment, and job discovery before deleting
+    # to avoid deadlocks with background tasks writing to the same rows.
+    async with ctx.session_factory() as db:
+        sources = (
+            await db.execute(select(Source).where(Source.user_id == user_id))
+        ).scalars().all()
+        for source in sources:
+            if source.sync_state in (SyncState.SYNCING.value, SyncState.PENDING.value):
+                source.sync_state = SyncState.FAILED.value
+                source.sync_error = "Account deleted."
+            if is_source_sync_running(source.id):
+                release_sync_lock(source.id, user_id)
+        await db.commit()
+
+    # Brief yield so background tasks can observe the cancelled state and wind down.
+    await asyncio.sleep(0.2)
+
+    max_attempts: int = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with ctx.session_factory() as db:
+                user: User | None = await db.get(User, user_id)
+                if user is None:
+                    return DeleteUserAccountResult(deleted=False, message="User not found.")
+                await db.delete(user)
+                await db.commit()
+                return DeleteUserAccountResult(
+                    deleted=True,
+                    message="Your account and all associated data have been deleted.",
+                )
+        except DBAPIError as exc:
+            is_deadlock: bool = "DeadlockDetectedError" in str(exc) or "deadlock" in str(exc).lower()
+            if is_deadlock and attempt < max_attempts:
+                logger.warning(
+                    "Deadlock on account deletion attempt %d/%d for user %s, retrying",
+                    attempt, max_attempts, user_id,
+                )
+                await asyncio.sleep(0.5 * attempt)
+                continue
+            logger.exception("Account deletion failed for user %s", user_id)
+            raise
+
+    return DeleteUserAccountResult(deleted=False, message="Deletion failed after retries.")
 
 
 async def upload_source(
@@ -838,14 +1168,15 @@ async def poll_connect(
                 message="Tokens already dispensed. Use refresh_token to get new access tokens via POST /oauth/token.",
             )
 
-        token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
-            session.user_id
-        )
-        session.token_dispensed_at = datetime.now(tz=UTC)
-        await db.commit()
-
         user: User | None = await db.get(User, session.user_id)
         email: str | None = user.email if user else None
+
+        token_response = await build_oauth_server_service(db, ctx).mint_tokens_for_user(
+            session.user_id, email=email
+        )
+
+        session.token_dispensed_at = datetime.now(tz=UTC)
+        await db.commit()
 
         return PollConnectResult(
             status="connected",
@@ -856,16 +1187,99 @@ async def poll_connect(
         )
 
 
-async def list_people(ctx: AppContext, user_id: UUID | None) -> ListPeopleResult:
+async def list_people(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    network_only: bool = True,
+    include_shared: bool = True,
+) -> ListPeopleResult:
     if user_id is None:
         return ListPeopleResult(
             people=[],
             total=0,
+            strong_tie_count=0,
+            enriched_count=0,
             message="Authentication required.",
         )
     async with ctx.session_factory() as db:
         service: ContactsService = ContactsService(db)
-        return await service.list_people(user_id)
+        return await service.list_people(
+            user_id, network_only=network_only, include_shared=include_shared
+        )
+
+
+async def list_strong_ties(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    limit: int | None = None,
+) -> ListStrongTiesResult:
+    if user_id is None:
+        return ListStrongTiesResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        service = StrongTieApiService(db, ctx.settings)
+        return await service.list_strong_ties(user_id, limit=limit)
+
+
+async def count_strong_ties(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> StrongTieCountResult:
+    if user_id is None:
+        return StrongTieCountResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        service = StrongTieApiService(db, ctx.settings)
+        return await service.count_strong_ties(user_id)
+
+
+async def list_strong_tie_companies(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> StrongTieCompaniesResult:
+    if user_id is None:
+        return StrongTieCompaniesResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        service = StrongTieApiService(db, ctx.settings)
+        return await service.list_companies(user_id)
+
+
+async def enrich_strong_ties(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> EnrichStrongTiesResult:
+    if user_id is None:
+        return EnrichStrongTiesResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        service = StrongTieApiService(db, ctx.settings)
+        result = await service.enrich_strong_ties(user_id)
+        await db.commit()
+        return result
+
+
+async def get_scrapingdog_enrichment_status(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> ScrapingDogEnrichmentStatusResult:
+    if user_id is None:
+        return ScrapingDogEnrichmentStatusResult(
+            state="idle",
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        service = StrongTieApiService(db, ctx.settings)
+        return await service.scrapingdog_status(user_id)
+
+
+async def get_network_status(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> NetworkStatusResult:
+    if user_id is None:
+        return NetworkStatusResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        service = StrongTieApiService(db, ctx.settings)
+        return await service.network_status(user_id)
 
 
 async def get_person(
@@ -885,7 +1299,74 @@ async def get_person(
         return detail
 
 
-async def list_orgs(ctx: AppContext, user_id: UUID | None) -> ListOrgsResult:
+async def update_person(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: UpdatePersonRequest,
+) -> PersonDetailResult:
+    if user_id is None:
+        raise ValueError("Authentication required")
+    async with ctx.session_factory() as db:
+        service: ContactsService = ContactsService(db)
+        detail: PersonDetailResult | None = await service.update_person(user_id, body)
+        if detail is None:
+            raise ValueError(f"Person not found: {body.person_id}")
+        await db.commit()
+        return detail
+
+
+async def enrich_person(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    person_id: str,
+) -> EnrichPersonResult:
+    if user_id is None:
+        raise ValueError("Authentication required")
+    parsed_id: UUID = UUID(person_id)
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.enrichment_queue_service import enqueue_enrichment
+
+        await enqueue_enrichment(
+            db,
+            ctx.settings,
+            person_id=parsed_id,
+            trigger_user_id=user_id,
+        )
+        await db.commit()
+
+        from contactsafe_server.services.contact_enrichment_worker import ContactEnrichmentWorker
+        from contactsafe_server.db.models import EnrichmentQueueItem
+
+        item: EnrichmentQueueItem | None = (
+            await db.execute(
+                select(EnrichmentQueueItem).where(
+                    EnrichmentQueueItem.person_id == parsed_id,
+                    EnrichmentQueueItem.status == "pending",
+                ).order_by(EnrichmentQueueItem.created_at.desc()).limit(1)
+            )
+        ).scalar_one_or_none()
+
+        if item is None:
+            return EnrichPersonResult(message="No enrichment needed.", queued=False)
+
+        await db.commit()
+
+        worker = ContactEnrichmentWorker(db, ctx.settings)
+        refreshed: EnrichmentQueueItem | None = await db.get(EnrichmentQueueItem, item.id)
+        if refreshed is not None:
+            await worker.enrich_one(refreshed, skip_org_rebuild=True)
+
+        return EnrichPersonResult(message="Enrichment complete.", queued=True)
+
+
+async def list_orgs(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    include_shared: bool = True,
+) -> ListOrgsResult:
     if user_id is None:
         return ListOrgsResult(
             orgs=[],
@@ -894,7 +1375,7 @@ async def list_orgs(ctx: AppContext, user_id: UUID | None) -> ListOrgsResult:
         )
     async with ctx.session_factory() as db:
         service: ContactsService = ContactsService(db)
-        return await service.list_orgs(user_id)
+        return await service.list_orgs(user_id, include_shared=include_shared)
 
 
 async def get_org(
@@ -914,6 +1395,76 @@ async def get_org(
         return detail
 
 
+async def update_org(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: UpdateOrgRequest,
+) -> OrgDetailResult:
+    if user_id is None:
+        raise ValueError("Authentication required")
+    async with ctx.session_factory() as db:
+        service: ContactsService = ContactsService(db)
+        detail: OrgDetailResult | None = await service.update_org(user_id, body)
+        if detail is None:
+            raise ValueError(f"Organization not found: {body.org_id}")
+        await db.commit()
+        return detail
+
+
+async def enrich_orgs(ctx: AppContext, user_id: UUID | None) -> EnrichOrgsResult:
+    if user_id is None:
+        return EnrichOrgsResult(
+            scheduled=False,
+            state="failed",
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.org_enrichment_service import OrgEnrichmentService
+
+        service = OrgEnrichmentService(db, ctx.settings)
+        result = await service.start_enrichment(user_id)
+        await db.commit()
+        return result
+
+
+async def get_org_enrichment_status(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> OrgEnrichmentStatusResult:
+    if user_id is None:
+        return OrgEnrichmentStatusResult(
+            state="failed",
+            orgs_total=0,
+            orgs_enriched=0,
+            error="Authentication required.",
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.org_enrichment_service import OrgEnrichmentService
+
+        service = OrgEnrichmentService(db, ctx.settings)
+        return await service.get_status(user_id)
+
+
+async def cancel_org_enrichment(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> CancelOrgEnrichmentResult:
+    if user_id is None:
+        return CancelOrgEnrichmentResult(
+            cancelled=False,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.org_enrichment_service import OrgEnrichmentService
+
+        service = OrgEnrichmentService(db, ctx.settings)
+        result = await service.cancel_enrichment(user_id)
+        await db.commit()
+        return result
+
+
 async def dedup_persons(
     ctx: AppContext,
     user_id: UUID | None,
@@ -925,3 +1476,398 @@ async def dedup_persons(
         result: DedupPersonsResult = await service.dedup_for_user(user_id)
         await db.commit()
         return result
+
+
+async def list_org_lists(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> ListOrgListsResult:
+    if user_id is None:
+        return ListOrgListsResult(lists=[], message="Authentication required.")
+    async with ctx.session_factory() as db:
+        service: OrgListService = OrgListService(db)
+        return await service.list_org_lists(user_id)
+
+
+async def create_org_list(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: CreateOrgListRequest,
+) -> CreateOrgListResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        service: OrgListService = OrgListService(db)
+        result: CreateOrgListResult = await service.create_org_list(
+            user_id,
+            name=body.name,
+        )
+        await db.commit()
+        return result
+
+
+async def rename_org_list(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: RenameOrgListRequest,
+) -> RenameOrgListResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        service: OrgListService = OrgListService(db)
+        result: RenameOrgListResult = await service.rename_org_list(
+            user_id,
+            list_id=UUID(body.list_id),
+            name=body.name,
+        )
+        await db.commit()
+        return result
+
+
+async def delete_org_list(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: DeleteOrgListRequest,
+) -> DeleteOrgListResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        service: OrgListService = OrgListService(db)
+        result: DeleteOrgListResult = await service.delete_org_list(
+            user_id,
+            list_id=UUID(body.list_id),
+        )
+        await db.commit()
+        return result
+
+
+async def add_orgs_to_list(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: ModifyOrgListMembershipRequest,
+) -> ModifyOrgListMembershipResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        service: OrgListService = OrgListService(db)
+        result: ModifyOrgListMembershipResult = await service.add_orgs_to_list(
+            user_id,
+            list_id=UUID(body.list_id),
+            org_ids=[UUID(org_id) for org_id in body.org_ids],
+        )
+        await db.commit()
+
+        # If the list is the user's job monitor list, immediately scrape new orgs
+        from contactsafe_server.config import get_settings
+        from contactsafe_server.db.models import User
+
+        from sqlalchemy import select
+
+        user_row = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if (
+            user_row is not None
+            and user_row.job_monitor_list_id is not None
+            and str(user_row.job_monitor_list_id) == body.list_id
+            and get_settings().use_arq_worker
+        ):
+            from contactsafe_server.queue import enqueue_background_job
+
+            for org_id_str in body.org_ids:
+                await enqueue_background_job(
+                    "scrape_org_jobs",
+                    org_id_str,
+                    force=True,
+                    trigger_user_id=str(user_id),
+                    _job_id=f"scrape-org-{org_id_str}",
+                )
+
+        return result
+
+
+async def remove_orgs_from_list(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: ModifyOrgListMembershipRequest,
+) -> ModifyOrgListMembershipResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        service: OrgListService = OrgListService(db)
+        result: ModifyOrgListMembershipResult = await service.remove_orgs_from_list(
+            user_id,
+            list_id=UUID(body.list_id),
+            org_ids=[UUID(org_id) for org_id in body.org_ids],
+        )
+        await db.commit()
+        return result
+
+
+async def get_job_monitor_config(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> JobMonitorConfigResult:
+    if user_id is None:
+        return JobMonitorConfigResult(
+            enabled=False,
+            list_id=None,
+            list_name=None,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        return await service.get_monitor_config(user_id)
+
+
+async def set_job_monitor_config(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: SetJobMonitorConfigRequest,
+) -> JobMonitorConfigResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        result: JobMonitorConfigResult = await service.set_monitor_config(user_id, body)
+        await db.commit()
+
+        # When monitoring is enabled, immediately enqueue scrapes for unscraped orgs
+        from contactsafe_server.config import get_settings
+
+        if result.enabled and result.list_id and get_settings().use_arq_worker:
+            from contactsafe_server.queue import enqueue_background_job
+
+            orgs_needing: list[UUID] = await service.collect_orgs_needing_scrape()
+            for org_id in orgs_needing:
+                await enqueue_background_job(
+                    "scrape_org_jobs",
+                    str(org_id),
+                    force=False,
+                    trigger_user_id=str(user_id),
+                    _job_id=f"scrape-org-{org_id}",
+                )
+
+        return result
+
+
+async def get_job_scan_status(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> JobScanStatusResult:
+    if user_id is None:
+        return JobScanStatusResult(
+            scanned=0,
+            total=0,
+            scanning_active=False,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        return await service.get_scan_status(user_id)
+
+
+async def start_single_org_job_discovery(
+    ctx: AppContext,
+    user_id: UUID | None,
+    org_id: UUID,
+) -> "StartSingleOrgDiscoveryResult":
+    from contactsafe_core.contact_schemas import StartSingleOrgDiscoveryResult
+
+    if user_id is None:
+        return StartSingleOrgDiscoveryResult(
+            scheduled=False,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        return await service.discover_single_org(user_id, org_id)
+
+
+async def list_org_jobs(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    relevant_only: bool = False,
+) -> ListOrgJobsResult:
+    if user_id is None:
+        return ListOrgJobsResult(
+            companies=[],
+            total_jobs=0,
+            total_relevant=0,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        return await service.list_jobs_for_user(user_id, relevant_only=relevant_only)
+
+
+async def list_flat_jobs(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> FlatJobListResult:
+    if user_id is None:
+        return FlatJobListResult(
+            jobs=[],
+            total_jobs=0,
+            total_relevant=0,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        return await service.list_flat_jobs_for_user(user_id)
+
+
+async def get_job_detail(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    job_id: UUID,
+) -> JobDetailResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        result: JobDetailResult | None = await service.get_job_detail(user_id, job_id)
+        if result is None:
+            raise ValueError("Job not found.")
+        return result
+
+
+async def get_job_preferences(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> JobPreferencesResult:
+    if user_id is None:
+        return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.db.models import User, UserJobRelevance
+
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return JobPreferencesResult(text=None, classified_job_count=0, message="User not found.")
+        from sqlalchemy import func, select
+
+        count_result = await db.execute(
+            select(func.count()).select_from(UserJobRelevance).where(UserJobRelevance.user_id == user_id),
+        )
+        count: int = count_result.scalar() or 0
+        raw_scope: dict | None = user.job_target_scope
+        target_scope: JobTargetScope | None = None
+        if raw_scope is not None:
+            target_scope = JobTargetScope(
+                industry_tags=list(raw_scope.get("industry_tags") or []),
+                sharer_names=list(raw_scope.get("sharer_names") or []),
+                size_bands=list(raw_scope.get("size_bands") or []),
+            )
+        return JobPreferencesResult(
+            text=user.job_preferences_text,
+            location_pref=user.job_location_pref,
+            location_city=user.job_location_city,
+            commute_max_minutes=user.job_commute_max_minutes,
+            commute_note=user.job_commute_note,
+            target_scope=target_scope,
+            classified_job_count=count,
+            message="OK",
+        )
+
+
+async def set_job_preferences(
+    ctx: AppContext,
+    user_id: UUID | None,
+    text: str,
+    location_pref: str | None = None,
+    location_city: str | None = None,
+    commute_max_minutes: int | None = None,
+    commute_note: str | None = None,
+) -> JobPreferencesResult:
+    if user_id is None:
+        return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.db.models import User
+
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return JobPreferencesResult(text=None, classified_job_count=0, message="User not found.")
+        user.job_preferences_text = text.strip() or None
+        user.job_location_pref = location_pref
+        user.job_location_city = location_city.strip() if location_city else None
+        user.job_commute_max_minutes = commute_max_minutes
+        user.job_commute_note = commute_note.strip() if commute_note else None
+        await db.commit()
+
+    import asyncio
+
+    from contactsafe_server.services.job_relevance_service import cancel_scoring
+
+    cancel_scoring(user_id)
+
+    from contactsafe_server.config import get_settings
+    from contactsafe_server.queue import enqueue_background_job
+
+    if get_settings().use_arq_worker:
+        await enqueue_background_job(
+            "score_jobs_for_user",
+            str(user_id),
+            reclassify=True,
+            _job_id=f"score-user-{user_id}",
+        )
+    else:
+
+        async def _reclassify_background() -> None:
+            async with ctx.session_factory() as bg_db:
+                from contactsafe_server.services.job_relevance_service import JobRelevanceService
+
+                svc = JobRelevanceService(bg_db, ctx.settings)
+                await svc.reclassify_all(user_id)
+
+        asyncio.ensure_future(_reclassify_background())
+
+    return JobPreferencesResult(
+        text=text.strip() or None,
+        location_pref=location_pref,
+        location_city=location_city.strip() if location_city else None,
+        classified_job_count=0,
+        message="Preferences saved. Rescoring jobs in background…",
+    )
+
+
+async def set_job_target_scope(
+    ctx: AppContext,
+    user_id: UUID | None,
+    target_scope: JobTargetScope,
+) -> JobPreferencesResult:
+    if user_id is None:
+        return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.db.models import User
+
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return JobPreferencesResult(text=None, classified_job_count=0, message="User not found.")
+        user.job_target_scope = {
+            "industry_tags": target_scope.industry_tags,
+            "sharer_names": target_scope.sharer_names,
+            "size_bands": target_scope.size_bands,
+        }
+        await db.commit()
+
+    return await get_job_preferences(ctx, user_id)

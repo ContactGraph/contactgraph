@@ -1,6 +1,7 @@
 "use client";
 
-import { MoreHorizontal } from "lucide-react";
+import { Loader2, MoreHorizontal, Pencil, Sparkles } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -11,12 +12,31 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import type { EnrichPersonResult } from "@/lib/api-types";
+import { proxyPost } from "@/lib/proxy-client";
 
 interface EntityActionsMenuProps {
   entityLabel: string;
+  personId: string;
+  onEdit?: () => void;
 }
 
-export function EntityActionsMenu({ entityLabel }: EntityActionsMenuProps) {
+export function EntityActionsMenu({
+  entityLabel,
+  personId,
+  onEdit,
+}: EntityActionsMenuProps) {
+  const queryClient = useQueryClient();
+
+  const enrichMutation = useMutation({
+    mutationFn: () =>
+      proxyPost<EnrichPersonResult>("enrich-person", { person_id: personId }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["people"] });
+      await queryClient.invalidateQueries({ queryKey: ["person", personId] });
+    },
+  });
+
   const notifyComingSoon = (action: string): void => {
     window.alert(`${action} for ${entityLabel} is coming soon.`);
   };
@@ -36,7 +56,28 @@ export function EntityActionsMenu({ entityLabel }: EntityActionsMenuProps) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         <DropdownMenuLabel>Actions</DropdownMenuLabel>
-        <DropdownMenuItem onClick={() => notifyComingSoon("Edit")}>
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            enrichMutation.mutate();
+          }}
+          disabled={enrichMutation.isPending}
+        >
+          {enrichMutation.isPending ? (
+            <Loader2 className="mr-2 size-4 animate-spin" />
+          ) : (
+            <Sparkles className="mr-2 size-4" />
+          )}
+          {enrichMutation.isPending ? "Enriching…" : "Enrich"}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            onEdit?.();
+          }}
+          disabled={onEdit === undefined}
+        >
+          <Pencil className="mr-2 size-4" />
           Edit
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => notifyComingSoon("Merge")}>

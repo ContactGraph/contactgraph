@@ -1,8 +1,13 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
+import { useEffect, useRef } from "react";
 
+import type { UserProfileResult, ViewTrustedUsersResult } from "@/lib/api-types";
+import { useOnboardingPhase } from "@/lib/use-onboarding-phase";
+import { proxyPost } from "@/lib/proxy-client";
 import { cn } from "@/lib/utils";
 
 const API_BASE = "https://api.contactgraph.ai";
@@ -12,15 +17,6 @@ type NavLink =
   | { kind: "internal"; href: string; label: string }
   | { kind: "external"; href: string; label: string };
 
-const appLinks: readonly NavLink[] = [
-  { kind: "internal", href: "/people", label: "People" },
-  { kind: "internal", href: "/organizations", label: "Organizations" },
-  { kind: "internal", href: "/sources", label: "Sources" },
-  { kind: "internal", href: "/profile", label: "Profile" },
-  { kind: "internal", href: "/target-companies", label: "Targets" },
-  { kind: "internal", href: "/trust", label: "Trust List" },
-];
-
 const marketingLinks: readonly NavLink[] = [
   { kind: "external", href: `${API_BASE}/skill.md`, label: "Skill" },
   { kind: "external", href: `${API_BASE}/mcp`, label: "MCP" },
@@ -28,16 +24,84 @@ const marketingLinks: readonly NavLink[] = [
   { kind: "internal", href: "/manifesto", label: "Manifesto" },
 ];
 
-export function SiteHeader({ email }: { email: string | null }) {
+export function SiteHeader({
+  email,
+  isAdmin = false,
+}: {
+  email: string | null;
+  isAdmin?: boolean;
+}) {
   const pathname: string = usePathname();
-  const router = useRouter();
+  const headerRef = useRef<HTMLElement>(null);
+  const onboarding = useOnboardingPhase();
+
+  const profileQuery = useQuery({
+    queryKey: ["user-profile"],
+    queryFn: () => proxyPost<UserProfileResult>("get-user-profile"),
+    enabled: email !== null,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const trustQuery = useQuery({
+    queryKey: ["trust-list"],
+    queryFn: () => proxyPost<ViewTrustedUsersResult>("view-trusted-users"),
+    enabled: email !== null,
+    staleTime: 60 * 1000,
+  });
+
+  const pendingInviteCount: number = trustQuery.data?.inbound_invites.length ?? 0;
+
+  const appLinks: readonly NavLink[] = onboarding.showJobsTab
+    ? [
+        { kind: "internal", href: "/graph", label: "Graph" },
+        { kind: "internal", href: "/jobs", label: "Jobs" },
+        { kind: "internal", href: "/sharing", label: "Sharing" },
+        ...(isAdmin ? [{ kind: "internal" as const, href: "/admin", label: "Admin" }] : []),
+      ]
+    : [
+        { kind: "internal", href: "/graph", label: "Graph" },
+        { kind: "internal", href: "/sharing", label: "Sharing" },
+        ...(isAdmin ? [{ kind: "internal" as const, href: "/admin", label: "Admin" }] : []),
+      ];
+
   const links: readonly NavLink[] = email ? appLinks : marketingLinks;
 
-  const handleSignOut = async (): Promise<void> => {
-    await fetch("/api/auth/logout", { method: "POST" });
-    router.push("/");
-    router.refresh();
-  };
+  const displayName: string =
+    profileQuery.data?.display_name ??
+    profileQuery.data?.google_profile_name ??
+    email ??
+    "";
+
+  const profilePicture: string | null =
+    profileQuery.data?.google_profile_picture ?? null;
+
+  const initials: string = displayName
+    .split(/[\s@.]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s) => s[0]!.toUpperCase())
+    .join("");
+
+  useEffect(() => {
+    const header: HTMLElement | null = headerRef.current;
+    if (header === null) {
+      return;
+    }
+
+    const updateHeight = (): void => {
+      document.documentElement.style.setProperty(
+        "--site-header-height",
+        `${header.offsetHeight}px`,
+      );
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(header);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   const navLinkClass = (href: string): string =>
     cn(
@@ -48,12 +112,15 @@ export function SiteHeader({ email }: { email: string | null }) {
     );
 
   return (
-    <header className="border-b border-border">
+    <header
+      ref={headerRef}
+      className="sticky top-0 z-40 border-b border-border bg-background"
+    >
       <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-4 sm:gap-6">
           <Link
-            href={email ? "/people" : "/"}
-            className="text-sm font-semibold no-underline hover:underline"
+            href={email ? "/graph" : "/"}
+            className="text-lg font-bold tracking-tight text-foreground no-underline hover:no-underline hover:opacity-80"
           >
             ContactGraph
           </Link>
@@ -66,9 +133,14 @@ export function SiteHeader({ email }: { email: string | null }) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={navLinkClass(item.href)}
+                  className={cn(navLinkClass(item.href), "relative")}
                 >
                   {item.label}
+                  {item.href === "/sharing" && pendingInviteCount > 0 ? (
+                    <span className="absolute -right-2.5 -top-1.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground">
+                      {pendingInviteCount}
+                    </span>
+                  ) : null}
                 </Link>
               ) : (
                 <a
@@ -85,16 +157,24 @@ export function SiteHeader({ email }: { email: string | null }) {
         <div className="flex shrink-0 items-center gap-3 text-sm">
           {email ? (
             <>
-              <span className="max-w-[200px] truncate text-muted-foreground">
-                {email}
-              </span>
-              <button
-                type="button"
-                onClick={() => void handleSignOut()}
-                className="text-muted-foreground no-underline hover:underline"
+              <Link
+                href="/profile"
+                className="flex items-center rounded-full no-underline hover:opacity-80"
+                title={displayName}
               >
-                Sign out
-              </button>
+                {profilePicture !== null ? (
+                  <img
+                    src={profilePicture}
+                    alt={displayName}
+                    className="size-7 rounded-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <span className="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+                    {initials}
+                  </span>
+                )}
+              </Link>
             </>
           ) : (
             <Link href="/login" className="no-underline hover:underline">
@@ -113,13 +193,18 @@ export function SiteHeader({ email }: { email: string | null }) {
               key={item.href}
               href={item.href}
               className={cn(
-                "whitespace-nowrap text-sm no-underline hover:underline",
+                "relative whitespace-nowrap text-sm no-underline hover:underline",
                 pathname === item.href
                   ? "font-semibold text-foreground"
                   : "text-muted-foreground",
               )}
             >
               {item.label}
+              {item.href === "/sharing" && pendingInviteCount > 0 ? (
+                <span className="absolute -right-2.5 -top-1.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground">
+                  {pendingInviteCount}
+                </span>
+              ) : null}
             </Link>
           ) : (
             <a

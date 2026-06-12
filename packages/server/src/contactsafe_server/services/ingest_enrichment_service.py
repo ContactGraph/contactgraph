@@ -17,6 +17,7 @@ from contactsafe_server.services.email_parse import (
     org_name_from_email,
 )
 from contactsafe_server.services.enrichment_attempt_tracker import EnrichmentAttemptTracker
+from contactsafe_server.services.enrichment_strategies.base import email_domain_is_fresh
 from contactsafe_server.services.entity_resolution import EntityResolver, MergeConflict
 from contactsafe_server.services.category_inference import infer_categories_from_contact
 from contactsafe_server.services.interaction_excerpt_service import InteractionExcerptService
@@ -103,7 +104,9 @@ class IngestEnrichmentService:
 
             try:
                 async with self._db.begin_nested():
-                    await self._heuristic_enrich(person, acc, user_id=user_id)
+                    await self._heuristic_enrich(
+                        person, acc, user_id=user_id, obs=obs
+                    )
                     await self._signature_enrich(person, acc, user_id=user_id)
             except Exception:
                 logger.warning(
@@ -282,6 +285,7 @@ class IngestEnrichmentService:
         accumulator: ContactAccumulator | None,
         *,
         user_id: uuid.UUID,
+        obs: UserPersonObservation | None = None,
     ) -> None:
         email: str = person.primary_email or ""
         if email:
@@ -339,15 +343,21 @@ class IngestEnrichmentService:
             if inferred_org:
                 domain: str = email.rsplit("@", 1)[1].lower()
                 if not is_automation_or_generic_domain(domain):
-                    org = await self._resolver.resolve_org(domain=domain, name=inferred_org)
-                    await record_employment(
-                        self._db,
-                        person_id=person.id,
-                        org_id=org.id,
-                        contributor_user_id=user_id,
-                        contributor_source_kind="heuristic",
-                        confidence=0.4,
+                    is_fresh: bool = email_domain_is_fresh(
+                        obs,
+                        freshness_days=self._settings.enrichment_email_domain_freshness_days,
                     )
+                    org = await self._resolver.resolve_org(domain=domain, name=inferred_org)
+                    if org is not None:
+                        await record_employment(
+                            self._db,
+                            person_id=person.id,
+                            org_id=org.id,
+                            contributor_user_id=user_id,
+                            contributor_source_kind="heuristic",
+                            is_current=is_fresh,
+                            confidence=0.4 if is_fresh else 0.2,
+                        )
 
     async def _signature_enrich(
         self,
@@ -374,15 +384,16 @@ class IngestEnrichmentService:
                     if not is_automation_or_generic_domain(d):
                         domain = d
                 org = await self._resolver.resolve_org(domain=domain, name=hints.org_name)
-                await record_employment(
-                    self._db,
-                    person_id=person.id,
-                    org_id=org.id,
-                    role_title=hints.current_role,
-                    contributor_user_id=user_id,
-                    contributor_source_kind="gmail_signature",
-                    confidence=0.85,
-                )
+                if org is not None:
+                    await record_employment(
+                        self._db,
+                        person_id=person.id,
+                        org_id=org.id,
+                        role_title=hints.current_role,
+                        contributor_user_id=user_id,
+                        contributor_source_kind="gmail_signature",
+                        confidence=0.85,
+                    )
 
         if hints.phone_numbers:
             for phone in hints.phone_numbers:
@@ -498,15 +509,16 @@ class IngestEnrichmentService:
                     if not is_automation_or_generic_domain(d):
                         domain = d
                 org = await self._resolver.resolve_org(domain=domain, name=web_hints.org_name)
-                await record_employment(
-                    self._db,
-                    person_id=person.id,
-                    org_id=org.id,
-                    role_title=web_hints.current_role,
-                    contributor_user_id=user_id,
-                    contributor_source_kind=source_kind,
-                    confidence=claim_confidence,
-                )
+                if org is not None:
+                    await record_employment(
+                        self._db,
+                        person_id=person.id,
+                        org_id=org.id,
+                        role_title=web_hints.current_role,
+                        contributor_user_id=user_id,
+                        contributor_source_kind=source_kind,
+                        confidence=claim_confidence,
+                    )
 
             if not verified.skip_categories:
                 for cat in web_hints.categories:
@@ -715,14 +727,15 @@ class IngestEnrichmentService:
                         if not is_automation_or_generic_domain(d):
                             domain = d
                     org = await self._resolver.resolve_org(domain=domain, name=candidate_org)
-                    await record_employment(
-                        self._db,
-                        person_id=person.id,
-                        org_id=org.id,
-                        contributor_user_id=user_id,
-                        contributor_source_kind="llm",
-                        confidence=0.6,
-                    )
+                    if org is not None:
+                        await record_employment(
+                            self._db,
+                            person_id=person.id,
+                            org_id=org.id,
+                            contributor_user_id=user_id,
+                            contributor_source_kind="llm",
+                            confidence=0.6,
+                        )
 
             await self._tracker.record_attempt(
                 person_id=person.id,

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { env } from "@/lib/env";
 import type { PollConnectResult } from "@/lib/api-types";
+import { applyAuthTokensToSession } from "@/lib/session-auth";
 import { getSession } from "@/lib/session";
 
 export async function GET(request: Request): Promise<NextResponse> {
@@ -45,10 +46,11 @@ export async function GET(request: Request): Promise<NextResponse> {
       result.refresh_token
     ) {
       const session = await getSession();
-      session.accessToken = result.access_token;
-      session.refreshToken = result.refresh_token;
-      session.email = result.email ?? "";
-      session.isLoggedIn = true;
+      applyAuthTokensToSession(session, {
+        accessToken: result.access_token,
+        refreshToken: result.refresh_token,
+        email: result.email ?? "",
+      });
       await session.save();
     }
 
