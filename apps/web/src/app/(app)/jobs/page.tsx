@@ -13,6 +13,7 @@ import {
   RefreshCw,
   Settings,
   Users,
+  XCircle,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -285,6 +286,15 @@ function JobsListings() {
     },
   });
 
+  const cancelMutation = useMutation({
+    mutationFn: () =>
+      proxyPost<{ ok: boolean }>("cancel-job-discovery"),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
+      void queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
+    },
+  });
+
   const discoveryRunning: boolean =
     discoveryStatusQuery.data?.state === "running";
 
@@ -330,7 +340,7 @@ function JobsListings() {
       } else if (filter === "all" || !hasRelevance) {
         filtered = company.jobs;
       } else {
-        filtered = company.jobs.filter((j) => j.is_relevant !== false);
+        filtered = company.jobs.filter((j) => j.is_relevant === true);
       }
       map.set(company.org_id, { filtered, all: company.jobs });
     }
@@ -546,19 +556,35 @@ function JobsListings() {
             </button>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={discoveryRunning || checkAllMutation.isPending}
-              onClick={() => checkAllMutation.mutate()}
-            >
-              {discoveryRunning || checkAllMutation.isPending ? (
-                <Loader2 className="mr-1.5 size-3.5 animate-spin" />
-              ) : (
-                <RefreshCw className="mr-1.5 size-3.5" />
-              )}
-              Check all
-            </Button>
+            {discoveryRunning ? (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={cancelMutation.isPending}
+                onClick={() => cancelMutation.mutate()}
+              >
+                {cancelMutation.isPending ? (
+                  <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                ) : (
+                  <XCircle className="mr-1.5 size-3.5" />
+                )}
+                Cancel
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={checkAllMutation.isPending}
+                onClick={() => checkAllMutation.mutate()}
+              >
+                {checkAllMutation.isPending ? (
+                  <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="mr-1.5 size-3.5" />
+                )}
+                Check all
+              </Button>
+            )}
             <Button
               type="button"
               variant="outline"

@@ -297,6 +297,7 @@ class JobDiscoveryService:
         total_jobs_found: int = 0
         total_new_jobs: int = 0
         processed: int = 0
+        skipped: int = 0
 
         for org_id in org_ids:
             await self._db.refresh(run)
@@ -314,16 +315,20 @@ class JobDiscoveryService:
             if source == "theirstack":
                 await asyncio.sleep(7.0)
 
-            scrape_run = JobScrapeRun(
-                org_id=org.id,
-                source=source,
-                started_at=datetime.now(tz=UTC),
-                completed_at=datetime.now(tz=UTC),
-                jobs_found=found,
-                new_jobs=new_count,
-                error=error,
-            )
-            self._db.add(scrape_run)
+            actually_scanned: bool = source != "none" or error is not None
+            if actually_scanned:
+                scrape_run = JobScrapeRun(
+                    org_id=org.id,
+                    source=source,
+                    started_at=datetime.now(tz=UTC),
+                    completed_at=datetime.now(tz=UTC),
+                    jobs_found=found,
+                    new_jobs=new_count,
+                    error=error,
+                )
+                self._db.add(scrape_run)
+            else:
+                skipped += 1
 
             total_jobs_found += found
             total_new_jobs += new_count
@@ -331,16 +336,24 @@ class JobDiscoveryService:
             run.orgs_processed = processed
             run.jobs_found = total_jobs_found
             run.new_jobs = total_new_jobs
-            run.progress_message = f"Scanned {processed}/{run.orgs_total} companies…"
+            scanned_count: int = processed - skipped
+            if skipped > 0:
+                run.progress_message = (
+                    f"Scanned {scanned_count}/{run.orgs_total} companies "
+                    f"({skipped} skipped — no supported careers page)…"
+                )
+            else:
+                run.progress_message = f"Scanned {processed}/{run.orgs_total} companies…"
             await self._db.commit()
+
+            if new_count > 0:
+                await self._classify_new_jobs(user_id)
 
         run.state = "complete"
         run.completed_at = datetime.now(tz=UTC)
         run.progress_message = None
         run.error = None
         await self._db.commit()
-
-        await self._classify_new_jobs(user_id)
 
     async def discover_single_org(
         self,
@@ -357,17 +370,28 @@ class JobDiscoveryService:
         apply_ats_detection_to_org(org)
         found, new_count, source, error = await self._discover_jobs_for_org(org)
 
-        scrape_run = JobScrapeRun(
-            org_id=org.id,
-            source=source,
-            started_at=datetime.now(tz=UTC),
-            completed_at=datetime.now(tz=UTC),
-            jobs_found=found,
-            new_jobs=new_count,
-            error=error,
-        )
-        self._db.add(scrape_run)
-        await self._db.commit()
+        actually_scanned: bool = source != "none" or error is not None
+        if actually_scanned:
+            scrape_run = JobScrapeRun(
+                org_id=org.id,
+                source=source,
+                started_at=datetime.now(tz=UTC),
+                completed_at=datetime.now(tz=UTC),
+                jobs_found=found,
+                new_jobs=new_count,
+                error=error,
+            )
+            self._db.add(scrape_run)
+            await self._db.commit()
+        else:
+            await self._db.commit()
+            return StartSingleOrgDiscoveryResult(
+                scheduled=False,
+                message=(
+                    f"No supported careers page found for {org.canonical_name}. "
+                    "Add a Greenhouse, Lever, or Ashby careers URL to scan."
+                ),
+            )
 
         if new_count > 0:
             await self._classify_new_jobs(user_id)
