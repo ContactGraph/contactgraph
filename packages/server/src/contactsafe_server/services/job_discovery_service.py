@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Literal
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import (
@@ -402,26 +403,38 @@ class JobDiscoveryService:
         )
         existing: OrgJob | None = result.scalar_one_or_none()
         if existing is None:
-            self._db.add(
-                OrgJob(
-                    org_id=org_id,
-                    external_job_id=discovered.external_job_id,
-                    source=discovered.source,
-                    title=discovered.title,
-                    location=discovered.location,
-                    department=discovered.department,
-                    url=discovered.url,
-                    description_snippet=discovered.description_snippet,
-                    salary_min=discovered.salary_min,
-                    salary_max=discovered.salary_max,
-                    remote_status=discovered.remote_status,
-                    posted_at=discovered.posted_at,
-                    first_seen_at=now,
-                    last_seen_at=now,
-                    is_active=True,
-                ),
-            )
-            return True
+            try:
+                self._db.add(
+                    OrgJob(
+                        org_id=org_id,
+                        external_job_id=discovered.external_job_id,
+                        source=discovered.source,
+                        title=discovered.title,
+                        location=discovered.location,
+                        department=discovered.department,
+                        url=discovered.url,
+                        description_snippet=discovered.description_snippet,
+                        salary_min=discovered.salary_min,
+                        salary_max=discovered.salary_max,
+                        remote_status=discovered.remote_status,
+                        posted_at=discovered.posted_at,
+                        first_seen_at=now,
+                        last_seen_at=now,
+                        is_active=True,
+                    ),
+                )
+                await self._db.flush()
+                return True
+            except IntegrityError:
+                await self._db.rollback()
+                result = await self._db.execute(
+                    select(OrgJob).where(
+                        OrgJob.org_id == org_id,
+                        OrgJob.external_job_id == discovered.external_job_id,
+                        OrgJob.source == discovered.source,
+                    ),
+                )
+                existing = result.scalar_one()
 
         existing.title = discovered.title
         existing.location = discovered.location
