@@ -400,11 +400,16 @@ class ContactsService:
         )
         people_rows: list[Person] = list(people_result.scalars().all())
         own_person_ids: set[uuid.UUID] = {p.id for p in people_rows}
+        viewer_person_id: uuid.UUID | None = await self._get_viewer_person_id(user_id)
 
         people_summaries: list[OrgPersonSummary] = [
             OrgPersonSummary(
                 person_id=person.id,
-                display_name=join_display_name(*split_display_name(person.canonical_name)),
+                display_name=self._contact_display_name(
+                    person.id,
+                    join_display_name(*split_display_name(person.canonical_name)),
+                    viewer_person_id,
+                ),
                 primary_email=person.primary_email,
                 current_role=person.current_role,
             )
@@ -705,6 +710,22 @@ class ContactsService:
         )
         return first, masked_last, masked_display
 
+    async def _get_viewer_person_id(self, user_id: uuid.UUID) -> uuid.UUID | None:
+        user: User | None = await self._db.get(User, user_id)
+        if user is None:
+            return None
+        return user.person_id
+
+    @staticmethod
+    def _contact_display_name(
+        person_id: uuid.UUID,
+        canonical_name: str,
+        viewer_person_id: uuid.UUID | None,
+    ) -> str:
+        if viewer_person_id is not None and person_id == viewer_person_id:
+            return "Me"
+        return canonical_name
+
     async def _load_shared_people(
         self,
         user_id: uuid.UUID,
@@ -725,6 +746,9 @@ class ContactsService:
 
         shared_people: list[PersonListItem] = []
         seen_person_ids: set[uuid.UUID] = set(own_person_ids)
+        viewer_person_id: uuid.UUID | None = await self._get_viewer_person_id(user_id)
+        if viewer_person_id is not None:
+            seen_person_ids.add(viewer_person_id)
 
         for member_id in member_ids:
             private_ids: set[uuid.UUID] = await self._get_private_person_ids(member_id)
@@ -816,9 +840,17 @@ class ContactsService:
                     user_row.display_name or user_row.google_profile_name or user_row.email
                 )
 
+        viewer_person_id: uuid.UUID | None = await self._get_viewer_person_id(user_id)
+
         for member_id in member_ids:
             private_ids: set[uuid.UUID] = await self._get_private_person_ids(member_id)
             sharer_name: str = member_names.get(member_id, "Someone")
+
+            person_filters: list[object] = []
+            if private_ids:
+                person_filters.append(~Person.id.in_(private_ids))
+            if viewer_person_id is not None:
+                person_filters.append(Person.id != viewer_person_id)
 
             stmt = (
                 select(
@@ -827,7 +859,7 @@ class ContactsService:
                 )
                 .join(Person, Person.current_org_id == Org.id)
                 .where(
-                    ~Person.id.in_(private_ids) if private_ids else True,
+                    *person_filters,
                     exists(
                         select(UserPersonObservation.person_id).where(
                             UserPersonObservation.user_id == member_id,
@@ -901,6 +933,9 @@ class ContactsService:
 
         shared_summaries: list[OrgPersonSummary] = []
         seen_ids: set[uuid.UUID] = set(own_person_ids)
+        viewer_person_id: uuid.UUID | None = await self._get_viewer_person_id(user_id)
+        if viewer_person_id is not None:
+            seen_ids.add(viewer_person_id)
 
         for member_id in member_ids:
             private_ids: set[uuid.UUID] = await self._get_private_person_ids(member_id)
@@ -957,10 +992,17 @@ class ContactsService:
         counts: dict[uuid.UUID, int] = {}
         primary_names: dict[uuid.UUID, str] = {}
         primary_bridges: dict[uuid.UUID, str] = {}
+        viewer_person_id: uuid.UUID | None = await self._get_viewer_person_id(user_id)
 
         for member_id in member_ids:
             private_ids: set[uuid.UUID] = await self._get_private_person_ids(member_id)
             sharer_name: str = member_names.get(member_id, "Someone")
+
+            person_filters: list[object] = []
+            if private_ids:
+                person_filters.append(~Person.id.in_(private_ids))
+            if viewer_person_id is not None:
+                person_filters.append(Person.id != viewer_person_id)
 
             people_result = await self._db.execute(
                 select(Person)
@@ -971,7 +1013,7 @@ class ContactsService:
                 )
                 .where(
                     Person.current_org_id.in_(org_ids),
-                    ~Person.id.in_(private_ids) if private_ids else True,
+                    *person_filters,
                     exists(
                         select(UserPersonObservation.person_id).where(
                             UserPersonObservation.user_id == member_id,
@@ -1047,8 +1089,10 @@ class ContactsService:
         if not org_ids:
             return
 
+        viewer_person_id: uuid.UUID | None = await self._get_viewer_person_id(user_id)
+
         result = await self._db.execute(
-            select(Person.current_org_id, Person.canonical_name)
+            select(Person.id, Person.current_org_id, Person.canonical_name)
             .join(
                 UserPersonObservation,
                 (UserPersonObservation.person_id == Person.id)
@@ -1083,12 +1127,17 @@ class ContactsService:
         )
 
         primary_names: dict[uuid.UUID, str] = {}
+        person_id: uuid.UUID
         org_id: uuid.UUID | None
         name: str
-        for org_id, name in result.all():
+        for person_id, org_id, name in result.all():
             if org_id is None or org_id in primary_names:
                 continue
-            primary_names[org_id] = name
+            primary_names[org_id] = self._contact_display_name(
+                person_id,
+                name,
+                viewer_person_id,
+            )
 
         for org_id, contact_name in primary_names.items():
             item: OrgListItem | None = org_map.get(org_id)

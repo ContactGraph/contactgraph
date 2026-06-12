@@ -564,10 +564,18 @@ class JobDiscoveryService:
         )
         own_people: list[Person] = list(people_result.scalars().all())
         own_person_ids: set[uuid.UUID] = {person.id for person in own_people}
+        viewer_person_id: uuid.UUID | None = None
+        viewer_user: User | None = await self._db.get(User, user_id)
+        if viewer_user is not None:
+            viewer_person_id = viewer_user.person_id
         contacts: list[OrgPersonSummary] = [
             OrgPersonSummary(
                 person_id=p.id,
-                display_name=p.canonical_name,
+                display_name=ContactsService._contact_display_name(
+                    p.id,
+                    p.canonical_name,
+                    viewer_person_id,
+                ),
                 primary_email=p.primary_email,
                 current_role=p.current_role,
             )
@@ -849,8 +857,11 @@ class JobDiscoveryService:
         if not org_ids:
             return {}
 
+        user: User | None = await self._db.get(User, user_id)
+        viewer_person_id: uuid.UUID | None = user.person_id if user is not None else None
+
         result = await self._db.execute(
-            select(Person.current_org_id, Person.canonical_name)
+            select(Person.id, Person.current_org_id, Person.canonical_name)
             .join(
                 UserPersonObservation,
                 (UserPersonObservation.person_id == Person.id)
@@ -861,13 +872,19 @@ class JobDiscoveryService:
         )
 
         summaries: dict[uuid.UUID, tuple[str, int]] = {}
+        person_id: uuid.UUID
         org_id: uuid.UUID | None
         name: str
-        for org_id, name in result.all():
+        for person_id, org_id, name in result.all():
             if org_id is None:
                 continue
+            display_name: str = ContactsService._contact_display_name(
+                person_id,
+                name,
+                viewer_person_id,
+            )
             if org_id not in summaries:
-                summaries[org_id] = (name, 1)
+                summaries[org_id] = (display_name, 1)
             else:
                 first_name, count = summaries[org_id]
                 summaries[org_id] = (first_name, count + 1)
