@@ -1558,6 +1558,31 @@ async def add_orgs_to_list(
             org_ids=[UUID(org_id) for org_id in body.org_ids],
         )
         await db.commit()
+
+        # If the list is the user's job monitor list, immediately scrape new orgs
+        from contactsafe_server.config import get_settings
+        from contactsafe_server.db.models import User
+
+        from sqlalchemy import select
+
+        user_row = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+        if (
+            user_row is not None
+            and user_row.job_monitor_list_id is not None
+            and str(user_row.job_monitor_list_id) == body.list_id
+            and get_settings().use_arq_worker
+        ):
+            from contactsafe_server.queue import enqueue_background_job
+
+            for org_id_str in body.org_ids:
+                await enqueue_background_job(
+                    "scrape_org_jobs",
+                    org_id_str,
+                    force=True,
+                    trigger_user_id=str(user_id),
+                    _job_id=f"scrape-org-{org_id_str}",
+                )
+
         return result
 
 
@@ -1612,6 +1637,23 @@ async def set_job_monitor_config(
         service = JobDiscoveryService(db, ctx.settings)
         result: JobMonitorConfigResult = await service.set_monitor_config(user_id, body)
         await db.commit()
+
+        # When monitoring is enabled, immediately enqueue scrapes for unscraped orgs
+        from contactsafe_server.config import get_settings
+
+        if result.enabled and result.list_id and get_settings().use_arq_worker:
+            from contactsafe_server.queue import enqueue_background_job
+
+            orgs_needing: list[UUID] = await service.collect_orgs_needing_scrape()
+            for org_id in orgs_needing:
+                await enqueue_background_job(
+                    "scrape_org_jobs",
+                    str(org_id),
+                    force=False,
+                    trigger_user_id=str(user_id),
+                    _job_id=f"scrape-org-{org_id}",
+                )
+
         return result
 
 
