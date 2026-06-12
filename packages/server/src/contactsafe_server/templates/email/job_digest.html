@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ subject }}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 36rem; margin: 0 auto; padding: 1.5rem 1rem; line-height: 1.5; color: #111; }
+    h1 { font-size: 1.35rem; margin: 0 0 0.5rem; }
+    .intro { color: #444; margin: 0 0 1.5rem; }
+    .company { margin: 1.5rem 0 0.25rem; font-size: 0.95rem; font-weight: 600; color: #333; }
+    .contact-blurb { font-size: 0.8rem; color: #1a73e8; margin: 0 0 0.5rem; }
+    .job { border-left: 3px solid #1a73e8; padding: 0.5rem 0 0.5rem 0.75rem; margin: 0 0 0.75rem; }
+    .job-title { font-weight: 600; margin: 0; }
+    .job-title a { color: #1a73e8; text-decoration: none; }
+    .job-meta { font-size: 0.875rem; color: #555; margin: 0.2rem 0 0; }
+    .match { display: inline-block; font-size: 0.75rem; font-weight: 600; color: #0d652d; background: #e6f4ea; padding: 0.1rem 0.4rem; border-radius: 4px; margin-left: 0.35rem; }
+    .cta { display: inline-block; margin: 1.5rem 0; padding: 0.7rem 1.1rem; background: #1a73e8; color: #fff !important; text-decoration: none; border-radius: 6px; font-weight: 500; }
+    .footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e5e5e5; font-size: 0.8rem; color: #666; }
+    .footer a { color: #666; }
+    .overflow { font-size: 0.875rem; color: #555; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>{{ job_count }} new job match{{ "es" if job_count != 1 else "" }}</h1>
+  <p class="intro">New roles at your target companies that match your preferences.</p>
+
+  {% for group in company_groups %}
+  <div class="company">{{ group.company_name }}</div>
+  {% if group.contact_blurb %}
+  <p class="contact-blurb">You know {{ group.contact_blurb }}</p>
+  {% endif %}
+  {% for job in group.jobs %}
+  <div class="job">
+    <p class="job-title">
+      <a href="{{ job.url }}">{{ job.title }}</a>
+      <span class="match">{{ job.match_score }}% match</span>
+    </p>
+    {% if job.location %}
+    <p class="job-meta">{{ job.location }}</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% endfor %}
+
+  {% if overflow_count > 0 %}
+  <p class="overflow">+ {{ overflow_count }} more match{{ "es" if overflow_count != 1 else "" }} in ContactGraph.</p>
+  {% endif %}
+
+  <a class="cta" href="{{ jobs_url }}">View all jobs</a>
+
+  <div class="footer">
+    <p>
+      <a href="{{ profile_url }}">Manage notification settings</a>
+      &nbsp;·&nbsp;
+      <a href="{{ unsubscribe_url }}">Unsubscribe</a>
+    </p>
+    <p>ContactGraph — your job search assistant</p>
+  </div>
+</body>
+</html>

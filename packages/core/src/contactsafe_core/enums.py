@@ -73,3 +73,9 @@ class TrustListMembershipStatus(StrEnum):
 class ContactPrivacyLabel(StrEnum):
     STANDARD = "standard"
     PRIVATE = "private"
+
+
+class JobDigestFrequency(StrEnum):
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    OFF = "off"
