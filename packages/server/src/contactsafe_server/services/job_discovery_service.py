@@ -744,7 +744,6 @@ class JobDiscoveryService:
             return 0, 0, source, error
 
         if not discovered_jobs:
-            await self._mark_stale_jobs_inactive(org.id, successful_source)
             return 0, 0, successful_source, error
 
         new_count: int = 0
