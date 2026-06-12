@@ -12,16 +12,25 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import (
+    FlatJobListResult,
+    JobDetailResult,
     JobDiscoveryStatusResult,
     JobMonitorConfigResult,
     ListOrgJobsResult,
     OrgJobItem,
     OrgJobsByCompany,
+    OrgPersonSummary,
     SetJobMonitorConfigRequest,
     StartJobDiscoveryResult,
     StartSingleOrgDiscoveryResult,
 )
 from contactsafe_server.config import Settings
+from contactsafe_server.events import (
+    DiscoveryCancelledEvent,
+    DiscoveryCompleteEvent,
+    DiscoveryProgressEvent,
+    job_event_bus,
+)
 from contactsafe_server.db.models import (
     JobDiscoveryRun,
     JobScrapeRun,
@@ -29,8 +38,10 @@ from contactsafe_server.db.models import (
     OrgJob,
     OrgList,
     OrgListMembership,
+    Person,
     User,
     UserJobRelevance,
+    UserPersonObservation,
 )
 from contactsafe_server.services.ats_detection import apply_ats_detection_to_org
 from contactsafe_server.services.ats_job_clients import AtsJobClient
@@ -42,6 +53,45 @@ from contactsafe_server.services.job_discovery_types import DiscoveredJob
 from contactsafe_server.services.theirstack_client import TheirStackClient
 
 logger: logging.Logger = logging.getLogger(__name__)
+
+
+def _publish_discovery_progress(
+    user_id: uuid.UUID,
+    *,
+    orgs_processed: int,
+    orgs_total: int,
+    jobs_found: int,
+    new_jobs: int,
+    progress_message: str | None,
+) -> None:
+    event: DiscoveryProgressEvent = {
+        "type": "discovery_progress",
+        "orgs_processed": orgs_processed,
+        "orgs_total": orgs_total,
+        "jobs_found": jobs_found,
+        "new_jobs": new_jobs,
+        "progress_message": progress_message,
+    }
+    job_event_bus.publish(user_id, event)
+
+
+def _publish_discovery_complete(
+    user_id: uuid.UUID,
+    *,
+    jobs_found: int,
+    new_jobs: int,
+) -> None:
+    event: DiscoveryCompleteEvent = {
+        "type": "discovery_complete",
+        "jobs_found": jobs_found,
+        "new_jobs": new_jobs,
+    }
+    job_event_bus.publish(user_id, event)
+
+
+def _publish_discovery_cancelled(user_id: uuid.UUID) -> None:
+    event: DiscoveryCancelledEvent = {"type": "discovery_cancelled"}
+    job_event_bus.publish(user_id, event)
 
 JobDiscoveryState = Literal["pending", "running", "complete", "failed"]
 
@@ -143,6 +193,14 @@ class JobDiscoveryService:
             )
 
         await self._db.commit()
+        _publish_discovery_progress(
+            user_id,
+            orgs_processed=0,
+            orgs_total=len(org_ids),
+            jobs_found=0,
+            new_jobs=0,
+            progress_message=run.progress_message,
+        )
         return StartJobDiscoveryResult(
             scheduled=True,
             state="running",
@@ -282,6 +340,193 @@ class JobDiscoveryService:
         )
         return ListOrgJobsResult(companies=companies, total_jobs=total_jobs, total_relevant=total_relevant, message=message)
 
+    async def list_flat_jobs_for_user(
+        self,
+        user_id: uuid.UUID,
+        *,
+        active_only: bool = True,
+    ) -> FlatJobListResult:
+        org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
+        if not org_ids:
+            return FlatJobListResult(jobs=[], total_jobs=0, total_relevant=0, message="No monitored organizations.")
+
+        orgs_result = await self._db.execute(
+            select(Org).where(Org.id.in_(org_ids)),
+        )
+        org_name_map: dict[uuid.UUID, str] = {
+            org.id: org.canonical_name for org in orgs_result.scalars().all()
+        }
+
+        jobs_query = select(OrgJob).where(OrgJob.org_id.in_(org_ids))
+        if active_only:
+            jobs_query = jobs_query.where(OrgJob.is_active.is_(True))
+        jobs_result = await self._db.execute(jobs_query)
+        jobs: list[OrgJob] = list(jobs_result.scalars().all())
+
+        relevance_result = await self._db.execute(
+            select(UserJobRelevance).where(UserJobRelevance.user_id == user_id),
+        )
+        relevance_map: dict[uuid.UUID, UserJobRelevance] = {
+            r.job_id: r for r in relevance_result.scalars().all()
+        }
+
+        unique_org_ids: list[uuid.UUID] = list({job.org_id for job in jobs})
+        contact_summaries: dict[uuid.UUID, tuple[str, int]] = (
+            await self._load_user_contact_summaries_by_org(user_id, unique_org_ids)
+        )
+
+        job_items: list[OrgJobItem] = []
+        total_relevant: int = 0
+        for job in jobs:
+            rel: UserJobRelevance | None = relevance_map.get(job.id)
+            is_relevant: bool | None = rel.is_relevant if rel else None
+            match_score: int | None = rel.match_score if rel else None
+            reason: str | None = rel.reason if rel else None
+
+            if is_relevant is True:
+                total_relevant += 1
+
+            contact_summary: tuple[str, int] | None = contact_summaries.get(job.org_id)
+            primary_contact_name: str | None = contact_summary[0] if contact_summary else None
+            contact_count: int = contact_summary[1] if contact_summary else 0
+
+            job_items.append(
+                OrgJobItem(
+                    job_id=job.id,
+                    external_job_id=job.external_job_id,
+                    source=job.source,
+                    title=job.title,
+                    org_name=org_name_map.get(job.org_id),
+                    org_id=job.org_id,
+                    location=job.location,
+                    department=job.department,
+                    url=job.url,
+                    description_snippet=job.description_snippet,
+                    salary_min=job.salary_min,
+                    salary_max=job.salary_max,
+                    remote_status=job.remote_status,
+                    posted_at=job.posted_at,
+                    first_seen_at=job.first_seen_at,
+                    last_seen_at=job.last_seen_at,
+                    is_active=job.is_active,
+                    is_relevant=is_relevant,
+                    match_score=match_score,
+                    relevance_reason=reason,
+                    role_score=rel.role_score if rel else None,
+                    role_reason=rel.role_reason if rel else None,
+                    seniority_score=rel.seniority_score if rel else None,
+                    seniority_reason=rel.seniority_reason if rel else None,
+                    location_score=rel.location_score if rel else None,
+                    location_reason=rel.location_reason if rel else None,
+                    contact_count=contact_count,
+                    primary_contact_name=primary_contact_name,
+                )
+            )
+
+        job_items.sort(
+            key=lambda j: (j.match_score if j.match_score is not None else -1),
+            reverse=True,
+        )
+
+        message: str = (
+            f"Found {len(job_items)} open job(s)."
+            if job_items
+            else "No open jobs found yet."
+        )
+        return FlatJobListResult(
+            jobs=job_items,
+            total_jobs=len(job_items),
+            total_relevant=total_relevant,
+            message=message,
+        )
+
+    async def get_job_detail(
+        self,
+        user_id: uuid.UUID,
+        job_id: uuid.UUID,
+    ) -> JobDetailResult | None:
+        job: OrgJob | None = await self._db.get(OrgJob, job_id)
+        if job is None:
+            return None
+
+        org: Org | None = await self._db.get(Org, job.org_id)
+
+        rel_result = await self._db.execute(
+            select(UserJobRelevance).where(
+                UserJobRelevance.user_id == user_id,
+                UserJobRelevance.job_id == job_id,
+            ),
+        )
+        rel: UserJobRelevance | None = rel_result.scalar_one_or_none()
+
+        contact_summaries: dict[uuid.UUID, tuple[str, int]] = (
+            await self._load_user_contact_summaries_by_org(user_id, [job.org_id])
+        )
+        contact_summary: tuple[str, int] | None = contact_summaries.get(job.org_id)
+        primary_contact_name: str | None = contact_summary[0] if contact_summary else None
+        contact_count: int = contact_summary[1] if contact_summary else 0
+
+        people_result = await self._db.execute(
+            select(Person)
+            .join(
+                UserPersonObservation,
+                (UserPersonObservation.person_id == Person.id)
+                & (UserPersonObservation.user_id == user_id),
+            )
+            .where(Person.current_org_id == job.org_id)
+            .order_by(Person.canonical_name.asc())
+            .limit(20),
+        )
+        contacts: list[OrgPersonSummary] = [
+            OrgPersonSummary(
+                person_id=p.id,
+                display_name=p.canonical_name,
+                primary_email=p.primary_email,
+                current_role=p.current_role,
+            )
+            for p in people_result.scalars().all()
+        ]
+
+        item = OrgJobItem(
+            job_id=job.id,
+            external_job_id=job.external_job_id,
+            source=job.source,
+            title=job.title,
+            org_name=org.canonical_name if org else None,
+            org_id=job.org_id,
+            location=job.location,
+            department=job.department,
+            url=job.url,
+            description_snippet=job.description_snippet,
+            salary_min=job.salary_min,
+            salary_max=job.salary_max,
+            remote_status=job.remote_status,
+            posted_at=job.posted_at,
+            first_seen_at=job.first_seen_at,
+            last_seen_at=job.last_seen_at,
+            is_active=job.is_active,
+            is_relevant=rel.is_relevant if rel else None,
+            match_score=rel.match_score if rel else None,
+            relevance_reason=rel.reason if rel else None,
+            role_score=rel.role_score if rel else None,
+            role_reason=rel.role_reason if rel else None,
+            seniority_score=rel.seniority_score if rel else None,
+            seniority_reason=rel.seniority_reason if rel else None,
+            location_score=rel.location_score if rel else None,
+            location_reason=rel.location_reason if rel else None,
+            contact_count=contact_count,
+            primary_contact_name=primary_contact_name,
+        )
+
+        return JobDetailResult(
+            job=item,
+            org_description=org.description if org else None,
+            org_primary_domain=org.primary_domain if org else None,
+            contacts=contacts,
+            contact_count=len(contacts),
+            message=f"Job detail for {job.title}.",
+        )
+
     async def run_discovery(self, user_id: uuid.UUID, run_id: uuid.UUID) -> None:
         run: JobDiscoveryRun | None = await self._db.get(JobDiscoveryRun, run_id)
         if run is None or run.user_id != user_id:
@@ -293,14 +538,24 @@ class JobDiscoveryService:
         run.started_at = datetime.now(tz=UTC)
         run.progress_message = "Scanning organizations…"
         await self._db.commit()
+        _publish_discovery_progress(
+            user_id,
+            orgs_processed=0,
+            orgs_total=len(org_ids),
+            jobs_found=0,
+            new_jobs=0,
+            progress_message=run.progress_message,
+        )
 
         total_jobs_found: int = 0
         total_new_jobs: int = 0
         processed: int = 0
+        skipped: int = 0
 
         for org_id in org_ids:
             await self._db.refresh(run)
             if run.state == "cancelled":
+                _publish_discovery_cancelled(user_id)
                 return
 
             org: Org | None = await self._db.get(Org, org_id)
@@ -314,16 +569,20 @@ class JobDiscoveryService:
             if source == "theirstack":
                 await asyncio.sleep(7.0)
 
-            scrape_run = JobScrapeRun(
-                org_id=org.id,
-                source=source,
-                started_at=datetime.now(tz=UTC),
-                completed_at=datetime.now(tz=UTC),
-                jobs_found=found,
-                new_jobs=new_count,
-                error=error,
-            )
-            self._db.add(scrape_run)
+            actually_scanned: bool = source != "none" or error is not None
+            if actually_scanned:
+                scrape_run = JobScrapeRun(
+                    org_id=org.id,
+                    source=source,
+                    started_at=datetime.now(tz=UTC),
+                    completed_at=datetime.now(tz=UTC),
+                    jobs_found=found,
+                    new_jobs=new_count,
+                    error=error,
+                )
+                self._db.add(scrape_run)
+            else:
+                skipped += 1
 
             total_jobs_found += found
             total_new_jobs += new_count
@@ -331,16 +590,37 @@ class JobDiscoveryService:
             run.orgs_processed = processed
             run.jobs_found = total_jobs_found
             run.new_jobs = total_new_jobs
-            run.progress_message = f"Scanned {processed}/{run.orgs_total} companies…"
+            scanned_count: int = processed - skipped
+            if skipped > 0:
+                run.progress_message = (
+                    f"Scanned {scanned_count}/{run.orgs_total} companies "
+                    f"({skipped} skipped — no supported careers page)…"
+                )
+            else:
+                run.progress_message = f"Scanned {processed}/{run.orgs_total} companies…"
             await self._db.commit()
+            _publish_discovery_progress(
+                user_id,
+                orgs_processed=processed,
+                orgs_total=run.orgs_total,
+                jobs_found=total_jobs_found,
+                new_jobs=total_new_jobs,
+                progress_message=run.progress_message,
+            )
+
+            if new_count > 0:
+                await self._classify_new_jobs(user_id)
 
         run.state = "complete"
         run.completed_at = datetime.now(tz=UTC)
         run.progress_message = None
         run.error = None
         await self._db.commit()
-
-        await self._classify_new_jobs(user_id)
+        _publish_discovery_complete(
+            user_id,
+            jobs_found=total_jobs_found,
+            new_jobs=total_new_jobs,
+        )
 
     async def discover_single_org(
         self,
@@ -357,17 +637,28 @@ class JobDiscoveryService:
         apply_ats_detection_to_org(org)
         found, new_count, source, error = await self._discover_jobs_for_org(org)
 
-        scrape_run = JobScrapeRun(
-            org_id=org.id,
-            source=source,
-            started_at=datetime.now(tz=UTC),
-            completed_at=datetime.now(tz=UTC),
-            jobs_found=found,
-            new_jobs=new_count,
-            error=error,
-        )
-        self._db.add(scrape_run)
-        await self._db.commit()
+        actually_scanned: bool = source != "none" or error is not None
+        if actually_scanned:
+            scrape_run = JobScrapeRun(
+                org_id=org.id,
+                source=source,
+                started_at=datetime.now(tz=UTC),
+                completed_at=datetime.now(tz=UTC),
+                jobs_found=found,
+                new_jobs=new_count,
+                error=error,
+            )
+            self._db.add(scrape_run)
+            await self._db.commit()
+        else:
+            await self._db.commit()
+            return StartSingleOrgDiscoveryResult(
+                scheduled=False,
+                message=(
+                    f"No supported careers page found for {org.canonical_name}. "
+                    "Add a Greenhouse, Lever, or Ashby careers URL to scan."
+                ),
+            )
 
         if new_count > 0:
             await self._classify_new_jobs(user_id)
@@ -525,6 +816,38 @@ class JobDiscoveryService:
         except Exception:
             logger.exception("Job classification failed for user %s", user_id)
 
+    async def _load_user_contact_summaries_by_org(
+        self,
+        user_id: uuid.UUID,
+        org_ids: list[uuid.UUID],
+    ) -> dict[uuid.UUID, tuple[str, int]]:
+        if not org_ids:
+            return {}
+
+        result = await self._db.execute(
+            select(Person.current_org_id, Person.canonical_name)
+            .join(
+                UserPersonObservation,
+                (UserPersonObservation.person_id == Person.id)
+                & (UserPersonObservation.user_id == user_id),
+            )
+            .where(Person.current_org_id.in_(org_ids))
+            .order_by(Person.current_org_id, Person.canonical_name.asc()),
+        )
+
+        summaries: dict[uuid.UUID, tuple[str, int]] = {}
+        org_id: uuid.UUID | None
+        name: str
+        for org_id, name in result.all():
+            if org_id is None:
+                continue
+            if org_id not in summaries:
+                summaries[org_id] = (name, 1)
+            else:
+                first_name, count = summaries[org_id]
+                summaries[org_id] = (first_name, count + 1)
+        return summaries
+
     async def _list_monitored_org_ids(self, user_id: uuid.UUID) -> list[uuid.UUID]:
         user: User | None = await self._db.get(User, user_id)
         if user is None or user.job_monitor_list_id is None:
@@ -560,6 +883,7 @@ class JobDiscoveryService:
             run.progress_message = None
             run.error = "Cancelled by user."
             await self._db.commit()
+            _publish_discovery_cancelled(user_id)
         release_job_discovery_lock(user_id)
 
     async def _latest_run(self, user_id: uuid.UUID) -> JobDiscoveryRun | None:

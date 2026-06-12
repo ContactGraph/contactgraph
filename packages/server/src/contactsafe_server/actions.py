@@ -37,6 +37,8 @@ from contactsafe_core.contact_schemas import (
     ScrapingDogEnrichmentStatusResult,
     StrongTieCompaniesResult,
     StrongTieCountResult,
+    FlatJobListResult,
+    JobDetailResult,
     JobDiscoveryStatusResult,
     JobMonitorConfigResult,
     JobPreferencesResult,
@@ -553,6 +555,7 @@ async def update_user_profile(
 
             if body.linkedin_url is not None:
                 linkedin: str = body.linkedin_url.strip().rstrip("/")
+                # Remove stale linkedin aliases/claims so the new value wins
                 await db.execute(
                     delete(PersonAlias).where(
                         PersonAlias.person_id == person.id,
@@ -1670,6 +1673,10 @@ async def cancel_job_discovery(
 ) -> None:
     if user_id is None:
         return
+    from contactsafe_server.services.job_relevance_service import cancel_scoring
+
+    cancel_scoring(user_id)
+
     async with ctx.session_factory() as db:
         from contactsafe_server.services.job_discovery_service import JobDiscoveryService
 
@@ -1697,6 +1704,42 @@ async def list_org_jobs(
         return await service.list_jobs_for_user(user_id, relevant_only=relevant_only)
 
 
+async def list_flat_jobs(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> FlatJobListResult:
+    if user_id is None:
+        return FlatJobListResult(
+            jobs=[],
+            total_jobs=0,
+            total_relevant=0,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        return await service.list_flat_jobs_for_user(user_id)
+
+
+async def get_job_detail(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    job_id: UUID,
+) -> JobDetailResult:
+    if user_id is None:
+        raise ValueError("Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+
+        service = JobDiscoveryService(db, ctx.settings)
+        result: JobDetailResult | None = await service.get_job_detail(user_id, job_id)
+        if result is None:
+            raise ValueError("Job not found.")
+        return result
+
+
 async def get_job_preferences(
     ctx: AppContext,
     user_id: UUID | None,
@@ -1719,6 +1762,8 @@ async def get_job_preferences(
             text=user.job_preferences_text,
             location_pref=user.job_location_pref,
             location_city=user.job_location_city,
+            commute_max_minutes=user.job_commute_max_minutes,
+            commute_note=user.job_commute_note,
             classified_job_count=count,
             message="OK",
         )
@@ -1730,6 +1775,8 @@ async def set_job_preferences(
     text: str,
     location_pref: str | None = None,
     location_city: str | None = None,
+    commute_max_minutes: int | None = None,
+    commute_note: str | None = None,
 ) -> JobPreferencesResult:
     if user_id is None:
         return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
@@ -1742,9 +1789,15 @@ async def set_job_preferences(
         user.job_preferences_text = text.strip() or None
         user.job_location_pref = location_pref
         user.job_location_city = location_city.strip() if location_city else None
+        user.job_commute_max_minutes = commute_max_minutes
+        user.job_commute_note = commute_note.strip() if commute_note else None
         await db.commit()
 
     import asyncio
+
+    from contactsafe_server.services.job_relevance_service import cancel_scoring
+
+    cancel_scoring(user_id)
 
     async def _reclassify_background() -> None:
         async with ctx.session_factory() as bg_db:
@@ -1760,5 +1813,5 @@ async def set_job_preferences(
         location_pref=location_pref,
         location_city=location_city.strip() if location_city else None,
         classified_job_count=0,
-        message="Preferences saved. Re-classifying jobs in background…",
+        message="Preferences saved. Rescoring jobs in background…",
     )

@@ -372,6 +372,8 @@ class OrgJobItem(BaseModel):
     external_job_id: str
     source: str
     title: str
+    org_name: str | None = None
+    org_id: UUID | None = None
     location: str | None = None
     department: str | None = None
     url: str
@@ -384,7 +386,16 @@ class OrgJobItem(BaseModel):
     last_seen_at: datetime
     is_active: bool = True
     is_relevant: bool | None = None
+    match_score: int | None = None
     relevance_reason: str | None = None
+    role_score: int | None = None
+    role_reason: str | None = None
+    seniority_score: int | None = None
+    seniority_reason: str | None = None
+    location_score: int | None = None
+    location_reason: str | None = None
+    contact_count: int = 0
+    primary_contact_name: str | None = None
 
 
 class OrgJobsByCompany(BaseModel):
@@ -414,15 +425,35 @@ class ListOrgJobsResult(BaseModel):
     message: str
 
 
+class FlatJobListResult(BaseModel):
+    jobs: list[OrgJobItem] = Field(default_factory=list)
+    total_jobs: int = 0
+    total_relevant: int = 0
+    message: str
+
+
+class JobDetailResult(BaseModel):
+    job: OrgJobItem
+    org_description: str | None = None
+    org_primary_domain: str | None = None
+    contacts: list[OrgPersonSummary] = Field(default_factory=list)
+    contact_count: int = 0
+    message: str
+
+
 class SetJobPreferencesRequest(BaseModel):
     text: str
     location_pref: str | None = None
     location_city: str | None = None
+    commute_max_minutes: int | None = None
+    commute_note: str | None = None
 
 
 class JobPreferencesResult(BaseModel):
     text: str | None = None
     location_pref: str | None = None
     location_city: str | None = None
+    commute_max_minutes: int | None = None
+    commute_note: str | None = None
     classified_job_count: int = 0
     message: str

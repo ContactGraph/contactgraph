@@ -20,6 +20,7 @@ import type {
   JobDiscoveryStatusResult,
   JobMonitorConfigResult,
   JobPreferencesResult,
+  SetJobPreferencesRequest,
   ListOrgListsResult,
   ListSourcesResult,
   OrgEnrichmentStatusResult,
@@ -61,6 +62,8 @@ export function JobSetupCards({
   const [preferencesText, setPreferencesText] = useState<string>("");
   const [locationPref, setLocationPref] = useState<string | null>(null);
   const [locationCity, setLocationCity] = useState<string>("");
+  const [commuteMaxMinutes, setCommuteMaxMinutes] = useState<string>("");
+  const [commuteNote, setCommuteNote] = useState<string>("");
 
   const sourcesQuery = useQuery({
     queryKey: ["sources"],
@@ -115,15 +118,14 @@ export function JobSetupCards({
   });
 
   const setJobPreferencesMutation = useMutation({
-    mutationFn: (params: {
-      text: string;
-      location_pref: string | null;
-      location_city: string | null;
-    }) => proxyPost<JobPreferencesResult>("set-job-preferences", params),
+    mutationFn: (params: SetJobPreferencesRequest) =>
+      proxyPost<JobPreferencesResult>("set-job-preferences", params),
     onSuccess: async (result: JobPreferencesResult) => {
       toast.success(result.message);
       await queryClient.invalidateQueries({ queryKey: ["job-preferences"] });
       await queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
+      await queryClient.invalidateQueries({ queryKey: ["flat-jobs"] });
+      await queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
     },
     onError: (error: Error) => {
       toast.error(error.message);
@@ -234,13 +236,27 @@ export function JobSetupCards({
     if (serverCity !== null && locationCity === "") {
       setLocationCity(serverCity);
     }
+    const serverCommute: number | null =
+      jobPreferencesQuery.data?.commute_max_minutes ?? null;
+    if (serverCommute !== null && commuteMaxMinutes === "") {
+      setCommuteMaxMinutes(String(serverCommute));
+    }
+    const serverCommuteNote: string | null =
+      jobPreferencesQuery.data?.commute_note ?? null;
+    if (serverCommuteNote !== null && commuteNote === "") {
+      setCommuteNote(serverCommuteNote);
+    }
   }, [
     jobPreferencesQuery.data?.text,
     jobPreferencesQuery.data?.location_pref,
     jobPreferencesQuery.data?.location_city,
+    jobPreferencesQuery.data?.commute_max_minutes,
+    jobPreferencesQuery.data?.commute_note,
     preferencesText,
     locationPref,
     locationCity,
+    commuteMaxMinutes,
+    commuteNote,
   ]);
 
   const preferencesDirty: boolean = useMemo(() => {
@@ -248,19 +264,31 @@ export function JobSetupCards({
     const serverLocPref: string | null =
       jobPreferencesQuery.data?.location_pref ?? null;
     const serverCity: string = jobPreferencesQuery.data?.location_city ?? "";
+    const serverCommute: string =
+      jobPreferencesQuery.data?.commute_max_minutes != null
+        ? String(jobPreferencesQuery.data.commute_max_minutes)
+        : "";
+    const serverCommuteNote: string =
+      jobPreferencesQuery.data?.commute_note ?? "";
     if (!serverText && !preferencesText.trim()) return false;
     return (
       preferencesText !== serverText ||
       locationPref !== serverLocPref ||
-      locationCity !== serverCity
+      locationCity !== serverCity ||
+      commuteMaxMinutes !== serverCommute ||
+      commuteNote !== serverCommuteNote
     );
   }, [
     preferencesText,
     locationPref,
     locationCity,
+    commuteMaxMinutes,
+    commuteNote,
     jobPreferencesQuery.data?.text,
     jobPreferencesQuery.data?.location_pref,
     jobPreferencesQuery.data?.location_city,
+    jobPreferencesQuery.data?.commute_max_minutes,
+    jobPreferencesQuery.data?.commute_note,
   ]);
 
   useEffect(() => {
@@ -484,6 +512,28 @@ export function JobSetupCards({
               />
             ) : null}
           </div>
+          {locationPref && locationPref !== "remote" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                className="w-20 rounded-md border bg-background px-2 py-1.5 text-sm"
+                placeholder="45"
+                value={commuteMaxMinutes}
+                onChange={(e) => setCommuteMaxMinutes(e.target.value)}
+              />
+              <span className="text-sm text-muted-foreground">
+                max commute (min)
+              </span>
+            </div>
+          ) : null}
+          <input
+            type="text"
+            className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            placeholder="e.g. Willing to commute to Santa Clara if only 1 day/week"
+            value={commuteNote}
+            onChange={(e) => setCommuteNote(e.target.value)}
+          />
           <Button
             variant={preferencesDirty ? "default" : "outline"}
             size="sm"
@@ -495,6 +545,10 @@ export function JobSetupCards({
                 text: preferencesText,
                 location_pref: locationPref,
                 location_city: locationCity || null,
+                commute_max_minutes: commuteMaxMinutes
+                  ? parseInt(commuteMaxMinutes, 10)
+                  : null,
+                commute_note: commuteNote.trim() || null,
               })
             }
           >

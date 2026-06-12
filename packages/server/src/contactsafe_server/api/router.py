@@ -8,6 +8,7 @@ Authentication uses the same JWT tokens as the MCP endpoint.  Admin users
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +40,8 @@ from contactsafe_core.contact_schemas import (
     ListPeopleRequest,
     ListPeopleResult,
     ListStrongTiesResult,
+    FlatJobListResult,
+    JobDetailResult,
     JobDiscoveryStatusResult,
     JobMonitorConfigResult,
     JobPreferencesResult,
@@ -94,6 +98,7 @@ from contactsafe_core.schemas import (
 from contactsafe_server import actions
 from contactsafe_server.db.models import User
 from contactsafe_server.deps import AppContext
+from contactsafe_server.events import JobEvent, job_event_bus
 from contactsafe_server.services.jwt_service import JWTService
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -780,6 +785,73 @@ async def api_get_job_discovery_status(
     return await actions.get_job_discovery_status(ctx, user_id)
 
 
+def _format_sse_event(event: JobEvent) -> str:
+    return f"data: {json.dumps(event)}\n\n"
+
+
+@router.get("/events/jobs")
+async def api_job_events(
+    request: Request,
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> StreamingResponse:
+    async def event_generator():
+        queue = job_event_bus.register(user_id)
+        try:
+            async with ctx.session_factory() as db:
+                from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+                from contactsafe_server.services.job_relevance_service import get_scoring_progress
+
+                discovery_service = JobDiscoveryService(db, ctx.settings)
+                status: JobDiscoveryStatusResult = await discovery_service.get_status(user_id)
+                if status.state == "running":
+                    yield _format_sse_event(
+                        {
+                            "type": "discovery_progress",
+                            "orgs_processed": status.orgs_processed,
+                            "orgs_total": status.orgs_total,
+                            "jobs_found": status.jobs_found,
+                            "new_jobs": status.new_jobs,
+                            "progress_message": status.progress_message,
+                        },
+                    )
+
+                scoring_progress: tuple[int, int] | None = get_scoring_progress(user_id)
+                if scoring_progress is not None:
+                    scored, total = scoring_progress
+                    yield _format_sse_event(
+                        {
+                            "type": "scoring_progress",
+                            "scored": scored,
+                            "total": total,
+                        },
+                    )
+
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event: JobEvent | None = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                if event is None:
+                    break
+                yield _format_sse_event(event)
+        finally:
+            job_event_bus.unregister(user_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 class _ListOrgJobsBody(BaseModel):
     relevant_only: bool = False
 
@@ -791,6 +863,27 @@ async def api_list_org_jobs(
     body: _ListOrgJobsBody = _ListOrgJobsBody(),
 ) -> ListOrgJobsResult:
     return await actions.list_org_jobs(ctx, user_id, relevant_only=body.relevant_only)
+
+
+@router.post("/list-flat-jobs", response_model=FlatJobListResult)
+async def api_list_flat_jobs(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> FlatJobListResult:
+    return await actions.list_flat_jobs(ctx, user_id)
+
+
+class _GetJobDetailBody(BaseModel):
+    job_id: UUID
+
+
+@router.post("/get-job-detail", response_model=JobDetailResult)
+async def api_get_job_detail(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: _GetJobDetailBody,
+) -> JobDetailResult:
+    return await actions.get_job_detail(ctx, user_id, job_id=body.job_id)
 
 
 @router.post("/get-job-preferences", response_model=JobPreferencesResult)
@@ -808,6 +901,8 @@ async def api_set_job_preferences(
         ctx, user_id, body.text,
         location_pref=body.location_pref,
         location_city=body.location_city,
+        commute_max_minutes=body.commute_max_minutes,
+        commute_note=body.commute_note,
     )
 
 

@@ -682,6 +682,8 @@ export interface OrgJobItem {
   external_job_id: string;
   source: string;
   title: string;
+  org_name: string | null;
+  org_id: string | null;
   location: string | null;
   department: string | null;
   url: string;
@@ -694,7 +696,16 @@ export interface OrgJobItem {
   last_seen_at: string;
   is_active: boolean;
   is_relevant: boolean | null;
+  match_score: number | null;
   relevance_reason: string | null;
+  role_score: number | null;
+  role_reason: string | null;
+  seniority_score: number | null;
+  seniority_reason: string | null;
+  location_score: number | null;
+  location_reason: string | null;
+  contact_count: number;
+  primary_contact_name: string | null;
 }
 
 export interface OrgJobsByCompany {
@@ -720,6 +731,22 @@ export interface ListOrgJobsResult {
   message: string;
 }
 
+export interface FlatJobListResult {
+  jobs: OrgJobItem[];
+  total_jobs: number;
+  total_relevant: number;
+  message: string;
+}
+
+export interface JobDetailResult {
+  job: OrgJobItem;
+  org_description: string | null;
+  org_primary_domain: string | null;
+  contacts: OrgPersonSummary[];
+  contact_count: number;
+  message: string;
+}
+
 export interface DedupPersonsResult {
   groups_merged: number;
   persons_removed: number;
@@ -730,12 +757,16 @@ export interface SetJobPreferencesRequest {
   text: string;
   location_pref: string | null;
   location_city: string | null;
+  commute_max_minutes: number | null;
+  commute_note: string | null;
 }
 
 export interface JobPreferencesResult {
   text: string | null;
   location_pref: string | null;
   location_city: string | null;
+  commute_max_minutes: number | null;
+  commute_note: string | null;
   classified_job_count: number;
   message: string;
 }
