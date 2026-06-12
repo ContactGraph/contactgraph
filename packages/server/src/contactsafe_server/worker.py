@@ -285,6 +285,7 @@ class WorkerSettings:
     on_shutdown = shutdown
     max_jobs: int = get_settings().arq_max_jobs
     job_timeout: int = get_settings().arq_job_timeout_seconds
+    health_check_interval: int = 60
     cron_jobs = [
         cron(
             global_job_scan,
