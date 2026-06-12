@@ -14,6 +14,7 @@ from contactsafe_server.services.file_upload_import_service import FileUploadImp
 from contactsafe_server.services.gmail_client import GmailClient
 from contactsafe_server.services.google_calendar_import_service import GoogleCalendarImportService
 from contactsafe_server.services.import_service import ImportService
+from contactsafe_server.graph_event_publishers import publish_source_sync_update
 from contactsafe_server.services.people_api_client import PeopleApiClient
 
 logger = logging.getLogger(__name__)
@@ -118,6 +119,7 @@ async def _mark_source_sync_failed(
     source.sync_state = SyncState.FAILED.value
     source.sync_error = error[:500]
     await db.commit()
+    publish_source_sync_update(source)
 
 
 async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:

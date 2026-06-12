@@ -12,6 +12,7 @@ import type {
 } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
 import { sourceForType } from "@/lib/setup-utils";
+import { useGraphEvents } from "@/lib/use-graph-events";
 
 export interface GraphImportState {
   sources: SourceSummary[];
@@ -67,6 +68,7 @@ function useUploadSourceMutation(
 }
 
 export function useGraphImport(): GraphImportState {
+  useGraphEvents();
   const queryClient = useQueryClient();
   const [phoneUploadError, setPhoneUploadError] = useState<string | null>(null);
   const [connectionsUploadError, setConnectionsUploadError] =
@@ -84,18 +86,6 @@ export function useGraphImport(): GraphImportState {
   const sourcesQuery = useQuery({
     queryKey: ["sources"],
     queryFn: () => proxyPost<ListSourcesResult>("list-sources"),
-    refetchInterval: (query) => {
-      const data: ListSourcesResult | undefined = query.state.data;
-      const syncing: boolean =
-        data?.sources.some((source) => source.sync_state === "syncing") ??
-        false;
-      const pending: boolean =
-        data?.sources.some((source) => source.sync_state === "pending") ??
-        false;
-      return syncing || pending || phoneProcessing || linkedinConnectionsProcessing
-        ? 4000
-        : false;
-    },
   });
 
   const phoneUploadMutation = useUploadSourceMutation(

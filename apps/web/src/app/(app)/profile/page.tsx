@@ -51,6 +51,7 @@ import type {
   UserProfileResult,
 } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
+import { useGraphEvents } from "@/lib/use-graph-events";
 import { isLinkedInProfileComplete, sourceForType } from "@/lib/setup-utils";
 import {
   createEmptySocialProfileEntry,
@@ -102,6 +103,7 @@ const EMPTY_FORM: ExperienceFormState = {
 };
 
 export default function ProfilePage() {
+  useGraphEvents();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState<boolean>(false);
@@ -129,7 +131,6 @@ export default function ProfilePage() {
   const sourcesQuery = useQuery({
     queryKey: ["sources"],
     queryFn: () => proxyPost<ListSourcesResult>("list-sources"),
-    refetchInterval: awaitingSync ? 2000 : false,
   });
 
   useEffect(() => {

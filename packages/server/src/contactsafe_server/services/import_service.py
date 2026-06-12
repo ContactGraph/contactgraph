@@ -20,6 +20,7 @@ from contactsafe_server.db.models import (
     UserRelationshipObservation,
 )
 from contactsafe_server.oauth.google import GoogleTokens
+from contactsafe_server.graph_event_publishers import publish_source_sync_update
 from contactsafe_server.services.claim_writer import record_employment, record_relationship
 from contactsafe_server.services.org_search import is_automation_or_generic_domain
 from contactsafe_server.services.crypto import TokenEncryptor
@@ -90,6 +91,7 @@ class ImportService:
         source.contacts_resolved = 0
         source.contacts_pending = 0
         await self._db.flush()
+        publish_source_sync_update(source)
 
         try:
             cred: OAuthCredential | None = await self._get_credential_for_source(source)
@@ -191,11 +193,13 @@ class ImportService:
             source.contacts_pending = 0
             source.connection_status = SourceConnectionStatus.CONNECTED.value
             await self._db.flush()
+            publish_source_sync_update(source)
         except Exception as exc:
             logger.exception("Sync failed for source %s", source_id)
             source.sync_state = SyncState.FAILED.value
             source.sync_error = str(exc)[:500]
             await self._db.flush()
+            publish_source_sync_update(source)
             raise
 
     async def run_import(self, user_id: uuid.UUID) -> None:
@@ -215,6 +219,7 @@ class ImportService:
     async def _commit_progress(self, source: Source) -> None:
         await self._db.commit()
         await self._db.refresh(source)
+        publish_source_sync_update(source)
 
     async def _phase1_google_contacts_seed(
         self,

@@ -224,6 +224,9 @@ async def cancel_sync(
         source.sync_state = SyncState.FAILED.value
         source.sync_error = "Import cancelled by user."
         await db.commit()
+        from contactsafe_server.graph_event_publishers import publish_source_sync_update
+
+        publish_source_sync_update(source)
         release_sync_lock(source.id, source.user_id)
         return CancelSyncResult(cancelled=True, message="Import cancelled.")
 
