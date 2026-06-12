@@ -305,6 +305,7 @@ class JobDiscoveryService:
                         external_job_id=job.external_job_id,
                         source=job.source,
                         title=job.title,
+                        org_primary_domain=org.primary_domain,
                         location=job.location,
                         department=job.department,
                         url=job.url,
@@ -353,8 +354,12 @@ class JobDiscoveryService:
         orgs_result = await self._db.execute(
             select(Org).where(Org.id.in_(org_ids)),
         )
+        orgs: list[Org] = list(orgs_result.scalars().all())
         org_name_map: dict[uuid.UUID, str] = {
-            org.id: org.canonical_name for org in orgs_result.scalars().all()
+            org.id: org.canonical_name for org in orgs
+        }
+        org_domain_map: dict[uuid.UUID, str | None] = {
+            org.id: org.primary_domain for org in orgs
         }
 
         jobs_query = select(OrgJob).where(OrgJob.org_id.in_(org_ids))
@@ -398,6 +403,7 @@ class JobDiscoveryService:
                     title=job.title,
                     org_name=org_name_map.get(job.org_id),
                     org_id=job.org_id,
+                    org_primary_domain=org_domain_map.get(job.org_id),
                     location=job.location,
                     department=job.department,
                     url=job.url,
@@ -494,6 +500,7 @@ class JobDiscoveryService:
             title=job.title,
             org_name=org.canonical_name if org else None,
             org_id=job.org_id,
+            org_primary_domain=org.primary_domain if org else None,
             location=job.location,
             department=job.department,
             url=job.url,

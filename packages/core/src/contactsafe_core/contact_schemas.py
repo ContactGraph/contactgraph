@@ -374,6 +374,7 @@ class OrgJobItem(BaseModel):
     title: str
     org_name: str | None = None
     org_id: UUID | None = None
+    org_primary_domain: str | None = None
     location: str | None = None
     department: str | None = None
     url: str

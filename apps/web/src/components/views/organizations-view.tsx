@@ -27,6 +27,7 @@ import {
   CompactTableShell,
 } from "@/components/data-table/compact-table";
 import { OrgDetailPanel } from "@/components/org-detail-panel";
+import { OrgLogo } from "@/components/org-logo";
 import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -403,7 +404,16 @@ export function OrganizationsView({
         header: ({ column }) => (
           <CompactSortHeader column={column} label="Organization" />
         ),
-        cell: ({ row }) => <CompactCell value={row.original.name} />,
+        cell: ({ row }) => (
+          <div className="flex items-center gap-1.5 truncate">
+            <OrgLogo
+              domain={row.original.primary_domain}
+              name={row.original.name}
+              size={16}
+            />
+            <CompactCell value={row.original.name} />
+          </div>
+        ),
         meta: { width: "w-[8rem]" },
       },
       {

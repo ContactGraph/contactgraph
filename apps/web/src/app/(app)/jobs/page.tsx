@@ -28,6 +28,7 @@ import {
   CompactTableShell,
 } from "@/components/data-table/compact-table";
 import { JobDetailPanel } from "@/components/job-detail-panel";
+import { OrgLogo } from "@/components/org-logo";
 import { JobSetupCards } from "@/components/setup/job-setup-cards";
 import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import {
@@ -268,10 +269,15 @@ function JobsTable() {
           return (
             <Link
               href={`/graph?tab=organizations&search=${encodeURIComponent(orgName)}`}
-              className="block truncate text-xs text-primary hover:underline"
+              className="flex items-center gap-1.5 truncate text-xs text-primary hover:underline"
               onClick={(e) => e.stopPropagation()}
             >
-              {orgName}
+              <OrgLogo
+                domain={row.original.org_primary_domain}
+                name={orgName}
+                size={16}
+              />
+              <span className="truncate">{orgName}</span>
             </Link>
           );
         },
