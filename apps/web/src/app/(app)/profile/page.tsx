@@ -1,7 +1,16 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Briefcase, Loader2, LogOut, Pencil, Plus, Trash2, X } from "lucide-react";
+import {
+  Briefcase,
+  Loader2,
+  LogOut,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -23,6 +32,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LinkedInProfileUploadDialog } from "@/components/setup/linkedin-profile-upload-dialog";
 import { FileDropZone } from "@/components/ui/file-drop-zone";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,6 +51,7 @@ import type {
   UserProfileResult,
 } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
+import { isLinkedInProfileComplete, sourceForType } from "@/lib/setup-utils";
 import {
   createEmptySocialProfileEntry,
   socialProfilesFromRecord,
@@ -100,6 +111,7 @@ export default function ProfilePage() {
   const [awaitingSync, setAwaitingSync] = useState<boolean>(false);
   const [deleteAccountDialogOpen, setDeleteAccountDialogOpen] =
     useState<boolean>(false);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState<boolean>(false);
 
   const [profileName, setProfileName] = useState<string>("");
   const [profileLocation, setProfileLocation] = useState<string>("");
@@ -281,6 +293,12 @@ export default function ProfilePage() {
     [uploadMutation],
   );
 
+  const sources = sourcesQuery.data?.sources ?? [];
+  const linkedinProfileSource = sourceForType(sources, "linkedin_profile_upload");
+  const linkedinProfileComplete: boolean = isLinkedInProfileComplete(sources);
+  const linkedinProfileBusy: boolean =
+    uploadMutation.isPending || awaitingSync;
+
   const openEditDialog = useCallback((exp: UserExperience): void => {
     setForm({
       id: exp.id,
@@ -316,28 +334,50 @@ export default function ProfilePage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Your Profile</h1>
-        <p className="text-muted-foreground">
-          Your professional background helps identify the right version of your
-          contacts during enrichment.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold tracking-tight">Your Profile</h1>
+          <p className="text-muted-foreground">
+            Your professional background helps identify the right version of your
+            contacts during enrichment.
+          </p>
+        </div>
+        {linkedinProfileComplete ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            disabled={linkedinProfileBusy}
+            onClick={() => setUploadDialogOpen(true)}
+          >
+            {linkedinProfileBusy ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Upload className="size-4" />
+            )}
+            Re-upload
+          </Button>
+        ) : null}
       </div>
 
-      <FileDropZone
-        accept=".pdf,application/pdf"
-        onFileSelect={(file: File) => void handlePdfUpload(file)}
-        disabled={uploadMutation.isPending || awaitingSync}
-        busy={uploadMutation.isPending || awaitingSync}
-        busyMessage={awaitingSync ? "Processing PDF…" : "Uploading…"}
-        idleMessage="Drag and drop your LinkedIn PDF here"
-        idleHint="or click to choose a file"
-      />
+      {!linkedinProfileComplete ? (
+        <>
+          <FileDropZone
+            accept=".pdf,application/pdf"
+            onFileSelect={(file: File) => void handlePdfUpload(file)}
+            disabled={linkedinProfileBusy}
+            busy={linkedinProfileBusy}
+            busyMessage={awaitingSync ? "Processing PDF…" : "Uploading…"}
+            idleMessage="Drag and drop your LinkedIn PDF here"
+            idleHint="or click to choose a file"
+          />
 
-      {uploadError ? (
-        <Alert variant="destructive">
-          <AlertDescription>{uploadError}</AlertDescription>
-        </Alert>
+          {uploadError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{uploadError}</AlertDescription>
+            </Alert>
+          ) : null}
+        </>
       ) : null}
 
       {/* Basic info */}
@@ -703,6 +743,18 @@ export default function ProfilePage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <LinkedInProfileUploadDialog
+        open={uploadDialogOpen}
+        onOpenChange={setUploadDialogOpen}
+        onFileSelect={(file: File) => {
+          void handlePdfUpload(file);
+        }}
+        isPending={uploadMutation.isPending}
+        isProcessing={awaitingSync}
+        error={uploadError}
+        isComplete={linkedinProfileSource?.sync_state === "complete"}
+      />
 
       <Dialog open={deleteAccountDialogOpen} onOpenChange={setDeleteAccountDialogOpen}>
         <DialogContent className="flex flex-col gap-4">
