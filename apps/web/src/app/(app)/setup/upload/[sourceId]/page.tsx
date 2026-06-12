@@ -16,6 +16,7 @@ import {
 import { FileDropZone } from "@/components/ui/file-drop-zone";
 import type { ListSourcesResult, SyncSourceResult } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
+import { useGraphEvents } from "@/lib/use-graph-events";
 
 interface UploadPageProps {
   params: Promise<{ sourceId: string }>;
@@ -24,6 +25,7 @@ interface UploadPageProps {
 export default function PhoneContactsUploadPage({
   params,
 }: UploadPageProps): React.JSX.Element {
+  useGraphEvents();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [sourceId, setSourceId] = useState<string>("");
@@ -40,15 +42,6 @@ export default function PhoneContactsUploadPage({
     queryKey: ["sources"],
     queryFn: () => proxyPost<ListSourcesResult>("list-sources"),
     enabled: sourceId.length > 0,
-    refetchInterval: (query) => {
-      const data: ListSourcesResult | undefined = query.state.data;
-      const syncing: boolean =
-        data?.sources.some(
-          (source) =>
-            source.source_id === sourceId && source.sync_state === "syncing",
-        ) ?? false;
-      return syncing ? 4000 : false;
-    },
   });
 
   const source = sourcesQuery.data?.sources.find(
@@ -93,7 +86,7 @@ export default function PhoneContactsUploadPage({
   useEffect(() => {
     if (source?.sync_state === "complete") {
       const timer: ReturnType<typeof setTimeout> = setTimeout(() => {
-        router.push("/setup");
+        router.push("/graph");
       }, 2500);
       return () => {
         clearTimeout(timer);
@@ -192,7 +185,7 @@ export default function PhoneContactsUploadPage({
             idleMessage="Drag and drop your contacts file here"
             idleHint="or click to choose a file"
           />
-          <Button variant="outline" onClick={() => router.push("/setup")}>
+          <Button variant="outline" onClick={() => router.push("/graph")}>
             Back to setup
           </Button>
         </CardContent>

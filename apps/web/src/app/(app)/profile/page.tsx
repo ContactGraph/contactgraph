@@ -1,7 +1,16 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Briefcase, Loader2, LogOut, Pencil, Plus, Trash2, X } from "lucide-react";
+import {
+  Briefcase,
+  Loader2,
+  LogOut,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -18,10 +27,12 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LinkedInProfileUploadDialog } from "@/components/setup/linkedin-profile-upload-dialog";
 import { FileDropZone } from "@/components/ui/file-drop-zone";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -29,6 +40,7 @@ import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import type {
+  DeleteUserAccountResult,
   DeleteUserExperienceRequest,
   ListSourcesResult,
   SaveUserExperienceRequest,
@@ -39,6 +51,8 @@ import type {
   UserProfileResult,
 } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
+import { useGraphEvents } from "@/lib/use-graph-events";
+import { isLinkedInProfileComplete, sourceForType } from "@/lib/setup-utils";
 import {
   createEmptySocialProfileEntry,
   socialProfilesFromRecord,
@@ -89,6 +103,7 @@ const EMPTY_FORM: ExperienceFormState = {
 };
 
 export default function ProfilePage() {
+  useGraphEvents();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState<boolean>(false);
@@ -96,6 +111,9 @@ export default function ProfilePage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [profileSaved, setProfileSaved] = useState<boolean>(false);
   const [awaitingSync, setAwaitingSync] = useState<boolean>(false);
+  const [deleteAccountDialogOpen, setDeleteAccountDialogOpen] =
+    useState<boolean>(false);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState<boolean>(false);
 
   const [profileName, setProfileName] = useState<string>("");
   const [profileLocation, setProfileLocation] = useState<string>("");
@@ -113,7 +131,6 @@ export default function ProfilePage() {
   const sourcesQuery = useQuery({
     queryKey: ["sources"],
     queryFn: () => proxyPost<ListSourcesResult>("list-sources"),
-    refetchInterval: awaitingSync ? 2000 : false,
   });
 
   useEffect(() => {
@@ -225,6 +242,24 @@ export default function ProfilePage() {
     },
   });
 
+  const deleteAccountMutation = useMutation({
+    mutationFn: () => proxyPost<DeleteUserAccountResult>("delete-user-account"),
+    onSuccess: async (result: DeleteUserAccountResult) => {
+      if (!result.deleted) {
+        return;
+      }
+      await fetch("/api/auth/logout", { method: "POST" });
+      router.push("/");
+      router.refresh();
+    },
+  });
+
+  const handleSignOut = useCallback(async (): Promise<void> => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/");
+    router.refresh();
+  }, [router]);
+
   const uploadMutation = useMutation({
     mutationFn: (payload: {
       source_type: SourceType;
@@ -258,6 +293,12 @@ export default function ProfilePage() {
     },
     [uploadMutation],
   );
+
+  const sources = sourcesQuery.data?.sources ?? [];
+  const linkedinProfileSource = sourceForType(sources, "linkedin_profile_upload");
+  const linkedinProfileComplete: boolean = isLinkedInProfileComplete(sources);
+  const linkedinProfileBusy: boolean =
+    uploadMutation.isPending || awaitingSync;
 
   const openEditDialog = useCallback((exp: UserExperience): void => {
     setForm({
@@ -294,28 +335,50 @@ export default function ProfilePage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Your Profile</h1>
-        <p className="text-muted-foreground">
-          Your professional background helps identify the right version of your
-          contacts during enrichment.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold tracking-tight">Your Profile</h1>
+          <p className="text-muted-foreground">
+            Your professional background helps identify the right version of your
+            contacts during enrichment.
+          </p>
+        </div>
+        {linkedinProfileComplete ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            disabled={linkedinProfileBusy}
+            onClick={() => setUploadDialogOpen(true)}
+          >
+            {linkedinProfileBusy ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Upload className="size-4" />
+            )}
+            Re-upload
+          </Button>
+        ) : null}
       </div>
 
-      <FileDropZone
-        accept=".pdf,application/pdf"
-        onFileSelect={(file: File) => void handlePdfUpload(file)}
-        disabled={uploadMutation.isPending || awaitingSync}
-        busy={uploadMutation.isPending || awaitingSync}
-        busyMessage={awaitingSync ? "Processing PDF…" : "Uploading…"}
-        idleMessage="Drag and drop your LinkedIn PDF here"
-        idleHint="or click to choose a file"
-      />
+      {!linkedinProfileComplete ? (
+        <>
+          <FileDropZone
+            accept=".pdf,application/pdf"
+            onFileSelect={(file: File) => void handlePdfUpload(file)}
+            disabled={linkedinProfileBusy}
+            busy={linkedinProfileBusy}
+            busyMessage={awaitingSync ? "Processing PDF…" : "Uploading…"}
+            idleMessage="Drag and drop your LinkedIn PDF here"
+            idleHint="or click to choose a file"
+          />
 
-      {uploadError ? (
-        <Alert variant="destructive">
-          <AlertDescription>{uploadError}</AlertDescription>
-        </Alert>
+          {uploadError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{uploadError}</AlertDescription>
+            </Alert>
+          ) : null}
+        </>
       ) : null}
 
       {/* Basic info */}
@@ -561,22 +624,34 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
 
-      {/* Sign out */}
-      <div className="flex justify-end">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground"
-          onClick={async () => {
-            await fetch("/api/auth/logout", { method: "POST" });
-            router.push("/");
-            router.refresh();
-          }}
-        >
-          <LogOut className="size-4" />
-          Sign out
-        </Button>
-      </div>
+      {/* Account */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Account</CardTitle>
+          <CardDescription>
+            Sign out or permanently delete your account and all imported data.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-3">
+          <Button variant="outline" size="sm" onClick={() => void handleSignOut()}>
+            <LogOut className="size-4" />
+            Sign out
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setDeleteAccountDialogOpen(true)}
+            disabled={deleteAccountMutation.isPending}
+          >
+            {deleteAccountMutation.isPending ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Trash2 className="size-4" />
+            )}
+            Delete my account
+          </Button>
+        </CardContent>
+      </Card>
 
       {/* Experience dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -665,6 +740,54 @@ export default function ProfilePage() {
                 <Loader2 className="size-4 animate-spin" />
               ) : null}
               Save
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <LinkedInProfileUploadDialog
+        open={uploadDialogOpen}
+        onOpenChange={setUploadDialogOpen}
+        onFileSelect={(file: File) => {
+          void handlePdfUpload(file);
+        }}
+        isPending={uploadMutation.isPending}
+        isProcessing={awaitingSync}
+        error={uploadError}
+        isComplete={linkedinProfileSource?.sync_state === "complete"}
+      />
+
+      <Dialog open={deleteAccountDialogOpen} onOpenChange={setDeleteAccountDialogOpen}>
+        <DialogContent className="flex flex-col gap-4">
+          <DialogHeader>
+            <DialogTitle>Delete your account?</DialogTitle>
+            <DialogDescription>
+              This permanently deletes your account, imports, lists, job preferences,
+              and network observations. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          {deleteAccountMutation.error ? (
+            <Alert variant="destructive">
+              <AlertDescription>{deleteAccountMutation.error.message}</AlertDescription>
+            </Alert>
+          ) : null}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteAccountDialogOpen(false)}
+              disabled={deleteAccountMutation.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteAccountMutation.isPending}
+              onClick={() => deleteAccountMutation.mutate()}
+            >
+              {deleteAccountMutation.isPending ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : null}
+              Delete my account
             </Button>
           </DialogFooter>
         </DialogContent>

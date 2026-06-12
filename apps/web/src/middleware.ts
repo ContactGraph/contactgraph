@@ -1,3 +1,7 @@
+import {
+  cookieStoreFromRequest,
+  cookieStoreFromResponse,
+} from "@/lib/session-cookie-store";
 import { getIronSession } from "iron-session";
 import { type NextRequest, NextResponse } from "next/server";
 
@@ -38,7 +42,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   }
 
   const readSession = await getIronSession<SessionData>(
-    request.cookies,
+    cookieStoreFromRequest(request) as never,
     getSessionOptions(),
   );
 
@@ -52,7 +56,7 @@ export async function middleware(request: NextRequest): Promise<NextResponse> {
   );
 
   const writeSession = await getIronSession<SessionData>(
-    response.cookies,
+    cookieStoreFromResponse(response) as never,
     getSessionOptions(),
   );
 

@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     database_ssl: bool | None = Field(default=None)
     # macOS uv Python often lacks system CA certs; set false for local Supabase dev if needed
     database_ssl_verify: bool = Field(default=True)
+    database_pool_size: int = Field(
+        default=3,
+        description="SQLAlchemy pool size per process (keep low for Supabase session pooler)",
+    )
+    database_max_overflow: int = Field(
+        default=2,
+        description="Extra connections beyond pool_size under burst load",
+    )
 
     token_encryption_key: str = Field(
         description="Fernet key for encrypting OAuth tokens at rest"
@@ -241,13 +249,47 @@ class Settings(BaseSettings):
         description="Email addresses that automatically receive contactsafe:admin scope on login",
     )
     theirstack_base_url: str = Field(default="https://api.theirstack.com")
-    theirstack_request_timeout_seconds: float = Field(default=30.0)
+    theirstack_request_timeout_seconds: float = Field(default=90.0)
     theirstack_job_max_age_days: int = Field(
         default=30,
         description="Max age of job postings returned by TheirStack searches",
     )
 
     job_discovery_request_timeout_seconds: float = Field(default=30.0)
+    job_scrape_cooldown_hours: int = Field(
+        default=24,
+        description="Skip re-scraping an org if it was successfully checked within this window",
+    )
+    job_scan_poll_interval_minutes: int = Field(
+        default=5,
+        description="How often the global job scanner checks for orgs needing a scrape",
+    )
+
+    org_enrichment_cooldown_days: int = Field(
+        default=30,
+        description="Skip re-enriching an org if it was successfully enriched within this window",
+    )
+    org_enrichment_scan_poll_interval_minutes: int = Field(
+        default=10,
+        description="How often the global org enrichment scanner checks for orgs needing enrichment",
+    )
+
+    redis_url: str = Field(
+        default="redis://localhost:6379",
+        description="Redis URL for arq task queue and cross-process event pub/sub",
+    )
+    use_arq_worker: bool = Field(
+        default=False,
+        description="When true, background work is enqueued to arq instead of in-process asyncio tasks",
+    )
+    arq_max_jobs: int = Field(
+        default=3,
+        description="Max concurrent jobs per arq worker process",
+    )
+    arq_job_timeout_seconds: int = Field(
+        default=600,
+        description="Default arq job timeout in seconds",
+    )
 
     @field_validator("database_url", mode="before")
     @classmethod

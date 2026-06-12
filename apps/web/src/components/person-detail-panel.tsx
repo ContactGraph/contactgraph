@@ -191,10 +191,25 @@ export const PersonDetailPanel = forwardRef<
   return (
     <div className="flex-1 space-y-6 overflow-y-auto px-6 py-4">
       <div className="space-y-2">
-        <div className="flex flex-wrap gap-2">
-          {person.is_human ? <Badge variant="success">Human</Badge> : null}
-          {person.is_broadcast ? <Badge variant="warning">Broadcast</Badge> : null}
-          {person.is_automated ? <Badge variant="secondary">Automated</Badge> : null}
+        <div className="flex items-center gap-3">
+          {person.is_claimed && person.avatar_url ? (
+            <img
+              src={person.avatar_url}
+              alt=""
+              className="size-10 shrink-0 rounded-full object-cover"
+              referrerPolicy="no-referrer"
+            />
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {person.is_claimed ? (
+              <Badge variant="secondary" className="px-1.5 py-0 text-[10px] font-medium uppercase tracking-wide">
+                Active
+              </Badge>
+            ) : null}
+            {person.is_human ? <Badge variant="success">Human</Badge> : null}
+            {person.is_broadcast ? <Badge variant="warning">Broadcast</Badge> : null}
+            {person.is_automated ? <Badge variant="secondary">Automated</Badge> : null}
+          </div>
         </div>
         <p className="text-sm text-muted-foreground">{person.message}</p>
       </div>
@@ -233,6 +248,26 @@ export const PersonDetailPanel = forwardRef<
               setForm((current) => ({ ...current, primary_email: event.target.value }))
             }
           />
+          {person.emails.filter(
+            (email: string) =>
+              email.toLowerCase() !== form.primary_email.trim().toLowerCase(),
+          ).length > 0 ? (
+            <div className="space-y-1">
+              <p className="text-xs text-muted-foreground">
+                Other emails from imports (read-only)
+              </p>
+              <ul className="space-y-0.5 text-sm text-muted-foreground">
+                {person.emails
+                  .filter(
+                    (email: string) =>
+                      email.toLowerCase() !== form.primary_email.trim().toLowerCase(),
+                  )
+                  .map((email: string) => (
+                    <li key={email}>{email}</li>
+                  ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="person-phone">Phone</Label>
@@ -249,7 +284,7 @@ export const PersonDetailPanel = forwardRef<
             <Label htmlFor="person-org">Organization</Label>
             {person.org_id ? (
               <Link
-                href={`/organizations?org=${encodeURIComponent(person.org_id)}`}
+                href={`/graph?tab=organizations&org=${encodeURIComponent(person.org_id)}`}
                 className="text-xs text-primary hover:underline"
               >
                 View org →
@@ -406,17 +441,6 @@ export const PersonDetailPanel = forwardRef<
           value={person.email_count.toString()}
         />
       </dl>
-
-      {person.emails.length > 0 ? (
-        <section className="space-y-2">
-          <h3 className="text-sm font-medium">Emails</h3>
-          <ul className="space-y-1 text-sm">
-            {person.emails.map((email: string) => (
-              <li key={email}>{email}</li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
 
       {person.sources.length > 0 ? (
         <section className="space-y-2">

@@ -41,19 +41,35 @@ def create_app() -> FastAPI:
         from contactsafe_server.services.job_discovery_scheduler import (
             schedule_initial_job_discovery_delay,
         )
+        from contactsafe_server.services.org_enrichment_scheduler import (
+            schedule_initial_org_enrichment_delay,
+        )
 
-        periodic_task = asyncio.create_task(
+        job_discovery_task = asyncio.create_task(
             schedule_initial_job_discovery_delay(),
             name="job-discovery-startup",
         )
+        org_enrichment_task = asyncio.create_task(
+            schedule_initial_org_enrichment_delay(),
+            name="org-enrichment-startup",
+        )
         async with mcp_server.session_manager.run():
             yield
-        periodic_task.cancel()
-        try:
-            await periodic_task
-        except asyncio.CancelledError:
-            pass
+        job_discovery_task.cancel()
+        org_enrichment_task.cancel()
+        for periodic_task in (job_discovery_task, org_enrichment_task):
+            try:
+                await periodic_task
+            except asyncio.CancelledError:
+                pass
         await shutdown_db()
+        from contactsafe_server.config import get_settings
+        from contactsafe_server.queue import close_arq_pool
+        from contactsafe_server.redis_state import close_redis_client
+
+        if get_settings().use_arq_worker:
+            await close_arq_pool()
+            await close_redis_client()
 
     app: FastAPI = FastAPI(
         title="ContactGraph",
@@ -85,6 +101,9 @@ def create_app() -> FastAPI:
     app.include_router(oauth_router)
     app.include_router(well_known_router)
     app.include_router(api_router, prefix="/api")
+    from contactsafe_server.api.admin_router import router as admin_router
+
+    app.include_router(admin_router, prefix="/api")
     app.mount(settings.mcp_path, mcp_http_app)
 
     @app.get("/health")  # pyright: ignore[reportUnusedFunction]

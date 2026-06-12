@@ -8,11 +8,11 @@ import re
 import threading
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 from urllib.parse import urlparse
 
-from sqlalchemy import exists, or_, select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import (
@@ -24,9 +24,15 @@ from contactsafe_server.config import Settings
 from contactsafe_server.db.models import (
     Org,
     OrgEnrichmentRun,
+    OrgEnrichmentScrapeRun,
     Person,
     PersonAlias,
     UserPersonObservation,
+)
+from contactsafe_server.graph_event_publishers import (
+    publish_org_enrichment_complete,
+    publish_org_enrichment_failed,
+    publish_org_enrichment_progress,
 )
 from contactsafe_server.services.contacts_service import PHONE_RELATIONSHIP
 from contactsafe_server.services.exa_client import ExaClient
@@ -77,6 +83,36 @@ _scheduling_lock: threading.Lock = threading.Lock()
 _active_org_enrichment_user_ids: set[uuid.UUID] = set()
 
 
+class EnrichOrgResult:
+    __slots__ = ("fields_updated", "source", "error", "enriched")
+
+    def __init__(
+        self,
+        *,
+        fields_updated: int,
+        source: str,
+        error: str | None,
+        enriched: bool,
+    ) -> None:
+        self.fields_updated: int = fields_updated
+        self.source: str = source
+        self.error: str | None = error
+        self.enriched: bool = enriched
+
+
+@dataclass(frozen=True, slots=True)
+class _OrgEnrichmentSnapshot:
+    primary_domain: str | None
+    description: str | None
+    careers_url: str | None
+    linkedin_url: str | None
+    categories: tuple[str, ...]
+    employee_count: int | None
+    company_size_band: str | None
+    ats_provider: str | None
+    ats_board_token: str | None
+
+
 class OrgEnrichmentService:
     def __init__(self, db: AsyncSession, settings: Settings) -> None:
         self._db: AsyncSession = db
@@ -98,23 +134,30 @@ class OrgEnrichmentService:
                 message="Company enrichment is already running.",
             )
 
-        org_ids: list[uuid.UUID] = await self._list_user_org_ids(user_id)
-        if not org_ids:
+        unenriched_org_ids: list[uuid.UUID] = await self._list_unenriched_user_org_ids(
+            user_id
+        )
+        total_orgs: int = await self._count_user_orgs(user_id)
+        if total_orgs == 0:
             return EnrichOrgsResult(
                 scheduled=False,
                 state="complete",
                 message="No organizations to enrich yet.",
             )
+        if not unenriched_org_ids:
+            return EnrichOrgsResult(
+                scheduled=False,
+                state="complete",
+                message="All organizations are already enriched.",
+            )
 
-        enriched_count: int = await self._count_enriched_orgs(user_id)
-        total: int = len(org_ids)
         run = OrgEnrichmentRun(
             user_id=user_id,
             state="running",
             started_at=datetime.now(tz=UTC),
-            orgs_total=total,
-            orgs_enriched=enriched_count,
-            progress_message=self._progress_message(enriched_count, total),
+            orgs_total=len(unenriched_org_ids),
+            orgs_enriched=0,
+            progress_message=self._progress_message(0, len(unenriched_org_ids)),
         )
         self._db.add(run)
         await self._db.flush()
@@ -131,10 +174,42 @@ class OrgEnrichmentService:
             )
 
         await self._db.commit()
+        publish_org_enrichment_progress(
+            user_id,
+            orgs_enriched=0,
+            orgs_total=len(unenriched_org_ids),
+            progress_message=run.progress_message,
+        )
         return EnrichOrgsResult(
             scheduled=True,
             state="running",
             message="Company enrichment started in the background.",
+        )
+
+    _STALE_RUN_THRESHOLD: timedelta = timedelta(minutes=5)
+
+    async def _recover_stale_run(self, run: OrgEnrichmentRun) -> None:
+        """Mark a run as failed if the background task appears to have crashed."""
+        if run.state != "running":
+            return
+        stale_cutoff: datetime = datetime.now(tz=UTC) - self._STALE_RUN_THRESHOLD
+        if run.updated_at > stale_cutoff:
+            return
+        logger.warning(
+            "Recovering stale enrichment run %s (last updated %s)",
+            run.id,
+            run.updated_at.isoformat(),
+        )
+        run.state = "failed"
+        run.error = "Enrichment task stopped unexpectedly. You can retry."
+        run.completed_at = datetime.now(tz=UTC)
+        run.progress_message = None
+        await self._db.commit()
+        publish_org_enrichment_failed(
+            run.user_id,
+            orgs_enriched=run.orgs_enriched,
+            orgs_total=run.orgs_total,
+            error=run.error,
         )
 
     async def get_status(self, user_id: uuid.UUID) -> OrgEnrichmentStatusResult:
@@ -143,6 +218,8 @@ class OrgEnrichmentService:
         orgs_enriched: int = await self._count_enriched_orgs(user_id)
 
         if run is not None:
+            if run.state == "running":
+                await self._recover_stale_run(run)
             state: OrgEnrichmentState = run.state  # type: ignore[assignment]
             return OrgEnrichmentStatusResult(
                 state=state,
@@ -188,6 +265,12 @@ class OrgEnrichmentService:
         run.completed_at = datetime.now(tz=UTC)
         run.progress_message = None
         await self._db.commit()
+        publish_org_enrichment_failed(
+            user_id,
+            orgs_enriched=run.orgs_enriched,
+            orgs_total=run.orgs_total,
+            error=run.error,
+        )
         return CancelOrgEnrichmentResult(
             cancelled=True,
             message="Enrichment cancelled.",
@@ -199,19 +282,28 @@ class OrgEnrichmentService:
             logger.warning("Org enrichment run %s not found", run_id)
             return
 
-        orgs: list[Org] = await self._load_orgs_for_user(user_id)
-        run.orgs_total = len(orgs)
+        org_ids: list[uuid.UUID] = await self._list_unenriched_user_org_ids(user_id)
+        run.orgs_total = len(org_ids)
         run.orgs_enriched = 0
         run.progress_message = self._progress_message(0, run.orgs_total)
         await self._db.commit()
+        publish_org_enrichment_progress(
+            user_id,
+            orgs_enriched=0,
+            orgs_total=run.orgs_total,
+            progress_message=run.progress_message,
+        )
 
-        for index, org in enumerate(orgs, start=1):
+        for index, org_id in enumerate(org_ids, start=1):
             run = await self._db.get(OrgEnrichmentRun, run_id)
             if run is None or run.state != "running":
                 return
 
+            org: Org | None = await self._db.get(Org, org_id)
+            org_name: str = org.canonical_name if org is not None else str(org_id)
+
             try:
-                await self._enrich_one_org(org)
+                enrich_result: EnrichOrgResult = await self.enrich_org_global(org_id)
                 run = await self._db.get(OrgEnrichmentRun, run_id)
                 if run is None or run.state != "running":
                     return
@@ -221,14 +313,21 @@ class OrgEnrichmentService:
                     run.orgs_total,
                 )
                 await self._db.commit()
+                publish_org_enrichment_progress(
+                    user_id,
+                    orgs_enriched=run.orgs_enriched,
+                    orgs_total=run.orgs_total,
+                    progress_message=run.progress_message,
+                )
                 logger.info(
-                    "Org enrichment progress: %d/%d (%s)",
+                    "Org enrichment progress: %d/%d (%s, enriched=%s)",
                     run.orgs_enriched,
                     run.orgs_total,
-                    org.canonical_name,
+                    org_name,
+                    enrich_result.enriched,
                 )
             except Exception:
-                logger.exception("Failed to enrich org %s (%s)", org.id, org.canonical_name)
+                logger.exception("Failed to enrich org %s (%s)", org_id, org_name)
                 await self._db.rollback()
                 run = await self._db.get(OrgEnrichmentRun, run_id)
                 if run is None or run.state != "running":
@@ -242,8 +341,138 @@ class OrgEnrichmentService:
         run.completed_at = datetime.now(tz=UTC)
         run.progress_message = None
         await self._db.commit()
+        publish_org_enrichment_complete(
+            user_id,
+            orgs_enriched=run.orgs_enriched,
+            orgs_total=run.orgs_total,
+        )
 
-    async def _enrich_one_org(self, org: Org) -> None:
+    async def collect_all_enrichable_org_ids(self) -> list[uuid.UUID]:
+        result = await self._db.execute(
+            select(Org.id)
+            .join(Person, Person.current_org_id == Org.id)
+            .group_by(Org.id)
+            .order_by(Org.canonical_name.asc()),
+        )
+        return [row[0] for row in result.all()]
+
+    async def collect_orgs_needing_enrichment(self) -> list[uuid.UUID]:
+        """Orgs linked to a person that are outside the enrichment cooldown window."""
+        cutoff: datetime = datetime.now(tz=UTC) - timedelta(
+            days=self._settings.org_enrichment_cooldown_days,
+        )
+        recently_enriched = (
+            select(OrgEnrichmentScrapeRun.org_id)
+            .where(
+                OrgEnrichmentScrapeRun.completed_at >= cutoff,
+                OrgEnrichmentScrapeRun.error.is_(None),
+            )
+            .distinct()
+        )
+        result = await self._db.execute(
+            select(Org.id)
+            .join(Person, Person.current_org_id == Org.id)
+            .where(Org.id.not_in(recently_enriched))
+            .group_by(Org.id)
+            .order_by(Org.canonical_name.asc()),
+        )
+        return [row[0] for row in result.all()]
+
+    async def was_recently_enriched(self, org_id: uuid.UUID) -> bool:
+        cutoff: datetime = datetime.now(tz=UTC) - timedelta(
+            days=self._settings.org_enrichment_cooldown_days,
+        )
+        result = await self._db.execute(
+            select(OrgEnrichmentScrapeRun.id)
+            .where(
+                OrgEnrichmentScrapeRun.org_id == org_id,
+                OrgEnrichmentScrapeRun.completed_at >= cutoff,
+                OrgEnrichmentScrapeRun.error.is_(None),
+            )
+            .limit(1),
+        )
+        if result.scalar_one_or_none() is not None:
+            return True
+
+        org: Org | None = await self._db.get(Org, org_id)
+        if org is None:
+            return False
+        enriched_at_raw: object | None = (org.attributes or {}).get("exa_enriched_at")
+        if not isinstance(enriched_at_raw, str):
+            return False
+        try:
+            enriched_at: datetime = datetime.fromisoformat(enriched_at_raw)
+        except ValueError:
+            return False
+        if enriched_at.tzinfo is None:
+            enriched_at = enriched_at.replace(tzinfo=UTC)
+        return enriched_at >= cutoff
+
+    async def enrich_org_global(
+        self,
+        org_id: uuid.UUID,
+        *,
+        force: bool = False,
+    ) -> EnrichOrgResult:
+        """Enrich one org and record an OrgEnrichmentScrapeRun."""
+        if not self._settings.exa_api_key:
+            return EnrichOrgResult(
+                fields_updated=0,
+                source="none",
+                error="Exa API key is not configured.",
+                enriched=False,
+            )
+
+        if not force and await self.was_recently_enriched(org_id):
+            return EnrichOrgResult(
+                fields_updated=0,
+                source="none",
+                error=None,
+                enriched=False,
+            )
+
+        org: Org | None = await self._db.get(Org, org_id)
+        if org is None:
+            return EnrichOrgResult(
+                fields_updated=0,
+                source="none",
+                error=None,
+                enriched=False,
+            )
+
+        started_at: datetime = datetime.now(tz=UTC)
+        source: str = "exa"
+        error: str | None = None
+        fields_updated: int = 0
+
+        try:
+            fields_updated = await self._enrich_one_org(org)
+        except Exception as exc:
+            error = str(exc)[:500]
+            logger.exception("Org enrichment failed for org %s", org_id)
+
+        actually_enriched: bool = error is None
+        if actually_enriched or error is not None:
+            scrape_run = OrgEnrichmentScrapeRun(
+                org_id=org.id,
+                source=source,
+                started_at=started_at,
+                completed_at=datetime.now(tz=UTC),
+                fields_updated=fields_updated,
+                error=error,
+            )
+            self._db.add(scrape_run)
+
+        await self._db.commit()
+        return EnrichOrgResult(
+            fields_updated=fields_updated,
+            source=source,
+            error=error,
+            enriched=actually_enriched,
+        )
+
+    async def _enrich_one_org(self, org: Org) -> int:
+        before: _OrgEnrichmentSnapshot = _org_enrichment_snapshot(org)
         summary_query: str = build_company_summary_query(org.canonical_name)
         company_hits, careers_hits = await asyncio.gather(
             self._exa.search_company_enrichment(
@@ -283,15 +512,16 @@ class OrgEnrichmentService:
         attributes: dict[str, object] = dict(org.attributes or {})
         attributes["exa_enriched_at"] = datetime.now(tz=UTC).isoformat()
         org.attributes = attributes
+        after: _OrgEnrichmentSnapshot = _org_enrichment_snapshot(org)
+        return _count_snapshot_changes(before, after)
 
-    async def _load_orgs_for_user(self, user_id: uuid.UUID) -> list[Org]:
+    async def _list_unenriched_user_org_ids(self, user_id: uuid.UUID) -> list[uuid.UUID]:
         org_ids: list[uuid.UUID] = await self._list_user_org_ids(user_id)
-        if not org_ids:
-            return []
-        result = await self._db.execute(
-            select(Org).where(Org.id.in_(org_ids)).order_by(Org.canonical_name.asc())
-        )
-        return list(result.scalars().all())
+        unenriched_org_ids: list[uuid.UUID] = []
+        for org_id in org_ids:
+            if not await self.was_recently_enriched(org_id):
+                unenriched_org_ids.append(org_id)
+        return unenriched_org_ids
 
     async def _list_user_org_ids(self, user_id: uuid.UUID) -> list[uuid.UUID]:
         result = await self._db.execute(
@@ -313,21 +543,12 @@ class OrgEnrichmentService:
         return len(result.all())
 
     async def _count_enriched_orgs(self, user_id: uuid.UUID) -> int:
-        result = await self._db.execute(
-            select(Org.id)
-            .join(Person, Person.current_org_id == Org.id)
-            .where(
-                *self._strong_tie_person_filter(user_id),
-                or_(
-                    Org.description.is_not(None),
-                    Org.careers_url.is_not(None),
-                    Org.linkedin_url.is_not(None),
-                    Org.attributes.has_key("exa_enriched_at"),
-                ),
-            )
-            .group_by(Org.id)
-        )
-        return len(result.all())
+        org_ids: list[uuid.UUID] = await self._list_user_org_ids(user_id)
+        enriched_count: int = 0
+        for org_id in org_ids:
+            if await self.was_recently_enriched(org_id):
+                enriched_count += 1
+        return enriched_count
 
     @staticmethod
     def _strong_tie_person_filter(user_id: uuid.UUID):  # noqa: ANN205
@@ -367,7 +588,10 @@ class OrgEnrichmentService:
 
     async def _has_running_run(self, user_id: uuid.UUID) -> bool:
         run: OrgEnrichmentRun | None = await self._latest_run(user_id)
-        return run is not None and run.state == "running"
+        if run is None or run.state != "running":
+            return False
+        await self._recover_stale_run(run)
+        return run.state == "running"
 
     @staticmethod
     def _progress_message(orgs_enriched: int, orgs_total: int) -> str:
@@ -424,6 +648,46 @@ def parse_org_enrichment_hits(
         employee_count=company_size.employee_count,
         company_size_band=company_size.company_size_band,
     )
+
+
+def _org_enrichment_snapshot(org: Org) -> _OrgEnrichmentSnapshot:
+    return _OrgEnrichmentSnapshot(
+        primary_domain=org.primary_domain,
+        description=org.description,
+        careers_url=org.careers_url,
+        linkedin_url=org.linkedin_url,
+        categories=tuple(org.categories),
+        employee_count=org.employee_count,
+        company_size_band=org.company_size_band,
+        ats_provider=org.ats_provider,
+        ats_board_token=org.ats_board_token,
+    )
+
+
+def _count_snapshot_changes(
+    before: _OrgEnrichmentSnapshot,
+    after: _OrgEnrichmentSnapshot,
+) -> int:
+    changes: int = 0
+    if before.primary_domain != after.primary_domain:
+        changes += 1
+    if before.description != after.description:
+        changes += 1
+    if before.careers_url != after.careers_url:
+        changes += 1
+    if before.linkedin_url != after.linkedin_url:
+        changes += 1
+    if before.categories != after.categories:
+        changes += 1
+    if before.employee_count != after.employee_count:
+        changes += 1
+    if before.company_size_band != after.company_size_band:
+        changes += 1
+    if before.ats_provider != after.ats_provider:
+        changes += 1
+    if before.ats_board_token != after.ats_board_token:
+        changes += 1
+    return changes
 
 
 def _org_is_enriched(org: Org) -> bool:
@@ -634,6 +898,26 @@ def _normalize_company_name(value: str) -> str:
 
 
 def schedule_org_enrichment(user_id: uuid.UUID, run_id: uuid.UUID) -> bool:
+    from contactsafe_server.config import get_settings
+
+    if get_settings().use_arq_worker:
+
+        async def _enqueue() -> None:
+            from contactsafe_server.queue import enqueue_background_job
+
+            await enqueue_background_job(
+                "enrich_user_orgs",
+                str(user_id),
+                str(run_id),
+                _job_id=f"enrich-user-orgs-{user_id}",
+            )
+
+        asyncio.create_task(
+            _enqueue(),
+            name=f"org-enrichment-enqueue-{user_id}",
+        )
+        return True
+
     with _scheduling_lock:
         if user_id in _active_org_enrichment_user_ids:
             return False
@@ -675,6 +959,12 @@ async def _run_org_enrichment_task(user_id: uuid.UUID, run_id: uuid.UUID) -> Non
                     run.completed_at = datetime.now(tz=UTC)
                     run.progress_message = None
                     await db.commit()
+                    publish_org_enrichment_failed(
+                        user_id,
+                        orgs_enriched=run.orgs_enriched,
+                        orgs_total=run.orgs_total,
+                        error=run.error,
+                    )
         except Exception:
             logger.exception("Failed to mark org enrichment run %s as failed", run_id)
     finally:

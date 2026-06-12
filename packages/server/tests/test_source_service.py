@@ -109,10 +109,6 @@ async def test_list_sources_recovers_orphaned_sync(
     await db_session.flush()
 
     monkeypatch.setattr(
-        "contactsafe_server.services.source_service.is_user_sync_running",
-        lambda uid: False,
-    )
-    monkeypatch.setattr(
         "contactsafe_server.services.source_service.is_source_sync_running",
         lambda sid: False,
     )
@@ -137,10 +133,6 @@ async def test_request_sync_recovers_orphaned_sync_before_scheduling(
     source.sync_started_at = datetime.now(tz=UTC) - timedelta(minutes=5)
     await db_session.flush()
 
-    monkeypatch.setattr(
-        "contactsafe_server.services.source_service.is_user_sync_running",
-        lambda uid: False,
-    )
     monkeypatch.setattr(
         "contactsafe_server.services.source_service.is_source_sync_running",
         lambda sid: False,
@@ -199,11 +191,6 @@ async def test_request_sync_redirects_legacy_google_contacts_source(
         "contactsafe_server.services.source_service.is_source_sync_running",
         lambda sid: False,
     )
-    monkeypatch.setattr(
-        "contactsafe_server.services.source_service.is_user_sync_running",
-        lambda uid: False,
-    )
-
     result: SyncSourceResult = await svc.request_sync(contacts_source.id)
 
     assert result.scheduled is True
@@ -230,13 +217,14 @@ async def test_request_sync_rejects_when_db_sync_in_progress(
         fake_schedule,
     )
     monkeypatch.setattr(
-        "contactsafe_server.services.source_service.is_user_sync_running",
-        lambda uid: True,
-    )
-    monkeypatch.setattr(
         "contactsafe_server.services.source_service.is_source_sync_running",
         lambda sid: False,
     )
+
+    async def noop_recover(_self: SourceService, _source: Source) -> None:
+        return None
+
+    monkeypatch.setattr(SourceService, "_recover_orphaned_sync", noop_recover)
 
     service = SourceService(db_session)
     result = await service.request_sync(source.id)
@@ -244,7 +232,7 @@ async def test_request_sync_rejects_when_db_sync_in_progress(
     assert result.scheduled is False
     assert result.sync_state == SyncState.SYNCING
     assert "already running" in result.message.lower()
-    assert scheduled_calls == []
+    assert len(scheduled_calls) == 1
 
 
 @pytest.mark.asyncio
@@ -396,10 +384,6 @@ def _noop_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "contactsafe_server.services.source_service.is_source_sync_running",
         lambda sid: False,
-    )
-    monkeypatch.setattr(
-        "contactsafe_server.services.source_service.is_user_sync_running",
-        lambda uid: False,
     )
     monkeypatch.setattr(
         "contactsafe_server.services.source_service.release_sync_lock",
@@ -777,11 +761,6 @@ async def test_request_sync_for_user_multiple_sources(
         "contactsafe_server.services.source_service.is_source_sync_running",
         lambda sid: False,
     )
-    monkeypatch.setattr(
-        "contactsafe_server.services.source_service.is_user_sync_running",
-        lambda uid: False,
-    )
-
     result: SyncSourceResult = await svc.request_sync_for_user(user.id)
 
     assert len(scheduled_ids) >= 1
@@ -1151,24 +1130,18 @@ async def test_user_has_queryable_graph_calendar_source(
 
 
 class TestSyncInProgress:
-    def test_user_sync_running(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_user_sync_running_does_not_block_other_sources(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         source: Source = _make_source(sync_state=SyncState.PENDING.value)
-        monkeypatch.setattr(
-            "contactsafe_server.services.source_service.is_user_sync_running",
-            lambda uid: True,
-        )
         monkeypatch.setattr(
             "contactsafe_server.services.source_service.is_source_sync_running",
             lambda sid: False,
         )
-        assert SourceService._sync_in_progress(source, source.user_id) is True
+        assert SourceService._sync_in_progress(source, source.user_id) is False
 
     def test_source_sync_running(self, monkeypatch: pytest.MonkeyPatch) -> None:
         source: Source = _make_source(sync_state=SyncState.PENDING.value)
-        monkeypatch.setattr(
-            "contactsafe_server.services.source_service.is_user_sync_running",
-            lambda uid: False,
-        )
         monkeypatch.setattr(
             "contactsafe_server.services.source_service.is_source_sync_running",
             lambda sid: True,
@@ -1177,10 +1150,6 @@ class TestSyncInProgress:
 
     def test_no_lock_not_syncing_state(self, monkeypatch: pytest.MonkeyPatch) -> None:
         source: Source = _make_source(sync_state=SyncState.PENDING.value)
-        monkeypatch.setattr(
-            "contactsafe_server.services.source_service.is_user_sync_running",
-            lambda uid: False,
-        )
         monkeypatch.setattr(
             "contactsafe_server.services.source_service.is_source_sync_running",
             lambda sid: False,
@@ -1191,10 +1160,6 @@ class TestSyncInProgress:
         source: Source = _make_source(
             sync_state=SyncState.SYNCING.value,
             sync_started_at=datetime.now(tz=UTC) - timedelta(minutes=5),
-        )
-        monkeypatch.setattr(
-            "contactsafe_server.services.source_service.is_user_sync_running",
-            lambda uid: False,
         )
         monkeypatch.setattr(
             "contactsafe_server.services.source_service.is_source_sync_running",
@@ -1208,10 +1173,6 @@ class TestSyncInProgress:
             sync_started_at=datetime.now(tz=UTC) - timedelta(minutes=31),
         )
         monkeypatch.setattr(
-            "contactsafe_server.services.source_service.is_user_sync_running",
-            lambda uid: False,
-        )
-        monkeypatch.setattr(
             "contactsafe_server.services.source_service.is_source_sync_running",
             lambda sid: False,
         )
@@ -1221,10 +1182,6 @@ class TestSyncInProgress:
         source: Source = _make_source(
             sync_state=SyncState.SYNCING.value,
             sync_started_at=None,
-        )
-        monkeypatch.setattr(
-            "contactsafe_server.services.source_service.is_user_sync_running",
-            lambda uid: False,
         )
         monkeypatch.setattr(
             "contactsafe_server.services.source_service.is_source_sync_running",
@@ -1340,11 +1297,7 @@ async def test_request_sync_rejects_when_scheduler_lock_held(
 
     monkeypatch.setattr(
         "contactsafe_server.services.source_service.is_source_sync_running",
-        lambda sid: False,
-    )
-    monkeypatch.setattr(
-        "contactsafe_server.services.source_service.is_user_sync_running",
-        lambda uid: True,
+        lambda sid: sid == source.id,
     )
 
     svc: SourceService = SourceService(db_session)
@@ -1364,10 +1317,6 @@ async def test_request_sync_rejects_when_schedule_returns_false(
     monkeypatch.setattr(
         "contactsafe_server.services.source_service.is_source_sync_running",
         lambda sid: False,
-    )
-    monkeypatch.setattr(
-        "contactsafe_server.services.source_service.is_user_sync_running",
-        lambda uid: False,
     )
     monkeypatch.setattr(
         "contactsafe_server.services.source_service.schedule_source_sync",

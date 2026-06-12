@@ -15,7 +15,7 @@ from contactsafe_server.services.job_discovery_types import DiscoveredJob
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-_DESCRIPTION_SNIPPET_MAX: int = 500
+_DESCRIPTION_SNIPPET_MAX: int = 2000
 
 
 class TheirStackClient:
@@ -28,7 +28,7 @@ class TheirStackClient:
     def is_configured(self) -> bool:
         return self._api_key is not None and bool(self._api_key.strip())
 
-    async def search_jobs_for_org(self, org: Org, limit: int = 50) -> list[DiscoveredJob]:
+    async def search_jobs_for_org(self, org: Org, limit: int = 25) -> list[DiscoveredJob]:
         if not self.is_configured():
             return []
 
@@ -112,6 +112,10 @@ class TheirStackClient:
         for attempt in range(max_retries):
             try:
                 async with httpx.AsyncClient(timeout=self._timeout) as client:
+                    logger.info(
+                        "TheirStack POST %s (attempt %d, timeout=%.0fs) payload=%s",
+                        path, attempt + 1, self._timeout, payload,
+                    )
                     response = await client.post(url, json=payload, headers=headers)
                     if response.status_code == 429 and attempt < max_retries - 1:
                         retry_after: float = float(
@@ -122,12 +126,26 @@ class TheirStackClient:
                         continue
                     response.raise_for_status()
                     result: dict[str, Any] = response.json()
+                    n_jobs: int = len(result.get("data", []))
+                    logger.info("TheirStack %s returned %d jobs", path, n_jobs)
                     return result
-            except httpx.HTTPStatusError:
+            except httpx.HTTPStatusError as exc:
+                logger.warning(
+                    "TheirStack HTTP %d for %s: %s",
+                    exc.response.status_code, path, exc.response.text[:300],
+                )
                 if attempt < max_retries - 1:
                     await asyncio.sleep(2.0 * (attempt + 1))
                     continue
-                logger.warning("TheirStack request failed for %s", path, exc_info=True)
+                return {}
+            except httpx.TimeoutException:
+                logger.error(
+                    "TheirStack TIMEOUT (%.0fs) for %s attempt %d",
+                    self._timeout, path, attempt + 1,
+                )
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(2.0 * (attempt + 1))
+                    continue
                 return {}
             except Exception:
                 logger.warning("TheirStack request failed for %s", path, exc_info=True)

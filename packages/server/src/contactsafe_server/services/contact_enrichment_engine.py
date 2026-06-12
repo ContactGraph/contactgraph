@@ -279,15 +279,16 @@ class ContactEnrichmentEngine:
                         freshness_days=self._settings.enrichment_email_domain_freshness_days,
                     )
                     org = await self._resolver.resolve_org(domain=domain, name=inferred_org)
-                    await record_employment(
-                        self._db,
-                        person_id=person.id,
-                        org_id=org.id,
-                        contributor_user_id=user_id,
-                        contributor_source_kind="heuristic",
-                        is_current=is_fresh,
-                        confidence=0.4 if is_fresh else 0.2,
-                    )
+                    if org is not None:
+                        await record_employment(
+                            self._db,
+                            person_id=person.id,
+                            org_id=org.id,
+                            contributor_user_id=user_id,
+                            contributor_source_kind="heuristic",
+                            is_current=is_fresh,
+                            confidence=0.4 if is_fresh else 0.2,
+                        )
 
     async def _run_signature(
         self,
@@ -314,15 +315,16 @@ class ContactEnrichmentEngine:
                     if not is_automation_or_generic_domain(d):
                         domain = d
                 org = await self._resolver.resolve_org(domain=domain, name=hints.org_name)
-                await record_employment(
-                    self._db,
-                    person_id=person.id,
-                    org_id=org.id,
-                    role_title=hints.current_role,
-                    contributor_user_id=user_id,
-                    contributor_source_kind="gmail_signature",
-                    confidence=0.85,
-                )
+                if org is not None:
+                    await record_employment(
+                        self._db,
+                        person_id=person.id,
+                        org_id=org.id,
+                        role_title=hints.current_role,
+                        contributor_user_id=user_id,
+                        contributor_source_kind="gmail_signature",
+                        confidence=0.85,
+                    )
 
         if hints.phone_numbers:
             for phone in hints.phone_numbers:
@@ -620,16 +622,17 @@ class ContactEnrichmentEngine:
                 if not is_automation_or_generic_domain(d):
                     domain = d
             org = await self._resolver.resolve_org(domain=domain, name=org_name)
-            await record_employment(
-                self._db,
-                person_id=person.id,
-                org_id=org.id,
-                role_title=cast(str | None, parsed.get("current_role")),
-                contributor_user_id=user_id,
-                contributor_source_kind="llm",
-                confidence=0.55,
-            )
-            applied = True
+            if org is not None:
+                await record_employment(
+                    self._db,
+                    person_id=person.id,
+                    org_id=org.id,
+                    role_title=cast(str | None, parsed.get("current_role")),
+                    contributor_user_id=user_id,
+                    contributor_source_kind="llm",
+                    confidence=0.55,
+                )
+                applied = True
 
         for tag in cast(list[str], parsed.get("descriptive_tags") or []):
             if tag.strip():
@@ -723,15 +726,16 @@ class ContactEnrichmentEngine:
                 if not is_automation_or_generic_domain(d):
                     domain = d
             org = await self._resolver.resolve_org(domain=domain, name=web_hints.org_name)
-            await record_employment(
-                self._db,
-                person_id=person.id,
-                org_id=org.id,
-                role_title=web_hints.current_role,
-                contributor_user_id=user_id,
-                contributor_source_kind=claim_source,
-                confidence=claim_confidence,
-            )
+            if org is not None:
+                await record_employment(
+                    self._db,
+                    person_id=person.id,
+                    org_id=org.id,
+                    role_title=web_hints.current_role,
+                    contributor_user_id=user_id,
+                    contributor_source_kind=claim_source,
+                    confidence=claim_confidence,
+                )
 
         if not verified.skip_categories:
             for cat in web_hints.categories:

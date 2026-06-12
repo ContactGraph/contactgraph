@@ -5,7 +5,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 
-import type { UserProfileResult } from "@/lib/api-types";
+import type { UserProfileResult, ViewTrustedUsersResult } from "@/lib/api-types";
+import { useOnboardingPhase } from "@/lib/use-onboarding-phase";
 import { proxyPost } from "@/lib/proxy-client";
 import { cn } from "@/lib/utils";
 
@@ -16,15 +17,6 @@ type NavLink =
   | { kind: "internal"; href: string; label: string }
   | { kind: "external"; href: string; label: string };
 
-const appLinks: readonly NavLink[] = [
-  { kind: "internal", href: "/setup", label: "Setup" },
-  { kind: "internal", href: "/people", label: "People" },
-  { kind: "internal", href: "/organizations", label: "Organizations" },
-  { kind: "internal", href: "/jobs", label: "Jobs" },
-  { kind: "internal", href: "/target-companies", label: "Targets" },
-  { kind: "internal", href: "/trust", label: "Trust List" },
-];
-
 const marketingLinks: readonly NavLink[] = [
   { kind: "external", href: `${API_BASE}/skill.md`, label: "Skill" },
   { kind: "external", href: `${API_BASE}/mcp`, label: "MCP" },
@@ -32,10 +24,16 @@ const marketingLinks: readonly NavLink[] = [
   { kind: "internal", href: "/manifesto", label: "Manifesto" },
 ];
 
-export function SiteHeader({ email }: { email: string | null }) {
+export function SiteHeader({
+  email,
+  isAdmin = false,
+}: {
+  email: string | null;
+  isAdmin?: boolean;
+}) {
   const pathname: string = usePathname();
   const headerRef = useRef<HTMLElement>(null);
-  const links: readonly NavLink[] = email ? appLinks : marketingLinks;
+  const onboarding = useOnboardingPhase();
 
   const profileQuery = useQuery({
     queryKey: ["user-profile"],
@@ -44,11 +42,38 @@ export function SiteHeader({ email }: { email: string | null }) {
     staleTime: 5 * 60 * 1000,
   });
 
+  const trustQuery = useQuery({
+    queryKey: ["trust-list"],
+    queryFn: () => proxyPost<ViewTrustedUsersResult>("view-trusted-users"),
+    enabled: email !== null,
+    staleTime: 60 * 1000,
+  });
+
+  const pendingInviteCount: number = trustQuery.data?.inbound_invites.length ?? 0;
+
+  const appLinks: readonly NavLink[] = onboarding.showJobsTab
+    ? [
+        { kind: "internal", href: "/graph", label: "Graph" },
+        { kind: "internal", href: "/jobs", label: "Jobs" },
+        { kind: "internal", href: "/sharing", label: "Sharing" },
+        ...(isAdmin ? [{ kind: "internal" as const, href: "/admin", label: "Admin" }] : []),
+      ]
+    : [
+        { kind: "internal", href: "/graph", label: "Graph" },
+        { kind: "internal", href: "/sharing", label: "Sharing" },
+        ...(isAdmin ? [{ kind: "internal" as const, href: "/admin", label: "Admin" }] : []),
+      ];
+
+  const links: readonly NavLink[] = email ? appLinks : marketingLinks;
+
   const displayName: string =
     profileQuery.data?.display_name ??
     profileQuery.data?.google_profile_name ??
     email ??
     "";
+
+  const profilePicture: string | null =
+    profileQuery.data?.google_profile_picture ?? null;
 
   const initials: string = displayName
     .split(/[\s@.]+/)
@@ -94,8 +119,8 @@ export function SiteHeader({ email }: { email: string | null }) {
       <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-4 sm:gap-6">
           <Link
-            href={email ? "/setup" : "/"}
-            className="text-sm font-semibold no-underline hover:underline"
+            href={email ? "/graph" : "/"}
+            className="text-lg font-bold tracking-tight text-foreground no-underline hover:no-underline hover:opacity-80"
           >
             ContactGraph
           </Link>
@@ -108,9 +133,14 @@ export function SiteHeader({ email }: { email: string | null }) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={navLinkClass(item.href)}
+                  className={cn(navLinkClass(item.href), "relative")}
                 >
                   {item.label}
+                  {item.href === "/sharing" && pendingInviteCount > 0 ? (
+                    <span className="absolute -right-2.5 -top-1.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground">
+                      {pendingInviteCount}
+                    </span>
+                  ) : null}
                 </Link>
               ) : (
                 <a
@@ -129,14 +159,21 @@ export function SiteHeader({ email }: { email: string | null }) {
             <>
               <Link
                 href="/profile"
-                className="flex items-center gap-2 rounded-full no-underline hover:opacity-80"
+                className="flex items-center rounded-full no-underline hover:opacity-80"
+                title={displayName}
               >
-                <span className="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
-                  {initials}
-                </span>
-                <span className="hidden max-w-[160px] truncate text-sm font-medium text-foreground sm:inline">
-                  {displayName}
-                </span>
+                {profilePicture !== null ? (
+                  <img
+                    src={profilePicture}
+                    alt={displayName}
+                    className="size-7 rounded-full object-cover"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <span className="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
+                    {initials}
+                  </span>
+                )}
               </Link>
             </>
           ) : (
@@ -156,13 +193,18 @@ export function SiteHeader({ email }: { email: string | null }) {
               key={item.href}
               href={item.href}
               className={cn(
-                "whitespace-nowrap text-sm no-underline hover:underline",
+                "relative whitespace-nowrap text-sm no-underline hover:underline",
                 pathname === item.href
                   ? "font-semibold text-foreground"
                   : "text-muted-foreground",
               )}
             >
               {item.label}
+              {item.href === "/sharing" && pendingInviteCount > 0 ? (
+                <span className="absolute -right-2.5 -top-1.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground">
+                  {pendingInviteCount}
+                </span>
+              ) : null}
             </Link>
           ) : (
             <a

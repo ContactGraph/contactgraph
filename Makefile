@@ -1,4 +1,4 @@
-.PHONY: dev migrate migrate-new sync test coverage lint typecheck docker-up docker-down web web-install
+.PHONY: dev migrate migrate-new sync test coverage lint typecheck docker-up docker-down web web-install worker
 
 sync:
 	uv sync
@@ -18,6 +18,9 @@ migrate-new:
 
 dev:
 	uv run --package contactsafe-server uvicorn contactsafe_server.main:app --reload --host 0.0.0.0 --port 8000
+
+worker:
+	uv run --package contactsafe-server arq contactsafe_server.worker.WorkerSettings
 
 web-install:
 	cd apps/web && COREPACK_ENABLE_STRICT=0 pnpm install
