@@ -383,6 +383,14 @@ function JobsTable() {
   const visibleCount: number = table.getRowModel().rows.length;
   const totalCount: number = data?.total_jobs ?? 0;
 
+  const unscoredCount: number = useMemo(
+    () => (data?.jobs ?? []).filter((j) => j.match_score === null).length,
+    [data?.jobs],
+  );
+
+  const discoveryStatus: JobDiscoveryStatusResult | undefined =
+    discoveryStatusQuery.data;
+
   return (
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-3">
@@ -391,9 +399,7 @@ function JobsTable() {
           <p className="text-sm text-muted-foreground">
             {loading
               ? "Loading…"
-              : discoveryRunning
-                ? (discoveryStatusQuery.data?.progress_message ?? "Scanning…")
-                : `${visibleCount} of ${totalCount} jobs`}
+              : `${visibleCount} of ${totalCount} jobs`}
           </p>
         </div>
         <ResponsiveModal
@@ -519,6 +525,38 @@ function JobsTable() {
           </Button>
         </div>
       </div>
+
+      {discoveryRunning || unscoredCount > 0 ? (
+        <div className="flex flex-col gap-1.5 rounded-lg border bg-muted/40 px-4 py-2.5">
+          {discoveryRunning ? (
+            <div className="flex items-center gap-2 text-sm">
+              <Loader2 className="size-3.5 animate-spin text-primary" />
+              <span className="font-medium">Scanning</span>
+              <span className="text-muted-foreground">
+                {discoveryStatus?.progress_message ??
+                  `${discoveryStatus?.orgs_processed ?? 0} of ${discoveryStatus?.orgs_total ?? 0} companies`}
+              </span>
+              {(discoveryStatus?.jobs_found ?? 0) > 0 ? (
+                <span className="text-muted-foreground">
+                  · {discoveryStatus!.jobs_found} jobs found
+                  {(discoveryStatus!.new_jobs ?? 0) > 0
+                    ? ` (${discoveryStatus!.new_jobs} new)`
+                    : ""}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+          {unscoredCount > 0 ? (
+            <div className="flex items-center gap-2 text-sm">
+              <Loader2 className="size-3.5 animate-spin text-primary" />
+              <span className="font-medium">Scoring</span>
+              <span className="text-muted-foreground">
+                {unscoredCount} job{unscoredCount !== 1 ? "s" : ""} awaiting match scoring
+              </span>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="space-y-2">
