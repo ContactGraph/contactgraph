@@ -28,6 +28,13 @@ def _set_global_enrichment_active(active: bool) -> None:
 
 
 async def _run_one_global_enrichment_scan() -> None:
+    from contactsafe_server.config import get_settings
+    from contactsafe_server.queue import enqueue_background_job
+
+    if get_settings().use_arq_worker:
+        await enqueue_background_job("global_org_enrichment_scan")
+        return
+
     from contactsafe_server.deps import build_app_context
     from contactsafe_server.services.org_enrichment_service import OrgEnrichmentService
 
@@ -84,6 +91,10 @@ async def _global_enrichment_loop() -> None:
 
 
 def start_global_org_enrichment_scanner() -> None:
+    from contactsafe_server.config import get_settings
+
+    if get_settings().use_arq_worker:
+        return
     global _periodic_task
     if _periodic_task is not None and not _periodic_task.done():
         return
@@ -95,5 +106,9 @@ def start_global_org_enrichment_scanner() -> None:
 
 async def schedule_initial_org_enrichment_delay() -> None:
     """Run first global org enrichment scan after a short delay."""
+    from contactsafe_server.config import get_settings
+
+    if get_settings().use_arq_worker:
+        return
     await asyncio.sleep(60)
     start_global_org_enrichment_scanner()

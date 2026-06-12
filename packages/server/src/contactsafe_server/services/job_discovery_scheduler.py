@@ -16,7 +16,34 @@ _global_scan_active: bool = False
 _periodic_task: asyncio.Task[None] | None = None
 
 
+async def is_global_scan_active_async() -> bool:
+    from contactsafe_server.config import get_settings
+
+    if get_settings().use_arq_worker:
+        from contactsafe_server.redis_state import is_worker_flag_active
+
+        if await is_worker_flag_active("global_job_scan"):
+            return True
+    with _global_scan_lock:
+        return _global_scan_active
+
+
 def is_global_scan_active() -> bool:
+    from contactsafe_server.config import get_settings
+
+    if get_settings().use_arq_worker:
+        import asyncio
+
+        from contactsafe_server.redis_state import is_worker_flag_active
+
+        try:
+            loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+            if loop.is_running():
+                future = asyncio.ensure_future(is_worker_flag_active("global_job_scan"))
+                if future.done():
+                    return bool(future.result())
+        except RuntimeError:
+            pass
     with _global_scan_lock:
         return _global_scan_active
 
@@ -28,6 +55,13 @@ def _set_global_scan_active(active: bool) -> None:
 
 
 async def _run_one_global_scan() -> None:
+    from contactsafe_server.config import get_settings
+    from contactsafe_server.queue import enqueue_background_job
+
+    if get_settings().use_arq_worker:
+        await enqueue_background_job("global_job_scan")
+        return
+
     from contactsafe_server.deps import build_app_context
     from contactsafe_server.job_event_publishers import publish_scan_progress_for_users
     from contactsafe_server.services.job_discovery_service import JobDiscoveryService
@@ -103,6 +137,10 @@ async def _global_scan_loop() -> None:
 
 
 def start_global_job_scanner() -> None:
+    from contactsafe_server.config import get_settings
+
+    if get_settings().use_arq_worker:
+        return
     global _periodic_task
     if _periodic_task is not None and not _periodic_task.done():
         return
@@ -114,5 +152,9 @@ def start_global_job_scanner() -> None:
 
 async def schedule_initial_job_discovery_delay() -> None:
     """Run first global scan after a short delay so the server can start."""
+    from contactsafe_server.config import get_settings
+
+    if get_settings().use_arq_worker:
+        return
     await asyncio.sleep(60)
     start_global_job_scanner()

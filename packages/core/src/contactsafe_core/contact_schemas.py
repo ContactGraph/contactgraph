@@ -465,3 +465,22 @@ class JobPreferencesResult(BaseModel):
     commute_note: str | None = None
     classified_job_count: int = 0
     message: str
+
+
+class PipelineStatus(BaseModel):
+    name: str
+    queued: int = 0
+    active: int = 0
+    completed_24h: int = 0
+    failed_24h: int = 0
+    last_run_at: datetime | None = None
+    last_run_duration_ms: int | None = None
+    items_processed: int | None = None
+    items_total: int | None = None
+
+
+class WorkerStatusResult(BaseModel):
+    pipelines: list[PipelineStatus] = Field(default_factory=list)
+    worker_connected: bool = False
+    redis_connected: bool = False
+    message: str = "OK"

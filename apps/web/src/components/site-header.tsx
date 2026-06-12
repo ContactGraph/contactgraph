@@ -24,7 +24,13 @@ const marketingLinks: readonly NavLink[] = [
   { kind: "internal", href: "/manifesto", label: "Manifesto" },
 ];
 
-export function SiteHeader({ email }: { email: string | null }) {
+export function SiteHeader({
+  email,
+  isAdmin = false,
+}: {
+  email: string | null;
+  isAdmin?: boolean;
+}) {
   const pathname: string = usePathname();
   const headerRef = useRef<HTMLElement>(null);
   const onboarding = useOnboardingPhase();
@@ -50,10 +56,12 @@ export function SiteHeader({ email }: { email: string | null }) {
         { kind: "internal", href: "/graph", label: "Graph" },
         { kind: "internal", href: "/jobs", label: "Jobs" },
         { kind: "internal", href: "/sharing", label: "Sharing" },
+        ...(isAdmin ? [{ kind: "internal" as const, href: "/admin", label: "Admin" }] : []),
       ]
     : [
         { kind: "internal", href: "/graph", label: "Graph" },
         { kind: "internal", href: "/sharing", label: "Sharing" },
+        ...(isAdmin ? [{ kind: "internal" as const, href: "/admin", label: "Admin" }] : []),
       ];
 
   const links: readonly NavLink[] = email ? appLinks : marketingLinks;

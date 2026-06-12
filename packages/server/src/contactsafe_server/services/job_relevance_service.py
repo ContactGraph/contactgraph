@@ -145,13 +145,78 @@ _scoring_cancelled: set[uuid.UUID] = set()
 _scoring_progress: dict[uuid.UUID, tuple[int, int]] = {}
 
 
+def _use_redis_state() -> bool:
+    from contactsafe_server.config import get_settings
+
+    return get_settings().use_arq_worker
+
+
 def cancel_scoring(user_id: uuid.UUID) -> None:
     """Signal the scoring loop to stop for this user."""
     _scoring_cancelled.add(user_id)
+    if _use_redis_state():
+        import asyncio
+
+        from contactsafe_server.redis_state import set_scoring_cancelled
+
+        try:
+            loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+            loop.create_task(set_scoring_cancelled(user_id))
+        except RuntimeError:
+            pass
 
 
 def get_scoring_progress(user_id: uuid.UUID) -> tuple[int, int] | None:
+    if _use_redis_state():
+        import asyncio
+
+        from contactsafe_server.redis_state import get_scoring_progress_redis
+
+        try:
+            loop: asyncio.AbstractEventLoop = asyncio.get_running_loop()
+            if loop.is_running():
+                future = asyncio.ensure_future(get_scoring_progress_redis(user_id))
+                if future.done():
+                    return future.result()
+        except RuntimeError:
+            pass
     return _scoring_progress.get(user_id)
+
+
+async def get_scoring_progress_async(user_id: uuid.UUID) -> tuple[int, int] | None:
+    if _use_redis_state():
+        from contactsafe_server.redis_state import get_scoring_progress_redis
+
+        return await get_scoring_progress_redis(user_id)
+    return _scoring_progress.get(user_id)
+
+
+async def _is_scoring_cancelled(user_id: uuid.UUID) -> bool:
+    if _use_redis_state():
+        from contactsafe_server.redis_state import is_scoring_cancelled_redis
+
+        if await is_scoring_cancelled_redis(user_id):
+            return True
+    return user_id in _scoring_cancelled
+
+
+async def _set_progress(user_id: uuid.UUID, scored: int, total: int) -> None:
+    _scoring_progress[user_id] = (scored, total)
+    if _use_redis_state():
+        from contactsafe_server.redis_state import set_scoring_progress
+
+        await set_scoring_progress(user_id, scored, total)
+
+
+async def _clear_progress(user_id: uuid.UUID) -> None:
+    _scoring_progress.pop(user_id, None)
+    if _use_redis_state():
+        from contactsafe_server.redis_state import clear_scoring_progress
+
+        await clear_scoring_progress(user_id)
+        from contactsafe_server.redis_state import clear_scoring_cancelled
+
+        await clear_scoring_cancelled(user_id)
 
 
 def _publish_scoring_progress(user_id: uuid.UUID, scored: int, total: int) -> None:
@@ -232,7 +297,7 @@ class JobRelevanceService:
             return 0
 
         total_jobs: int = len(unclassified_jobs)
-        _scoring_progress[user_id] = (0, total_jobs)
+        await _set_progress(user_id, 0, total_jobs)
         _publish_scoring_progress(user_id, scored=0, total=total_jobs)
 
         total_classified: int = 0
@@ -240,7 +305,7 @@ class JobRelevanceService:
         preferences_text: str | None = user.job_preferences_text
         try:
             for i in range(0, len(unclassified_jobs), _BATCH_SIZE):
-                if user_id in _scoring_cancelled:
+                if await _is_scoring_cancelled(user_id):
                     logger.info(
                         "Scoring cancelled for user %s after %d jobs",
                         user_id,
@@ -258,7 +323,7 @@ class JobRelevanceService:
                     preferences_text=preferences_text,
                 )
                 total_classified += classified
-                _scoring_progress[user_id] = (total_classified, total_jobs)
+                await _set_progress(user_id, total_classified, total_jobs)
                 _publish_scoring_progress(
                     user_id,
                     scored=total_classified,
@@ -280,7 +345,7 @@ class JobRelevanceService:
 
             return total_classified
         finally:
-            _scoring_progress.pop(user_id, None)
+            await _clear_progress(user_id)
 
     @staticmethod
     def _build_preferences_section(user: User) -> str:

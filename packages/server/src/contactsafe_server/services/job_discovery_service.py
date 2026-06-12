@@ -143,7 +143,7 @@ class JobDiscoveryService:
             ),
         )
         scanned: int = int(scanned_result.scalar_one())
-        scanning_active: bool = scanned < total or is_global_scan_active()
+        scanning_active: bool = scanned < total or await is_global_scan_active_async()
 
         if scanned >= total:
             message = f"{scanned} of {total} companies scanned today."
@@ -172,6 +172,15 @@ class JobDiscoveryService:
             .distinct(),
         )
         return list(result.scalars().all())
+
+    async def collect_orgs_needing_scrape(self) -> list[uuid.UUID]:
+        """Monitored orgs outside the job-scrape cooldown window."""
+        org_ids: list[uuid.UUID] = await self.collect_all_monitored_org_ids()
+        needing: list[uuid.UUID] = []
+        for org_id in org_ids:
+            if not await self.was_recently_scraped(org_id):
+                needing.append(org_id)
+        return needing
 
     async def collect_all_monitoring_user_ids(self) -> list[uuid.UUID]:
         result = await self._db.execute(
@@ -252,7 +261,18 @@ class JobDiscoveryService:
         )
 
     async def classify_for_all_monitoring_users(self, org_id: uuid.UUID) -> None:
+        from contactsafe_server.config import get_settings
+        from contactsafe_server.queue import enqueue_background_job
+
         user_ids: list[uuid.UUID] = await self.users_monitoring_org(org_id)
+        if get_settings().use_arq_worker:
+            for user_id in user_ids:
+                await enqueue_background_job(
+                    "score_jobs_for_user",
+                    str(user_id),
+                    _job_id=f"score-user-{user_id}",
+                )
+            return
         for user_id in user_ids:
             await self._classify_new_jobs(user_id)
 
@@ -563,11 +583,32 @@ class JobDiscoveryService:
         user_id: uuid.UUID,
         org_id: uuid.UUID,
     ) -> StartSingleOrgDiscoveryResult:
-        """Run discovery for a single org synchronously (not backgrounded)."""
+        """Run discovery for a single org (backgrounded when arq is enabled)."""
+        from contactsafe_server.config import get_settings
+        from contactsafe_server.queue import enqueue_background_job
+
         org: Org | None = await self._db.get(Org, org_id)
         if org is None:
             return StartSingleOrgDiscoveryResult(
                 scheduled=False, message="Organization not found.",
+            )
+
+        if get_settings().use_arq_worker:
+            job_id: str | None = await enqueue_background_job(
+                "scrape_org_jobs",
+                str(org_id),
+                force=True,
+                trigger_user_id=str(user_id),
+                _job_id=f"scrape-org-{org_id}",
+            )
+            if job_id is None:
+                return StartSingleOrgDiscoveryResult(
+                    scheduled=False,
+                    message="Could not schedule job discovery.",
+                )
+            return StartSingleOrgDiscoveryResult(
+                scheduled=True,
+                message=f"Job discovery scheduled for {org.canonical_name}.",
             )
 
         result: ScrapeOrgResult = await self.scrape_org_global(org_id, force=True)

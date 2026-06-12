@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     database_ssl: bool | None = Field(default=None)
     # macOS uv Python often lacks system CA certs; set false for local Supabase dev if needed
     database_ssl_verify: bool = Field(default=True)
+    database_pool_size: int = Field(
+        default=3,
+        description="SQLAlchemy pool size per process (keep low for Supabase session pooler)",
+    )
+    database_max_overflow: int = Field(
+        default=2,
+        description="Extra connections beyond pool_size under burst load",
+    )
 
     token_encryption_key: str = Field(
         description="Fernet key for encrypting OAuth tokens at rest"
@@ -264,6 +272,23 @@ class Settings(BaseSettings):
     org_enrichment_scan_poll_interval_minutes: int = Field(
         default=10,
         description="How often the global org enrichment scanner checks for orgs needing enrichment",
+    )
+
+    redis_url: str = Field(
+        default="redis://localhost:6379",
+        description="Redis URL for arq task queue and cross-process event pub/sub",
+    )
+    use_arq_worker: bool = Field(
+        default=False,
+        description="When true, background work is enqueued to arq instead of in-process asyncio tasks",
+    )
+    arq_max_jobs: int = Field(
+        default=3,
+        description="Max concurrent jobs per arq worker process",
+    )
+    arq_job_timeout_seconds: int = Field(
+        default=600,
+        description="Default arq job timeout in seconds",
     )
 
     @field_validator("database_url", mode="before")

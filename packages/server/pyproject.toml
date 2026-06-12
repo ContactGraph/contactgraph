@@ -20,10 +20,13 @@ dependencies = [
     "pgvector>=0.3.6",
     "vobject>=0.9.9",
     "pypdf>=4.0",
+    "arq>=0.26.0",
+    "redis[hiredis]>=5.0.0",
 ]
 
 [project.scripts]
 contactsafe-server = "contactsafe_server.main:run"
+contactsafe-worker = "contactsafe_server.worker:run"
 
 [build-system]
 requires = ["hatchling"]
