@@ -59,6 +59,7 @@ import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { formatCompanySize } from "@/lib/company-size";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { formatIndustryTag, formatIndustryTags } from "@/lib/industry-tags";
+import { formatNetworkContactsLabel } from "@/lib/format-network-contacts-label";
 import { proxyPost } from "@/lib/proxy-client";
 import {
   JOB_PROSPECTS_LIST_NAME,
@@ -321,19 +322,18 @@ export function OrganizationsView({
         header: ({ column }) => (
           <CompactSortHeader column={column} label="Contacts" />
         ),
-        cell: ({ row }) => {
-          const own: number = row.original.contact_count;
-          const shared: number = row.original.shared_contact_count;
-          if (shared > 0) {
-            return (
-              <span className="text-xs">
-                {own > 0 ? `${own} + ` : ""}
-                <span className="text-muted-foreground">{shared} shared</span>
-              </span>
-            );
-          }
-          return <CompactCell value={own.toString()} />;
-        },
+        cell: ({ row }) => (
+          <CompactCell
+            className="text-xs"
+            value={formatNetworkContactsLabel({
+              primaryContactName: row.original.primary_contact_name,
+              contactCount: row.original.contact_count,
+              sharedPrimaryContactName: row.original.shared_primary_contact_name,
+              sharedContactCount: row.original.shared_contact_count,
+              sharedPrimaryBridgeName: row.original.shared_primary_bridge_name,
+            })}
+          />
+        ),
         meta: { width: "w-[5.5rem]" },
       },
       {
