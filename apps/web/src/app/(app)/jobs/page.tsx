@@ -283,41 +283,47 @@ function JobsTable() {
         meta: { width: "w-[4rem]" },
       },
       {
+        id: "bookmark",
+        header: "",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <button
+            type="button"
+            className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+            onClick={(e) => {
+              e.stopPropagation();
+              toggleBookmark(row.original.job_id);
+            }}
+            aria-label={
+              isBookmarked(row.original.job_id)
+                ? "Remove bookmark"
+                : "Bookmark"
+            }
+          >
+            <Bookmark
+              className={`size-3.5 ${isBookmarked(row.original.job_id) ? "fill-current text-foreground" : ""}`}
+            />
+          </button>
+        ),
+        meta: { width: "w-[2rem]" },
+      },
+      {
         id: "actions",
         header: "",
         enableSorting: false,
         cell: ({ row }) => (
-          <div className="flex items-center justify-end gap-1">
-            <button
-              type="button"
-              className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-              onClick={(e) => {
-                e.stopPropagation();
-                toggleBookmark(row.original.job_id);
-              }}
-              aria-label={
-                isBookmarked(row.original.job_id)
-                  ? "Remove bookmark"
-                  : "Bookmark"
-              }
-            >
-              <Bookmark
-                className={`size-3.5 ${isBookmarked(row.original.job_id) ? "fill-current text-foreground" : ""}`}
-              />
-            </button>
-            <a
-              href={row.original.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
-              onClick={(e) => e.stopPropagation()}
-              aria-label="View posting"
-            >
-              <ExternalLink className="size-3.5" />
-            </a>
-          </div>
+          <a
+            href={row.original.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex justify-end rounded p-0.5 text-muted-foreground transition-colors hover:text-foreground"
+            onClick={(e) => e.stopPropagation()}
+            aria-label="View posting"
+          >
+            <ExternalLink className="size-3.5" />
+          </a>
         ),
-        meta: { width: "w-[3rem]", stickyRight: true },
+        meta: { width: "w-[2rem]", stickyRight: true },
       },
     ],
     [toggleBookmark, isBookmarked],
