@@ -7,8 +7,9 @@ import {
 } from "@/app/(marketing)/company-lists/data";
 import { getAllGuideSlugs } from "@/app/(marketing)/guides/data";
 import { companyPageHref } from "@/lib/company-slug";
+import { SITE_URL } from "@/lib/site-url";
 
-const SITE_URL: string = "https://contactgraph.ai";
+export const revalidate = 3600;
 
 const STATIC_ROUTES: readonly {
   readonly path: string;
