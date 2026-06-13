@@ -9,6 +9,11 @@ import {
   getAllCategoryPages,
   type CategoryPageData,
 } from "@/app/(marketing)/company-lists/data";
+import {
+  getAllGuidePages,
+  guidePageHref,
+  type GuidePageData,
+} from "@/app/(marketing)/guides/data";
 import { companyListPageHref } from "@/lib/company-slug";
 import { Button } from "@/components/ui/button";
 
@@ -54,6 +59,7 @@ export default function ResourcesPage() {
   const categoryPages: readonly CategoryPageData[] = getAllCategoryPages();
   const alternativesPages: readonly AlternativesPageData[] =
     getAllAlternativesPages();
+  const guidePages: readonly GuidePageData[] = getAllGuidePages();
 
   return (
     <main className="flex-1">
@@ -119,6 +125,38 @@ export default function ResourcesPage() {
               <li key={page.slug}>
                 <Link
                   href={`/alternatives/${page.slug}`}
+                  className="block px-4 py-5 no-underline transition-colors hover:bg-secondary sm:px-6"
+                >
+                  <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+                    {page.targetKeyword}
+                  </p>
+                  <h3 className="mt-1 text-lg font-bold text-foreground">
+                    {page.pageTitle}
+                  </h3>
+                  <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                    {page.pageDescription}
+                  </p>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      <section id="guides" className="border-t border-border">
+        <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
+          <SectionLabel>Guides</SectionLabel>
+          <SectionHeading>Connect AI to your LinkedIn network</SectionHeading>
+          <p className="mb-10 max-w-xl text-base leading-relaxed text-muted-foreground">
+            LinkedIn doesn&apos;t offer consumer API access for AI tools. These
+            guides explain the problem, compare approaches, and show how to
+            connect Claude to your contacts safely.
+          </p>
+          <ul className="divide-y divide-border border border-border">
+            {guidePages.map((page: GuidePageData) => (
+              <li key={page.slug}>
+                <Link
+                  href={guidePageHref(page.slug)}
                   className="block px-4 py-5 no-underline transition-colors hover:bg-secondary sm:px-6"
                 >
                   <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
