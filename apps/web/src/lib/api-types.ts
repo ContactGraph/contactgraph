@@ -326,6 +326,7 @@ export interface PersonListItem {
   scrapingdog_enriched: boolean;
   shared_from: string | null;
   shared_from_user_id: string | null;
+  job_count: number;
 }
 
 export interface EnrichPersonResult {
@@ -474,6 +475,7 @@ export interface OrgListItem {
   shared_contact_count: number;
   shared_primary_contact_name: string | null;
   shared_primary_bridge_name: string | null;
+  job_count: number;
 }
 
 export interface ListOrgsResult {

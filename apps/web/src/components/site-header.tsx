@@ -116,7 +116,7 @@ export function SiteHeader({
       ref={headerRef}
       className="sticky top-0 z-40 border-b border-border bg-background"
     >
-      <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-2 sm:px-6 sm:py-3">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-4 sm:gap-6">
           <Link
             href="/"
@@ -184,7 +184,7 @@ export function SiteHeader({
         </div>
       </div>
       <nav
-        className="flex gap-4 overflow-x-auto border-t border-border px-4 py-2 md:hidden"
+        className="flex gap-4 overflow-x-auto border-t border-border px-4 py-1.5 md:hidden"
         aria-label="Primary navigation"
       >
         {links.map((item) =>

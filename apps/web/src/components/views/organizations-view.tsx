@@ -246,7 +246,7 @@ export function OrganizationsView({
       {
         accessorKey: "name",
         header: ({ column }) => (
-          <CompactSortHeader column={column} label="Organization" />
+          <CompactSortHeader column={column} label="Name" />
         ),
         cell: ({ row }) => (
           <div className="flex items-center gap-1.5 truncate">
@@ -259,63 +259,6 @@ export function OrganizationsView({
           </div>
         ),
         meta: { width: "w-[8rem]" },
-      },
-      {
-        id: "description",
-        accessorFn: (row: OrgListItem) => row.description ?? "",
-        header: "Description",
-        cell: ({ row }) => (
-          <CompactCell
-            value={row.original.description ?? "—"}
-            title={row.original.description ?? undefined}
-          />
-        ),
-        meta: { width: "w-[12rem]" },
-      },
-      {
-        id: "website",
-        accessorFn: (row: OrgListItem) => row.primary_domain ?? "",
-        header: "Website",
-        cell: ({ row }) => (
-          <CompactLinkCell
-            href={websiteUrl(row.original.primary_domain)}
-            label={row.original.primary_domain ?? "—"}
-          />
-        ),
-        meta: { width: "w-[7rem]" },
-      },
-      {
-        id: "jobs",
-        accessorFn: (row: OrgListItem) => row.careers_url ?? "",
-        header: "Jobs",
-        cell: ({ row }) => (
-          <CompactLinkCell href={row.original.careers_url} label="Careers" />
-        ),
-        meta: { width: "w-[4.5rem]" },
-      },
-      {
-        id: "size",
-        accessorFn: (row: OrgListItem) =>
-          formatCompanySize(row.company_size_band, row.employee_count),
-        header: "Size",
-        cell: ({ row }) => (
-          <CompactCell
-            value={formatCompanySize(
-              row.original.company_size_band,
-              row.original.employee_count,
-            )}
-          />
-        ),
-        meta: { width: "w-[7rem]" },
-      },
-      {
-        id: "categories",
-        accessorFn: (row: OrgListItem) => formatIndustryTags(row.categories),
-        header: "Categories",
-        cell: ({ row }) => (
-          <CompactCell value={formatIndustryTags(row.original.categories)} />
-        ),
-        meta: { width: "w-[6.5rem]" },
       },
       {
         accessorKey: "contact_count",
@@ -337,19 +280,48 @@ export function OrganizationsView({
         meta: { width: "w-[5.5rem]" },
       },
       {
-        id: "shared_by",
-        accessorFn: (row: OrgListItem) => row.shared_from.join(", "),
-        header: "Shared by",
-        cell: ({ row }) => {
-          const sharers: string[] = row.original.shared_from;
-          if (sharers.length === 0) return <CompactCell value="—" />;
-          return (
-            <span className="text-xs text-muted-foreground">
-              {sharers.map((name) => `via ${name}`).join(", ")}
-            </span>
-          );
-        },
-        meta: { width: "w-[5.5rem]" },
+        id: "job_count",
+        accessorFn: (row: OrgListItem) => row.job_count,
+        header: ({ column }) => (
+          <CompactSortHeader column={column} label="# Jobs" />
+        ),
+        cell: ({ row }) => (
+          <CompactCell value={row.original.job_count > 0 ? row.original.job_count.toString() : "—"} />
+        ),
+        meta: { width: "w-[3.5rem]" },
+      },
+      {
+        id: "careers",
+        accessorFn: (row: OrgListItem) => row.careers_url ?? "",
+        header: "Career Page",
+        cell: ({ row }) => (
+          <CompactLinkCell href={row.original.careers_url} label="Careers" />
+        ),
+        meta: { width: "w-[5rem]" },
+      },
+      {
+        id: "categories",
+        accessorFn: (row: OrgListItem) => formatIndustryTags(row.categories),
+        header: "Category",
+        cell: ({ row }) => (
+          <CompactCell value={formatIndustryTags(row.original.categories)} />
+        ),
+        meta: { width: "w-[6.5rem]" },
+      },
+      {
+        id: "size",
+        accessorFn: (row: OrgListItem) =>
+          formatCompanySize(row.company_size_band, row.employee_count),
+        header: "Size",
+        cell: ({ row }) => (
+          <CompactCell
+            value={formatCompanySize(
+              row.original.company_size_band,
+              row.original.employee_count,
+            )}
+          />
+        ),
+        meta: { width: "w-[7rem]" },
       },
       {
         id: "star",

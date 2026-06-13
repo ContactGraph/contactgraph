@@ -45,6 +45,7 @@ class PersonListItem(BaseModel):
     scrapingdog_enriched: bool = False
     shared_from: str | None = None
     shared_from_user_id: UUID | None = None
+    job_count: int = 0
 
 
 class ListPeopleRequest(BaseModel):
@@ -194,6 +195,7 @@ class OrgListItem(BaseModel):
     shared_contact_count: int = 0
     shared_primary_contact_name: str | None = None
     shared_primary_bridge_name: str | None = None
+    job_count: int = 0
 
 
 class ListOrgsResult(BaseModel):

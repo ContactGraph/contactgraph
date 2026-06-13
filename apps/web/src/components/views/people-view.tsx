@@ -11,7 +11,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { Download } from "lucide-react";
+import { ChevronDown, Download } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -25,6 +25,13 @@ import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SearchInput } from "@/components/ui/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -147,28 +154,6 @@ export function PeopleView({
         meta: { width: "w-[12rem]" },
       },
       {
-        accessorKey: "phone",
-        header: "Phone",
-        cell: ({ row }) => (
-          <CompactCell value={row.original.shared_from ? "—" : (row.original.phone ?? "—")} />
-        ),
-        meta: { width: "w-[5.5rem]" },
-      },
-      {
-        accessorKey: "primary_email",
-        header: ({ column }) => <CompactSortHeader column={column} label="Email" />,
-        cell: ({ row }) => (
-          <CompactCell
-            value={
-              row.original.shared_from
-                ? "—"
-                : (row.original.primary_email ?? row.original.emails[0] ?? "—")
-            }
-          />
-        ),
-        meta: { width: "w-[9rem]" },
-      },
-      {
         accessorKey: "current_role",
         header: ({ column }) => <CompactSortHeader column={column} label="Title" />,
         cell: ({ row }) => (
@@ -194,6 +179,37 @@ export function PeopleView({
           );
         },
         meta: { width: "w-[7rem]" },
+      },
+      {
+        id: "jobs",
+        accessorFn: (row: PersonListItem) => row.job_count,
+        header: ({ column }) => <CompactSortHeader column={column} label="# Jobs" />,
+        cell: ({ row }) => (
+          <CompactCell value={row.original.job_count > 0 ? row.original.job_count.toString() : "—"} />
+        ),
+        meta: { width: "w-[3.5rem]" },
+      },
+      {
+        accessorKey: "phone",
+        header: "Phone",
+        cell: ({ row }) => (
+          <CompactCell value={row.original.shared_from ? "—" : (row.original.phone ?? "—")} />
+        ),
+        meta: { width: "w-[5.5rem]" },
+      },
+      {
+        accessorKey: "primary_email",
+        header: ({ column }) => <CompactSortHeader column={column} label="Email" />,
+        cell: ({ row }) => (
+          <CompactCell
+            value={
+              row.original.shared_from
+                ? "—"
+                : (row.original.primary_email ?? row.original.emails[0] ?? "—")
+            }
+          />
+        ),
+        meta: { width: "w-[9rem]" },
       },
       {
         id: "linkedin",
@@ -337,28 +353,27 @@ export function PeopleView({
     downloadCsv(csvFilename("people"), csv);
   };
 
+  const sourceFilterLabels: Record<typeof sourceFilter, string> = {
+    phone_linkedin: "Phone & LinkedIn",
+    phone_only: "Phone only",
+    linkedin_only: "LinkedIn only",
+    all: "All sources",
+  };
+
+  const contactCountText: string = peopleQuery.isLoading
+    ? "Loading your network…"
+    : peopleQuery.data
+      ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
+      : "No network data available.";
+
   return (
     <div className="space-y-2">
       {!embedded ? (
         <div>
           <h1 className="text-xl font-semibold tracking-tight">People</h1>
-          <p className="text-xs text-muted-foreground">
-            {peopleQuery.isLoading
-              ? "Loading your network…"
-              : peopleQuery.data
-                ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
-                : "No network data available."}
-          </p>
+          <p className="text-xs text-muted-foreground">{contactCountText}</p>
         </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          {peopleQuery.isLoading
-            ? "Loading your network…"
-            : peopleQuery.data
-              ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
-              : "No network data available."}
-        </p>
-      )}
+      ) : null}
 
       {peopleQuery.error ? (
         <Alert variant="destructive">
@@ -368,7 +383,7 @@ export function PeopleView({
 
       <div className="flex flex-wrap items-center gap-2">
         <SearchInput
-          containerClassName="w-48"
+          containerClassName="w-36 sm:w-48"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search people…"
@@ -376,27 +391,84 @@ export function PeopleView({
 
         {viewingFilter === "mine" ? (
           <>
-            {([
-              ["phone_linkedin", "Phone + LinkedIn"],
-              ["phone_only", "Phone only"],
-              ["linkedin_only", "LinkedIn only"],
-              ["all", "All sources"],
-            ] as const).map(([value, label]) => (
-              <Button
-                key={value}
-                type="button"
-                variant={sourceFilter === value ? "default" : "outline"}
-                size="sm"
-                className="h-8 text-xs px-2.5"
-                onClick={() => setSourceFilter(value)}
-              >
-                {label}
-              </Button>
-            ))}
+            {/* Desktop: inline pill buttons */}
+            <div className="hidden items-center gap-2 sm:flex">
+              {(
+                [
+                  ["phone_linkedin", "Phone & LinkedIn"],
+                  ["phone_only", "Phone only"],
+                  ["linkedin_only", "LinkedIn only"],
+                  ["all", "All sources"],
+                ] as const
+              ).map(([value, label]) => (
+                <Button
+                  key={value}
+                  type="button"
+                  variant={sourceFilter === value ? "default" : "outline"}
+                  size="sm"
+                  className="h-8 text-xs px-2.5"
+                  onClick={() => setSourceFilter(value)}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+
+            {/* Mobile: compact dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs sm:hidden"
+                >
+                  {sourceFilterLabels[sourceFilter]}
+                  <ChevronDown className="ml-1 size-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuRadioGroup
+                  value={sourceFilter}
+                  onValueChange={(v) =>
+                    setSourceFilter(
+                      v as typeof sourceFilter,
+                    )
+                  }
+                >
+                  <DropdownMenuRadioItem value="phone_linkedin">
+                    Phone & LinkedIn
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="phone_only">
+                    Phone only
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="linkedin_only">
+                    LinkedIn only
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="all">
+                    All sources
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         ) : null}
 
-        <div className="ml-auto flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="size-8 sm:hidden"
+          onClick={handleDownloadCsv}
+          disabled={peopleQuery.isLoading || table.getRowModel().rows.length === 0}
+          aria-label="Download CSV"
+        >
+          <Download className="size-3.5" />
+        </Button>
+
+        <div className="ml-auto hidden items-center gap-2 sm:flex">
+          {embedded ? (
+            <span className="text-xs text-muted-foreground">{contactCountText}</span>
+          ) : null}
           <Button
             type="button"
             variant="outline"

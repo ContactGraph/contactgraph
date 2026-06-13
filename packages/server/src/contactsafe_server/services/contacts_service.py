@@ -32,6 +32,7 @@ from contactsafe_server.db.models import (
     ContactPrivacyLabelRow,
     EmploymentClaim,
     Org,
+    OrgJob,
     Person,
     PersonAlias,
     PersonAttributeClaim,
@@ -198,6 +199,25 @@ class ContactsService:
                 message="No contacts in your network yet. Import phone contacts to get started.",
             )
 
+        org_ids: set[uuid.UUID] = set()
+        for person, _obs, _source in rows:
+            if person.current_org_id is not None:
+                org_ids.add(person.current_org_id)
+        job_counts: dict[uuid.UUID, int] = (
+            await self._load_active_job_counts(org_ids) if org_ids else {}
+        )
+        for person_item in people:
+            org_id: uuid.UUID | None = next(
+                (
+                    person.current_org_id
+                    for person, _obs, _source in rows
+                    if person.id == person_item.person_id
+                ),
+                None,
+            )
+            if org_id is not None:
+                person_item.job_count = job_counts.get(org_id, 0)
+
         return ListPeopleResult(
             people=people,
             total=len(people),
@@ -208,6 +228,21 @@ class ContactsService:
                 f"{strong_tie_count} strong professional tie(s) · {enriched_count} enriched."
             ),
         )
+
+    async def _load_active_job_counts(
+        self, org_ids: set[uuid.UUID]
+    ) -> dict[uuid.UUID, int]:
+        if not org_ids:
+            return {}
+        result = await self._db.execute(
+            select(
+                OrgJob.org_id,
+                func.count(OrgJob.id).label("job_count"),
+            )
+            .where(OrgJob.org_id.in_(org_ids), OrgJob.is_active.is_(True))
+            .group_by(OrgJob.org_id)
+        )
+        return {row.org_id: int(row.job_count) for row in result.all()}
 
     async def get_person(
         self,
@@ -357,6 +392,12 @@ class ContactsService:
 
         if include_shared:
             await self._merge_shared_orgs(user_id, org_map)
+
+        job_counts: dict[uuid.UUID, int] = await self._load_active_job_counts(
+            set(org_map.keys())
+        )
+        for org_id, org_item in org_map.items():
+            org_item.job_count = job_counts.get(org_id, 0)
 
         orgs: list[OrgListItem] = sorted(org_map.values(), key=lambda o: o.name.lower())
 

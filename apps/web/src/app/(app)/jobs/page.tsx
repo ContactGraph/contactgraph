@@ -395,10 +395,10 @@ function JobsTable() {
       }`;
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2 sm:space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-1">
-          <h1 className="text-2xl font-semibold tracking-tight">Open Jobs</h1>
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Open Jobs</h1>
           <p className="text-sm text-muted-foreground">{jobsCountLabel}</p>
         </div>
         <ResponsiveModal
