@@ -258,7 +258,7 @@ export function OrganizationsView({
             <CompactCell value={row.original.name} />
           </div>
         ),
-        meta: { width: "w-[8rem]" },
+        meta: { width: "w-[8rem] sm:w-[12rem]" },
       },
       {
         accessorKey: "contact_count",
@@ -277,7 +277,7 @@ export function OrganizationsView({
             })}
           />
         ),
-        meta: { width: "w-[5.5rem]" },
+        meta: { width: "w-[5.5rem] sm:w-[8rem]" },
       },
       {
         id: "job_count",
@@ -288,7 +288,7 @@ export function OrganizationsView({
         cell: ({ row }) => (
           <CompactCell value={row.original.job_count > 0 ? row.original.job_count.toString() : "—"} />
         ),
-        meta: { width: "w-[3.5rem]" },
+        meta: { width: "w-[3.5rem] sm:w-[5rem]" },
       },
       {
         id: "careers",
@@ -297,7 +297,7 @@ export function OrganizationsView({
         cell: ({ row }) => (
           <CompactLinkCell href={row.original.careers_url} label="Careers" />
         ),
-        meta: { width: "w-[5rem]" },
+        meta: { width: "w-[5rem] sm:w-[7.5rem]" },
       },
       {
         id: "categories",
@@ -306,7 +306,7 @@ export function OrganizationsView({
         cell: ({ row }) => (
           <CompactCell value={formatIndustryTags(row.original.categories)} />
         ),
-        meta: { width: "w-[6.5rem]" },
+        meta: { width: "w-[6.5rem] sm:w-[10rem]" },
       },
       {
         id: "size",
@@ -321,7 +321,7 @@ export function OrganizationsView({
             )}
           />
         ),
-        meta: { width: "w-[7rem]" },
+        meta: { width: "w-[7rem] sm:w-[10.5rem]" },
       },
       {
         id: "star",
@@ -376,7 +376,7 @@ export function OrganizationsView({
           );
         },
         enableSorting: false,
-        meta: { width: "w-[5rem]" },
+        meta: { width: "w-[5rem] sm:w-[7.5rem]" },
       },
       {
         id: "actions",
