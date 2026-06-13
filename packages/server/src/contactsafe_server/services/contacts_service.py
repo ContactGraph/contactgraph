@@ -32,6 +32,7 @@ from contactsafe_server.db.models import (
     ContactPrivacyLabelRow,
     EmploymentClaim,
     Org,
+    OrgJob,
     Person,
     PersonAlias,
     PersonAttributeClaim,
@@ -198,6 +199,26 @@ class ContactsService:
                 message="No contacts in your network yet. Import phone contacts to get started.",
             )
 
+        org_ids: set[uuid.UUID] = set()
+        person_org_map: dict[uuid.UUID, uuid.UUID] = {}
+        for person, _obs, _source in rows:
+            if person.current_org_id is not None:
+                org_ids.add(person.current_org_id)
+                person_org_map[person.id] = person.current_org_id
+
+        if org_ids:
+            job_counts: dict[uuid.UUID, int] = await self._load_active_job_counts(org_ids)
+            org_domains: dict[uuid.UUID, str | None] = await self._load_org_domains(org_ids)
+        else:
+            job_counts = {}
+            org_domains = {}
+
+        for person_item in people:
+            oid: uuid.UUID | None = person_org_map.get(person_item.person_id)
+            if oid is not None:
+                person_item.job_count = job_counts.get(oid, 0)
+                person_item.org_primary_domain = org_domains.get(oid)
+
         return ListPeopleResult(
             people=people,
             total=len(people),
@@ -208,6 +229,31 @@ class ContactsService:
                 f"{strong_tie_count} strong professional tie(s) · {enriched_count} enriched."
             ),
         )
+
+    async def _load_active_job_counts(
+        self, org_ids: set[uuid.UUID]
+    ) -> dict[uuid.UUID, int]:
+        if not org_ids:
+            return {}
+        result = await self._db.execute(
+            select(
+                OrgJob.org_id,
+                func.count(OrgJob.id).label("job_count"),
+            )
+            .where(OrgJob.org_id.in_(org_ids), OrgJob.is_active.is_(True))
+            .group_by(OrgJob.org_id)
+        )
+        return {row.org_id: int(row.job_count) for row in result.all()}
+
+    async def _load_org_domains(
+        self, org_ids: set[uuid.UUID]
+    ) -> dict[uuid.UUID, str | None]:
+        if not org_ids:
+            return {}
+        result = await self._db.execute(
+            select(Org.id, Org.primary_domain).where(Org.id.in_(org_ids))
+        )
+        return {row.id: row.primary_domain for row in result.all()}
 
     async def get_person(
         self,
@@ -357,6 +403,12 @@ class ContactsService:
 
         if include_shared:
             await self._merge_shared_orgs(user_id, org_map)
+
+        job_counts: dict[uuid.UUID, int] = await self._load_active_job_counts(
+            set(org_map.keys())
+        )
+        for org_id, org_item in org_map.items():
+            org_item.job_count = job_counts.get(org_id, 0)
 
         orgs: list[OrgListItem] = sorted(org_map.values(), key=lambda o: o.name.lower())
 

@@ -19,12 +19,14 @@ interface EntityActionsMenuProps {
   entityLabel: string;
   personId: string;
   onEdit?: () => void;
+  triggerClassName?: string;
 }
 
 export function EntityActionsMenu({
   entityLabel,
   personId,
   onEdit,
+  triggerClassName,
 }: EntityActionsMenuProps) {
   const queryClient = useQueryClient();
 
@@ -47,7 +49,7 @@ export function EntityActionsMenu({
         <Button
           variant="ghost"
           size="icon"
-          className="size-6 shrink-0"
+          className={triggerClassName ?? "size-6 shrink-0"}
           onClick={(event) => event.stopPropagation()}
         >
           <MoreHorizontal className="size-3.5" />

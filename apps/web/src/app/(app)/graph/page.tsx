@@ -80,11 +80,11 @@ export default function GraphPage() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2 sm:space-y-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">Graph</h1>
-          <p className="text-sm text-muted-foreground">
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Graph</h1>
+          <p className="hidden text-sm text-muted-foreground sm:block">
             Browse people and organizations in your network.
           </p>
         </div>

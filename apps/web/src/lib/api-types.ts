@@ -310,6 +310,7 @@ export interface PersonListItem {
   primary_email: string | null;
   phone: string | null;
   org_name: string | null;
+  org_primary_domain: string | null;
   current_role: string | null;
   emails: string[];
   sources: string[];
@@ -326,6 +327,7 @@ export interface PersonListItem {
   scrapingdog_enriched: boolean;
   shared_from: string | null;
   shared_from_user_id: string | null;
+  job_count: number;
 }
 
 export interface EnrichPersonResult {
@@ -474,6 +476,7 @@ export interface OrgListItem {
   shared_contact_count: number;
   shared_primary_contact_name: string | null;
   shared_primary_bridge_name: string | null;
+  job_count: number;
 }
 
 export interface ListOrgsResult {

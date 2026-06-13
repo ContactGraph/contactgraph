@@ -11,7 +11,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { Download } from "lucide-react";
+import { ChevronDown, Download } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -20,11 +20,19 @@ import {
   CompactTableShell,
 } from "@/components/data-table/compact-table";
 import { EntityActionsMenu } from "@/components/entity-actions-menu";
+import { OrgLogo } from "@/components/org-logo";
 import { PersonDetailPanel } from "@/components/person-detail-panel";
 import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { SearchInput } from "@/components/ui/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -144,7 +152,44 @@ export function PeopleView({
             </div>
           );
         },
-        meta: { width: "w-[12rem]" },
+        meta: { width: "w-[8rem]" },
+      },
+      {
+        accessorKey: "current_role",
+        header: ({ column }) => <CompactSortHeader column={column} label="Title" />,
+        cell: ({ row }) => (
+          <CompactCell value={row.original.current_role ?? "—"} />
+        ),
+        meta: { width: "w-[6rem]" },
+      },
+      {
+        id: "company",
+        accessorFn: (row: PersonListItem) => row.org_name ?? "",
+        header: ({ column }) => <CompactSortHeader column={column} label="Company" />,
+        cell: ({ row }) => {
+          const orgName: string | null = row.original.org_name;
+          if (!orgName) return <CompactCell value="—" />;
+          return (
+            <Link
+              href={`/graph?tab=organizations&search=${encodeURIComponent(orgName)}`}
+              className="flex items-center gap-1.5 truncate text-xs text-primary no-underline"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <OrgLogo domain={row.original.org_primary_domain} name={orgName} size={16} />
+              <span className="truncate">{orgName}</span>
+            </Link>
+          );
+        },
+        meta: { width: "w-[6rem]" },
+      },
+      {
+        id: "jobs",
+        accessorFn: (row: PersonListItem) => row.job_count,
+        header: ({ column }) => <CompactSortHeader column={column} label="# Jobs" />,
+        cell: ({ row }) => (
+          <CompactCell value={row.original.job_count > 0 ? row.original.job_count.toString() : "—"} />
+        ),
+        meta: { width: "w-[3.5rem]" },
       },
       {
         accessorKey: "phone",
@@ -169,33 +214,6 @@ export function PeopleView({
         meta: { width: "w-[9rem]" },
       },
       {
-        accessorKey: "current_role",
-        header: ({ column }) => <CompactSortHeader column={column} label="Title" />,
-        cell: ({ row }) => (
-          <CompactCell value={row.original.current_role ?? "—"} />
-        ),
-        meta: { width: "w-[7rem]" },
-      },
-      {
-        id: "company",
-        accessorFn: (row: PersonListItem) => row.org_name ?? "",
-        header: ({ column }) => <CompactSortHeader column={column} label="Company" />,
-        cell: ({ row }) => {
-          const orgName: string | null = row.original.org_name;
-          if (!orgName) return <CompactCell value="—" />;
-          return (
-            <Link
-              href={`/graph?tab=organizations&search=${encodeURIComponent(orgName)}`}
-              className="block truncate text-xs text-primary hover:underline"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {orgName}
-            </Link>
-          );
-        },
-        meta: { width: "w-[7rem]" },
-      },
-      {
         id: "linkedin",
         accessorFn: (row: PersonListItem) => row.linkedin_url ?? "",
         header: "LinkedIn",
@@ -208,7 +226,7 @@ export function PeopleView({
               href={url}
               target="_blank"
               rel="noreferrer"
-              className="text-xs text-primary hover:underline"
+              className="text-xs text-primary no-underline"
               onClick={(e) => e.stopPropagation()}
             >
               Profile ↗
@@ -233,7 +251,7 @@ export function PeopleView({
             </div>
           );
         },
-        meta: { width: "w-[2rem]", stickyRight: true },
+        meta: { width: "w-[2rem]", stickyRight: true, hiddenClass: "hidden sm:table-cell" },
       },
     ],
     [],
@@ -337,28 +355,27 @@ export function PeopleView({
     downloadCsv(csvFilename("people"), csv);
   };
 
+  const sourceFilterLabels: Record<typeof sourceFilter, string> = {
+    phone_linkedin: "Phone & LinkedIn",
+    phone_only: "Phone only",
+    linkedin_only: "LinkedIn only",
+    all: "All sources",
+  };
+
+  const contactCountText: string = peopleQuery.isLoading
+    ? "Loading your network…"
+    : peopleQuery.data
+      ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
+      : "No network data available.";
+
   return (
     <div className="space-y-2">
       {!embedded ? (
         <div>
           <h1 className="text-xl font-semibold tracking-tight">People</h1>
-          <p className="text-xs text-muted-foreground">
-            {peopleQuery.isLoading
-              ? "Loading your network…"
-              : peopleQuery.data
-                ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
-                : "No network data available."}
-          </p>
+          <p className="text-xs text-muted-foreground">{contactCountText}</p>
         </div>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          {peopleQuery.isLoading
-            ? "Loading your network…"
-            : peopleQuery.data
-              ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
-              : "No network data available."}
-        </p>
-      )}
+      ) : null}
 
       {peopleQuery.error ? (
         <Alert variant="destructive">
@@ -368,7 +385,7 @@ export function PeopleView({
 
       <div className="flex flex-wrap items-center gap-2">
         <SearchInput
-          containerClassName="w-48"
+          containerClassName="w-36 sm:w-48"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
           placeholder="Search people…"
@@ -376,27 +393,84 @@ export function PeopleView({
 
         {viewingFilter === "mine" ? (
           <>
-            {([
-              ["phone_linkedin", "Phone + LinkedIn"],
-              ["phone_only", "Phone only"],
-              ["linkedin_only", "LinkedIn only"],
-              ["all", "All sources"],
-            ] as const).map(([value, label]) => (
-              <Button
-                key={value}
-                type="button"
-                variant={sourceFilter === value ? "default" : "outline"}
-                size="sm"
-                className="h-8 text-xs px-2.5"
-                onClick={() => setSourceFilter(value)}
-              >
-                {label}
-              </Button>
-            ))}
+            {/* Desktop: inline pill buttons */}
+            <div className="hidden items-center gap-2 sm:flex">
+              {(
+                [
+                  ["phone_linkedin", "Phone & LinkedIn"],
+                  ["phone_only", "Phone only"],
+                  ["linkedin_only", "LinkedIn only"],
+                  ["all", "All sources"],
+                ] as const
+              ).map(([value, label]) => (
+                <Button
+                  key={value}
+                  type="button"
+                  variant={sourceFilter === value ? "default" : "outline"}
+                  size="sm"
+                  className="h-8 text-xs px-2.5"
+                  onClick={() => setSourceFilter(value)}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
+
+            {/* Mobile: compact dropdown */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs sm:hidden"
+                >
+                  {sourceFilterLabels[sourceFilter]}
+                  <ChevronDown className="ml-1 size-3" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                <DropdownMenuRadioGroup
+                  value={sourceFilter}
+                  onValueChange={(v) =>
+                    setSourceFilter(
+                      v as typeof sourceFilter,
+                    )
+                  }
+                >
+                  <DropdownMenuRadioItem value="phone_linkedin">
+                    Phone & LinkedIn
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="phone_only">
+                    Phone only
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="linkedin_only">
+                    LinkedIn only
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="all">
+                    All sources
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         ) : null}
 
-        <div className="ml-auto flex items-center gap-2">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="size-8 sm:hidden"
+          onClick={handleDownloadCsv}
+          disabled={peopleQuery.isLoading || table.getRowModel().rows.length === 0}
+          aria-label="Download CSV"
+        >
+          <Download className="size-3.5" />
+        </Button>
+
+        <div className="ml-auto hidden items-center gap-2 sm:flex">
+          {embedded ? (
+            <span className="text-xs text-muted-foreground">{contactCountText}</span>
+          ) : null}
           <Button
             type="button"
             variant="outline"
@@ -423,7 +497,7 @@ export function PeopleView({
             table={table}
             columnCount={columns.length}
             emptyMessage="No phone contacts in your network yet. Import them from Graph Settings."
-            minWidth="44rem"
+            minWidth="38rem"
             onRowClick={(person: PersonListItem) =>
               setSelectedPersonId(person.person_id)
             }
@@ -436,7 +510,17 @@ export function PeopleView({
         onOpenChange={handleDetailSheetOpenChange}
       >
         <SheetContent className="flex w-full flex-col p-0 sm:max-w-xl">
-          <SheetHeader>
+          <SheetHeader
+            actions={
+              selectedPerson !== undefined && selectedPerson.shared_from === null ? (
+                <EntityActionsMenu
+                  entityLabel={selectedPerson.display_name}
+                  personId={selectedPerson.person_id}
+                  triggerClassName="size-9 shrink-0"
+                />
+              ) : undefined
+            }
+          >
             <SheetTitle>{selectedPerson?.display_name ?? "Contact"}</SheetTitle>
             <SheetDescription>
               {selectedPerson?.shared_from

@@ -20,7 +20,7 @@ export function AppShell({
         <MasqueradeBanner masqueradeAs={masqueradeAs} />
       ) : null}
       <SiteHeader email={masqueradeAs ?? email} isAdmin={isAdmin} />
-      <main className="mx-auto max-w-[1400px] px-4 py-6 sm:px-6">{children}</main>
+      <main className="mx-auto max-w-[1400px] px-4 py-3 sm:px-6 sm:py-6">{children}</main>
     </div>
   );
 }
