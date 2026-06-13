@@ -196,7 +196,7 @@ function JobsTable() {
           return (
             <Link
               href={`/graph?tab=organizations&search=${encodeURIComponent(orgName)}`}
-              className="flex items-center gap-1.5 truncate text-xs text-primary hover:underline"
+              className="flex items-center gap-1.5 truncate text-xs text-primary no-underline"
               onClick={(e) => e.stopPropagation()}
             >
               <OrgLogo

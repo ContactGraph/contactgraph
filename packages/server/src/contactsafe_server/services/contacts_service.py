@@ -200,23 +200,24 @@ class ContactsService:
             )
 
         org_ids: set[uuid.UUID] = set()
+        person_org_map: dict[uuid.UUID, uuid.UUID] = {}
         for person, _obs, _source in rows:
             if person.current_org_id is not None:
                 org_ids.add(person.current_org_id)
-        job_counts: dict[uuid.UUID, int] = (
-            await self._load_active_job_counts(org_ids) if org_ids else {}
-        )
+                person_org_map[person.id] = person.current_org_id
+
+        if org_ids:
+            job_counts: dict[uuid.UUID, int] = await self._load_active_job_counts(org_ids)
+            org_domains: dict[uuid.UUID, str | None] = await self._load_org_domains(org_ids)
+        else:
+            job_counts = {}
+            org_domains = {}
+
         for person_item in people:
-            org_id: uuid.UUID | None = next(
-                (
-                    person.current_org_id
-                    for person, _obs, _source in rows
-                    if person.id == person_item.person_id
-                ),
-                None,
-            )
-            if org_id is not None:
-                person_item.job_count = job_counts.get(org_id, 0)
+            oid: uuid.UUID | None = person_org_map.get(person_item.person_id)
+            if oid is not None:
+                person_item.job_count = job_counts.get(oid, 0)
+                person_item.org_primary_domain = org_domains.get(oid)
 
         return ListPeopleResult(
             people=people,
@@ -243,6 +244,16 @@ class ContactsService:
             .group_by(OrgJob.org_id)
         )
         return {row.org_id: int(row.job_count) for row in result.all()}
+
+    async def _load_org_domains(
+        self, org_ids: set[uuid.UUID]
+    ) -> dict[uuid.UUID, str | None]:
+        if not org_ids:
+            return {}
+        result = await self._db.execute(
+            select(Org.id, Org.primary_domain).where(Org.id.in_(org_ids))
+        )
+        return {row.id: row.primary_domain for row in result.all()}
 
     async def get_person(
         self,

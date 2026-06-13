@@ -29,6 +29,7 @@ class PersonListItem(BaseModel):
     primary_email: str | None = None
     phone: str | None = None
     org_name: str | None = None
+    org_primary_domain: str | None = None
     current_role: str | None = None
     emails: list[str] = Field(default_factory=list)
     sources: list[str] = Field(default_factory=list)

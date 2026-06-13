@@ -20,6 +20,7 @@ import {
   CompactTableShell,
 } from "@/components/data-table/compact-table";
 import { EntityActionsMenu } from "@/components/entity-actions-menu";
+import { OrgLogo } from "@/components/org-logo";
 import { PersonDetailPanel } from "@/components/person-detail-panel";
 import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -151,7 +152,7 @@ export function PeopleView({
             </div>
           );
         },
-        meta: { width: "w-[12rem]" },
+        meta: { width: "w-[8rem]" },
       },
       {
         accessorKey: "current_role",
@@ -159,7 +160,7 @@ export function PeopleView({
         cell: ({ row }) => (
           <CompactCell value={row.original.current_role ?? "—"} />
         ),
-        meta: { width: "w-[7rem]" },
+        meta: { width: "w-[6rem]" },
       },
       {
         id: "company",
@@ -171,14 +172,15 @@ export function PeopleView({
           return (
             <Link
               href={`/graph?tab=organizations&search=${encodeURIComponent(orgName)}`}
-              className="block truncate text-xs text-primary hover:underline"
+              className="flex items-center gap-1.5 truncate text-xs text-primary no-underline"
               onClick={(e) => e.stopPropagation()}
             >
-              {orgName}
+              <OrgLogo domain={row.original.org_primary_domain} name={orgName} size={16} />
+              <span className="truncate">{orgName}</span>
             </Link>
           );
         },
-        meta: { width: "w-[7rem]" },
+        meta: { width: "w-[6rem]" },
       },
       {
         id: "jobs",
@@ -224,7 +226,7 @@ export function PeopleView({
               href={url}
               target="_blank"
               rel="noreferrer"
-              className="text-xs text-primary hover:underline"
+              className="text-xs text-primary no-underline"
               onClick={(e) => e.stopPropagation()}
             >
               Profile ↗
@@ -495,7 +497,7 @@ export function PeopleView({
             table={table}
             columnCount={columns.length}
             emptyMessage="No phone contacts in your network yet. Import them from Graph Settings."
-            minWidth="44rem"
+            minWidth="38rem"
             onRowClick={(person: PersonListItem) =>
               setSelectedPersonId(person.person_id)
             }

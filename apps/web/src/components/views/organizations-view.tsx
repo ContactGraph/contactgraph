@@ -91,7 +91,7 @@ function CompactLinkCell({
       href={href}
       target="_blank"
       rel="noreferrer"
-      className="block truncate text-primary underline-offset-2 hover:underline"
+      className="block truncate text-primary no-underline"
       title={href}
       onClick={(event) => event.stopPropagation()}
     >

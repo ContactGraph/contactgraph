@@ -310,6 +310,7 @@ export interface PersonListItem {
   primary_email: string | null;
   phone: string | null;
   org_name: string | null;
+  org_primary_domain: string | null;
   current_role: string | null;
   emails: string[];
   sources: string[];
