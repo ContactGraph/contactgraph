@@ -25,6 +25,10 @@ export function MarketingFooter() {
           Terms
         </a>
         {" | "}
+        <a href="/alternatives/linkedin-jobs-alternatives" className="no-underline hover:underline">
+          Alternatives
+        </a>
+        {" | "}
         <a href={GITHUB_REPO_URL} className="no-underline hover:underline">
           GitHub
         </a>
