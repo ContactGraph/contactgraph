@@ -36,6 +36,9 @@ _PIPELINE_FUNCTIONS: dict[str, set[str]] = {
     "job_discovery": {"scrape_org_jobs", "global_job_scan"},
     "job_scoring": {"score_jobs_for_user"},
 }
+_KNOWN_WORKER_FUNCTIONS: set[str] = set().union(*_PIPELINE_FUNCTIONS.values())
+_PICKLE_STRING_OPCODES: set[str] = {"BINUNICODE", "SHORT_BINUNICODE", "UNICODE"}
+_PICKLE_MEMO_OPCODES: set[str] = {"BINPUT", "LONG_BINPUT", "MEMOIZE", "PUT"}
 
 
 async def _count_arq_jobs() -> tuple[dict[str, int], dict[str, int], bool]:
@@ -98,28 +101,26 @@ def _function_name_from_job(raw: bytes) -> str | None:
     disassembles the byte stream without importing or constructing
     attacker-controlled objects.
     """
+    _structural_after_value_opcodes: set[str] = {"SETITEM"}
+    _expected_next_keys: set[str] = {"a", "k", "et"}
     saw_function_key: bool = False
     function_name: str | None = None
-    string_opcodes: set[str] = {"BINUNICODE", "SHORT_BINUNICODE", "UNICODE"}
-    memo_opcodes: set[str] = {"MEMOIZE", "PUT", "BINPUT", "LONG_BINPUT"}
-    structural_after_value_opcodes: set[str] = {"SETITEM"}
-    expected_next_keys: set[str] = {"a", "k", "et"}
     try:
         for opcode, arg, _pos in pickletools.genops(raw):
             if function_name is not None:
-                if opcode.name in memo_opcodes | structural_after_value_opcodes:
+                if opcode.name in _PICKLE_MEMO_OPCODES | _structural_after_value_opcodes:
                     continue
-                if opcode.name in string_opcodes and arg in expected_next_keys:
+                if opcode.name in _PICKLE_STRING_OPCODES and arg in _expected_next_keys:
                     return function_name
                 return None
             if saw_function_key:
-                if opcode.name in memo_opcodes:
+                if opcode.name in _PICKLE_MEMO_OPCODES:
                     continue
-                if opcode.name in string_opcodes:
+                if opcode.name in _PICKLE_STRING_OPCODES:
                     function_name = str(arg)
                     continue
                 return None
-            if opcode.name in string_opcodes and arg == "f":
+            if opcode.name in _PICKLE_STRING_OPCODES and arg == "f":
                 saw_function_key = True
     except Exception:
         return None
