@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import pickle
+import pickletools
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from contactsafe_core.contact_schemas import (
     AdminUserItem,
@@ -37,6 +36,9 @@ _PIPELINE_FUNCTIONS: dict[str, set[str]] = {
     "job_discovery": {"scrape_org_jobs", "global_job_scan"},
     "job_scoring": {"score_jobs_for_user"},
 }
+_KNOWN_WORKER_FUNCTIONS: set[str] = set().union(*_PIPELINE_FUNCTIONS.values())
+_PICKLE_STRING_OPCODES: set[str] = {"BINUNICODE", "SHORT_BINUNICODE", "UNICODE"}
+_PICKLE_MEMO_OPCODES: set[str] = {"BINPUT", "LONG_BINPUT", "MEMOIZE", "PUT"}
 
 
 async def _count_arq_jobs() -> tuple[dict[str, int], dict[str, int], bool]:
@@ -89,14 +91,40 @@ async def _count_arq_jobs() -> tuple[dict[str, int], dict[str, int], bool]:
 
 
 def _function_name_from_job(raw: bytes) -> str | None:
+    """Extract an arq function name without deserializing the pickle payload.
+
+    arq's default job serializer stores jobs as pickled dictionaries containing an
+    ``"f"`` key for the function name.  Calling ``pickle.loads`` on Redis data is
+    unsafe because Redis contents are not trusted by the admin API process, so this
+    parser only walks pickle opcodes and returns the string value for the first
+    ``"f"`` key when the surrounding arq job shape is present.  ``pickletools``
+    disassembles the byte stream without importing or constructing
+    attacker-controlled objects.
+    """
+    _structural_after_value_opcodes: set[str] = {"SETITEM"}
+    _expected_next_keys: set[str] = {"a", "k", "et"}
+    saw_function_key: bool = False
+    function_name: str | None = None
     try:
-        data: dict[str, Any] = pickle.loads(raw)
-        function: object = data.get("f")
-        if function is None:
-            return None
-        return str(getattr(function, "__name__", function))
+        for opcode, arg, _pos in pickletools.genops(raw):
+            if function_name is not None:
+                if opcode.name in _PICKLE_MEMO_OPCODES | _structural_after_value_opcodes:
+                    continue
+                if opcode.name in _PICKLE_STRING_OPCODES and arg in _expected_next_keys:
+                    return function_name
+                return None
+            if saw_function_key:
+                if opcode.name in _PICKLE_MEMO_OPCODES:
+                    continue
+                if opcode.name in _PICKLE_STRING_OPCODES:
+                    function_name = str(arg)
+                    continue
+                return None
+            if opcode.name in _PICKLE_STRING_OPCODES and arg == "f":
+                saw_function_key = True
     except Exception:
         return None
+    return None
 
 
 def _pipeline_for_function(function_name: str) -> str | None:
