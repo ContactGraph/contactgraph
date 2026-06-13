@@ -53,10 +53,11 @@ class OAuthService:
         if source_type == SourceType.GOOGLE_CONTACTS:
             source_type = SourceType.GOOGLE_MAIL
 
-        if user_token:
+        if user_token and authenticated_user_id is not None:
             existing: ConnectSourceResult | None = await self._check_existing_by_email(
                 user_token,
                 source_type=source_type,
+                authenticated_user_id=authenticated_user_id,
             )
             if existing is not None:
                 return existing
@@ -125,10 +126,11 @@ class OAuthService:
         email: str,
         *,
         source_type: SourceType = SourceType.GOOGLE_MAIL,
+        authenticated_user_id: uuid.UUID | None = None,
     ) -> ConnectSourceResult | None:
         normalized: str = email.strip().lower()
         user: User | None = await self._find_user_by_email(normalized)
-        if user is None:
+        if user is None or user.id != authenticated_user_id:
             return None
 
         cred: OAuthCredential | None = await self._get_valid_credential(
