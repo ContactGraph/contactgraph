@@ -5,6 +5,7 @@ import {
   fetchCategoryCompanies,
   getAllCategorySlugs,
 } from "@/app/(marketing)/company-lists/data";
+import { getAllFeatureSlugs } from "@/app/(marketing)/features/data";
 import { getAllGuideSlugs } from "@/app/(marketing)/guides/data";
 import { companyPageHref } from "@/lib/company-slug";
 import { SITE_URL } from "@/lib/site-url";
@@ -71,6 +72,15 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }),
   );
 
+  const featurePages: MetadataRoute.Sitemap = getAllFeatureSlugs().map(
+    (slug: string) => ({
+      url: `${SITE_URL}/features/${slug}`,
+      lastModified: now,
+      changeFrequency: "monthly" as const,
+      priority: 0.85,
+    }),
+  );
+
   const alternativesPages: MetadataRoute.Sitemap = getAllAlternativesSlugs().map(
     (slug: string) => ({
       url: `${SITE_URL}/alternatives/${slug}`,
@@ -99,6 +109,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   return [
     ...staticPages,
+    ...featurePages,
     ...guidePages,
     ...alternativesPages,
     ...categoryPages,

@@ -10,6 +10,11 @@ import {
   type CategoryPageData,
 } from "@/app/(marketing)/company-lists/data";
 import {
+  getAllFeaturePages,
+  featurePageHref,
+  type FeaturePageData,
+} from "@/app/(marketing)/features/data";
+import {
   getAllGuidePages,
   guidePageHref,
   type GuidePageData,
@@ -19,7 +24,7 @@ import { Button } from "@/components/ui/button";
 
 const PAGE_TITLE = "Resources for job seekers";
 const PAGE_DESCRIPTION =
-  "Live hiring lists, job-search tool comparisons, and warm intro paths through your network.";
+  "Live hiring lists, product features, job-search comparisons, and warm intro paths through your network.";
 
 export const metadata: Metadata = {
   title: `${PAGE_TITLE} — ContactGraph`,
@@ -59,6 +64,7 @@ export default function ResourcesPage() {
   const categoryPages: readonly CategoryPageData[] = getAllCategoryPages();
   const alternativesPages: readonly AlternativesPageData[] =
     getAllAlternativesPages();
+  const featurePages: readonly FeaturePageData[] = getAllFeaturePages();
   const guidePages: readonly GuidePageData[] = getAllGuidePages();
 
   return (
@@ -69,9 +75,8 @@ export default function ResourcesPage() {
           Who&apos;s hiring — and who you know there.
         </h1>
         <p className="mt-6 max-w-xl text-base leading-relaxed text-muted-foreground">
-          Browse live employer lists with current open-role counts, compare
-          job-search tools to ContactGraph, and find a warm intro path before
-          you apply.
+          Browse live employer lists, explore what ContactGraph does, compare
+          job-search tools, and find a warm intro path before you apply.
         </p>
         <div className="mt-7">
           <Button asChild>
@@ -94,6 +99,37 @@ export default function ResourcesPage() {
               <li key={page.slug}>
                 <Link
                   href={companyListPageHref(page.slug)}
+                  className="block px-4 py-5 no-underline transition-colors hover:bg-secondary sm:px-6"
+                >
+                  <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+                    {page.targetKeyword}
+                  </p>
+                  <h3 className="mt-1 text-lg font-bold text-foreground">
+                    {page.pageTitle}
+                  </h3>
+                  <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                    {page.pageDescription}
+                  </p>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      <section className="border-t border-border">
+        <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
+          <SectionLabel>Features</SectionLabel>
+          <SectionHeading>What ContactGraph does</SectionHeading>
+          <p className="mb-10 max-w-xl text-base leading-relaxed text-muted-foreground">
+            Core capabilities for warm-path job search — from finding intro
+            opportunities to enriching and searching your professional network.
+          </p>
+          <ul className="divide-y divide-border border border-border">
+            {featurePages.map((page: FeaturePageData) => (
+              <li key={page.slug}>
+                <Link
+                  href={featurePageHref(page.slug)}
                   className="block px-4 py-5 no-underline transition-colors hover:bg-secondary sm:px-6"
                 >
                   <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
