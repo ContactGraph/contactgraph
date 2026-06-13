@@ -62,3 +62,10 @@ def test_refresh_token_has_typ_claim(jwt_service: JWTService) -> None:
     token: str = jwt_service.create_refresh_token(user_id, ["contactsafe:read"])
     claims: dict[str, object] = jwt_service.decode_token(token)
     assert claims["typ"] == "refresh"
+
+
+def test_unsubscribe_token_round_trip(jwt_service: JWTService) -> None:
+    user_id: uuid.UUID = uuid.uuid4()
+    token: str = jwt_service.create_unsubscribe_token(user_id)
+    decoded: uuid.UUID = jwt_service.decode_unsubscribe_token(token)
+    assert decoded == user_id

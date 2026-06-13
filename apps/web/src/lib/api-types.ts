@@ -777,6 +777,17 @@ export interface JobPreferencesResult {
   message: string;
 }
 
+export type JobDigestFrequency = "daily" | "weekly" | "off";
+
+export interface NotificationPreferencesResult {
+  job_digest_frequency: JobDigestFrequency;
+  message: string;
+}
+
+export interface SetNotificationPreferencesRequest {
+  job_digest_frequency: JobDigestFrequency;
+}
+
 export interface PipelineStatus {
   name: string;
   queued: number;

@@ -232,6 +232,63 @@ async def global_job_scan(ctx: dict[str, Any]) -> None:
         await record_worker_run("job_discovery_scan", duration_ms=duration_ms, settings=settings)
 
 
+async def send_job_digests(ctx: dict[str, Any]) -> None:
+    settings: Settings = ctx["settings"]
+    factory = ctx["session_factory"]
+    redis = ctx["redis"]
+    started: float = time.monotonic()
+
+    from contactsafe_server.deps import build_jwt_service
+    from contactsafe_server.services.job_digest_service import JobDigestService
+
+    try:
+        async with factory() as db:
+            service = JobDigestService(
+                db,
+                settings,
+                jwt_service=build_jwt_service(settings),
+            )
+            user_ids: list[uuid.UUID] = await service.collect_users_due()
+
+        for user_id in user_ids:
+            await redis.enqueue_job(
+                "send_job_digest_for_user",
+                str(user_id),
+                _job_id=f"digest-user-{user_id}",
+            )
+    except Exception:
+        logger.exception("Job digest enqueue failed")
+    finally:
+        duration_ms: int = int((time.monotonic() - started) * 1000)
+        await record_worker_run("job_digest_scan", duration_ms=duration_ms, settings=settings)
+
+
+async def send_job_digest_for_user(ctx: dict[str, Any], user_id: str) -> dict[str, object]:
+    settings: Settings = ctx["settings"]
+    factory = ctx["session_factory"]
+    uid: uuid.UUID = uuid.UUID(user_id)
+    started: float = time.monotonic()
+
+    from contactsafe_server.deps import build_jwt_service
+    from contactsafe_server.services.job_digest_service import JobDigestService
+
+    async with factory() as db:
+        service = JobDigestService(
+            db,
+            settings,
+            jwt_service=build_jwt_service(settings),
+        )
+        result = await service.send_digest_for_user(uid)
+
+    duration_ms: int = int((time.monotonic() - started) * 1000)
+    await record_worker_run("job_digest_send", duration_ms=duration_ms, settings=settings)
+    return {
+        "sent": result.sent,
+        "job_count": result.job_count,
+        "message": result.message,
+    }
+
+
 async def global_org_enrichment_scan(ctx: dict[str, Any]) -> None:
     settings: Settings = ctx["settings"]
     factory = ctx["session_factory"]
@@ -277,6 +334,8 @@ class WorkerSettings:
         enrich_org,
         enrich_user_orgs,
         global_job_scan,
+        send_job_digests,
+        send_job_digest_for_user,
         global_org_enrichment_scan,
     ]
 
@@ -291,6 +350,11 @@ class WorkerSettings:
             global_job_scan,
             minute=_job_scan_cron_minutes(get_settings()),
             run_at_startup=True,
+            unique=True,
+        ),
+        cron(
+            send_job_digests,
+            minute={15},
             unique=True,
         ),
         cron(
