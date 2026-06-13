@@ -8,6 +8,7 @@ export const metadata: Metadata = {
   title: "Manifesto — ContactGraph",
   description:
     "We gave away our relationships — ContactGraph builds a private graph from your email so your agent can answer who you know.",
+  alternates: { canonical: "/manifesto" },
   openGraph: {
     title: "Manifesto — ContactGraph",
     description:

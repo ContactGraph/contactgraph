@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   title: "Terms of Service — ContactGraph",
   description:
     "ContactGraph terms of service — usage terms, responsibilities, and disclaimers.",
+  alternates: { canonical: "/terms" },
   openGraph: {
     title: "Terms of Service — ContactGraph",
     description:

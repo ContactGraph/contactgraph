@@ -6,6 +6,7 @@ export const metadata: Metadata = {
   title: "Privacy Policy — ContactGraph",
   description:
     "ContactGraph privacy policy — what data we collect, how we use it, and your rights.",
+  alternates: { canonical: "/privacy" },
   openGraph: {
     title: "Privacy Policy — ContactGraph",
     description:
