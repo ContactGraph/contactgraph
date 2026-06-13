@@ -25,6 +25,10 @@ export function MarketingFooter() {
           Terms
         </a>
         {" | "}
+        <a href="/resources" className="no-underline hover:underline">
+          Resources
+        </a>
+        {" | "}
         <a href="/alternatives/linkedin-jobs-alternatives" className="no-underline hover:underline">
           Alternatives
         </a>

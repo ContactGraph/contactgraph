@@ -9,6 +9,7 @@ from fastapi.responses import FileResponse
 from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
 
+from contactsafe_server.api.public_router import router as public_router
 from contactsafe_server.api.router import router as api_router
 from contactsafe_server.config import Settings, get_settings
 from contactsafe_server.db.connection import init_db, shutdown_db
@@ -100,6 +101,7 @@ def create_app() -> FastAPI:
 
     app.include_router(oauth_router)
     app.include_router(well_known_router)
+    app.include_router(public_router, prefix="/api/public")
     app.include_router(api_router, prefix="/api")
     from contactsafe_server.api.admin_router import router as admin_router
 

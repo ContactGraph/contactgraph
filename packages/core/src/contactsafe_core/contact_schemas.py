@@ -530,3 +530,43 @@ class AdminUserItem(BaseModel):
 class AdminUsersResult(BaseModel):
     users: list[AdminUserItem] = Field(default_factory=list)
     message: str = "OK"
+
+
+class PublicCategoryJobItem(BaseModel):
+    job_id: UUID
+    title: str
+    location: str | None = None
+    url: str
+    remote_status: str | None = None
+    posted_at: datetime | None = None
+
+
+class PublicCategoryCompanyItem(BaseModel):
+    org_id: UUID
+    slug: str
+    name: str
+    primary_domain: str | None = None
+    description: str | None = None
+    company_size_band: str | None = None
+    active_job_count: int
+    sample_jobs: list[PublicCategoryJobItem] = Field(default_factory=list)
+
+
+class PublicCompaniesByCategoryResult(BaseModel):
+    category: str
+    companies: list[PublicCategoryCompanyItem] = Field(default_factory=list)
+    total_companies: int = 0
+    total_jobs: int = 0
+    generated_at: datetime
+
+
+class PublicCompanyDetailResult(BaseModel):
+    org_id: UUID
+    slug: str
+    name: str
+    primary_domain: str | None = None
+    description: str | None = None
+    company_size_band: str | None = None
+    active_job_count: int
+    jobs: list[PublicCategoryJobItem] = Field(default_factory=list)
+    generated_at: datetime
