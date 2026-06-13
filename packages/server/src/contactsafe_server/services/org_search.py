@@ -4,6 +4,35 @@ import re
 
 from contactsafe_server.services.email_parse import BROADCAST_LOCAL_PARTS, NO_REPLY_LOCAL_PARTS
 
+_PLACEHOLDER_ORG_NAMES: frozenset[str] = frozenset(
+    {
+        "self employed",
+        "selfemployed",
+        "freelance",
+        "freelancer",
+        "freelancing",
+        "independent",
+        "independent consultant",
+        "retired",
+        "unemployed",
+        "student",
+        "none",
+        "n a",
+        "na",
+        "not applicable",
+        "various",
+        "myself",
+        "personal",
+        "home",
+        "open to work",
+        "looking for opportunities",
+        "between jobs",
+        "seeking opportunities",
+        "available",
+        "confidential",
+    }
+)
+
 # TLDs that often appear as a separate word in company names (e.g. "Sticker VC").
 _COMPANY_TLD_SUFFIXES: frozenset[str] = frozenset(
     {"vc", "ai", "io", "co", "tv", "hq", "labs", "capital", "ventures", "partners"}
@@ -132,6 +161,56 @@ def is_automation_or_generic_domain(domain: str) -> bool:
         or is_automation_domain(domain_lower)
         or is_non_company_domain(domain_lower)
     )
+
+
+def normalize_org_name_key(name: str) -> str:
+    """Lowercase org name with punctuation collapsed for alias lookup."""
+    lowered: str = name.strip().lower()
+    collapsed: str = re.sub(r"[^a-z0-9]+", " ", lowered)
+    return " ".join(collapsed.split())
+
+
+def is_placeholder_org_name(name: str) -> bool:
+    """LinkedIn-style status labels that are not real organizations."""
+    normalized: str = normalize_org_name_key(name)
+    if not normalized or len(normalized) < 2:
+        return True
+    if normalized in _PLACEHOLDER_ORG_NAMES:
+        return True
+    return normalized.startswith("stealth")
+
+
+def org_name_from_domain(domain: str) -> str | None:
+    """Infer a display org name from a work email domain."""
+    domain_lower: str = domain.strip().lower()
+    if not domain_lower or "." not in domain_lower:
+        return None
+    if (
+        domain_lower in _GENERIC_EMAIL_DOMAINS
+        or is_automation_domain(domain_lower)
+        or is_non_company_domain(domain_lower)
+    ):
+        return None
+
+    known_brand: str | None = _KNOWN_DOMAIN_BRANDS.get(domain_lower)
+    if known_brand is not None:
+        return known_brand
+
+    labels: list[str] = [label for label in domain_lower.split(".") if label]
+    if len(labels) < 2:
+        return None
+
+    tld: str = labels[-1].lower()
+    sld: str = labels[-2].lower()
+    if tld in _COMPANY_TLD_SUFFIXES and len(labels) >= 2:
+        brand: str = _label_to_words(sld)
+        suffix: str = tld.upper() if len(tld) <= 3 else tld.title()
+        return f"{brand} {suffix}".strip()
+
+    brand_only: str = _label_to_words(sld)
+    if not brand_only or len(brand_only) < 2:
+        return None
+    return brand_only
 
 
 def org_name_from_email(email: str) -> str | None:

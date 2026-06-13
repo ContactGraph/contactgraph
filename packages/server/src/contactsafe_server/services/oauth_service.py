@@ -53,10 +53,11 @@ class OAuthService:
         if source_type == SourceType.GOOGLE_CONTACTS:
             source_type = SourceType.GOOGLE_MAIL
 
-        if user_token:
+        if user_token and authenticated_user_id is not None:
             existing: ConnectSourceResult | None = await self._check_existing_by_email(
                 user_token,
                 source_type=source_type,
+                authenticated_user_id=authenticated_user_id,
             )
             if existing is not None:
                 return existing
@@ -125,10 +126,11 @@ class OAuthService:
         email: str,
         *,
         source_type: SourceType = SourceType.GOOGLE_MAIL,
+        authenticated_user_id: uuid.UUID | None = None,
     ) -> ConnectSourceResult | None:
         normalized: str = email.strip().lower()
         user: User | None = await self._find_user_by_email(normalized)
-        if user is None:
+        if user is None or user.id != authenticated_user_id:
             return None
 
         cred: OAuthCredential | None = await self._get_valid_credential(
@@ -154,7 +156,11 @@ class OAuthService:
             requested_scopes=list(cred.scopes),
             completed_at=datetime.now(tz=UTC),
         )
-        poll_secret: str = assign_poll_secret(session)
+        # Already-connected lookups are reachable before authentication when a
+        # caller supplies an email as ``user_token``. Keep the response
+        # informational only: do not create a poll secret that could be used to
+        # redeem this shortcut session for bearer tokens. Authenticated callers
+        # that own the source are issued tokens by ``actions.connect_source``.
         self._db.add(session)
         await self._db.flush()
 
@@ -177,7 +183,6 @@ class OAuthService:
             email=user.email,
             scopes=list(cred.scopes),
             source_id=target_source.id,
-            poll_secret=poll_secret,
         )
 
     async def _find_user_by_email(self, email: str) -> User | None:

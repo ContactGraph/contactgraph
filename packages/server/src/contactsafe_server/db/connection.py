@@ -23,6 +23,8 @@ def get_engine(settings: Settings | None = None) -> AsyncEngine:
             str(cfg.database_url),
             echo=cfg.database_echo,
             pool_pre_ping=True,
+            pool_size=cfg.database_pool_size,
+            max_overflow=cfg.database_max_overflow,
             connect_args=connect_args if connect_args else {},
         )
     return _engine

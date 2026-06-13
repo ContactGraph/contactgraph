@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
 
-import type { UserProfileResult } from "@/lib/api-types";
+import type { UserProfileResult, ViewTrustedUsersResult } from "@/lib/api-types";
 import { useOnboardingPhase } from "@/lib/use-onboarding-phase";
 import { proxyPost } from "@/lib/proxy-client";
 import { cn } from "@/lib/utils";
@@ -24,7 +24,13 @@ const marketingLinks: readonly NavLink[] = [
   { kind: "internal", href: "/manifesto", label: "Manifesto" },
 ];
 
-export function SiteHeader({ email }: { email: string | null }) {
+export function SiteHeader({
+  email,
+  isAdmin = false,
+}: {
+  email: string | null;
+  isAdmin?: boolean;
+}) {
   const pathname: string = usePathname();
   const headerRef = useRef<HTMLElement>(null);
   const onboarding = useOnboardingPhase();
@@ -36,12 +42,27 @@ export function SiteHeader({ email }: { email: string | null }) {
     staleTime: 5 * 60 * 1000,
   });
 
+  const trustQuery = useQuery({
+    queryKey: ["trust-list"],
+    queryFn: () => proxyPost<ViewTrustedUsersResult>("view-trusted-users"),
+    enabled: email !== null,
+    staleTime: 60 * 1000,
+  });
+
+  const pendingInviteCount: number = trustQuery.data?.inbound_invites.length ?? 0;
+
   const appLinks: readonly NavLink[] = onboarding.showJobsTab
     ? [
-        { kind: "internal", href: "/graph", label: "My Graph" },
+        { kind: "internal", href: "/graph", label: "Graph" },
         { kind: "internal", href: "/jobs", label: "Jobs" },
+        { kind: "internal", href: "/sharing", label: "Sharing" },
+        ...(isAdmin ? [{ kind: "internal" as const, href: "/admin", label: "Admin" }] : []),
       ]
-    : [{ kind: "internal", href: "/graph", label: "My Graph" }];
+    : [
+        { kind: "internal", href: "/graph", label: "Graph" },
+        { kind: "internal", href: "/sharing", label: "Sharing" },
+        ...(isAdmin ? [{ kind: "internal" as const, href: "/admin", label: "Admin" }] : []),
+      ];
 
   const links: readonly NavLink[] = email ? appLinks : marketingLinks;
 
@@ -98,7 +119,7 @@ export function SiteHeader({ email }: { email: string | null }) {
       <div className="mx-auto flex max-w-[1400px] items-center justify-between gap-4 px-4 py-3 sm:px-6">
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-4 sm:gap-6">
           <Link
-            href={email ? "/graph" : "/"}
+            href="/"
             className="text-lg font-bold tracking-tight text-foreground no-underline hover:no-underline hover:opacity-80"
           >
             ContactGraph
@@ -112,9 +133,14 @@ export function SiteHeader({ email }: { email: string | null }) {
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={navLinkClass(item.href)}
+                  className={cn(navLinkClass(item.href), "relative")}
                 >
                   {item.label}
+                  {item.href === "/sharing" && pendingInviteCount > 0 ? (
+                    <span className="absolute -right-2.5 -top-1.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground">
+                      {pendingInviteCount}
+                    </span>
+                  ) : null}
                 </Link>
               ) : (
                 <a
@@ -167,13 +193,18 @@ export function SiteHeader({ email }: { email: string | null }) {
               key={item.href}
               href={item.href}
               className={cn(
-                "whitespace-nowrap text-sm no-underline hover:underline",
+                "relative whitespace-nowrap text-sm no-underline hover:underline",
                 pathname === item.href
                   ? "font-semibold text-foreground"
                   : "text-muted-foreground",
               )}
             >
               {item.label}
+              {item.href === "/sharing" && pendingInviteCount > 0 ? (
+                <span className="absolute -right-2.5 -top-1.5 flex size-4 items-center justify-center rounded-full bg-primary text-[10px] font-medium text-primary-foreground">
+                  {pendingInviteCount}
+                </span>
+              ) : null}
             </Link>
           ) : (
             <a

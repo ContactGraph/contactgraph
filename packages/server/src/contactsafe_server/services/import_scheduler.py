@@ -14,6 +14,7 @@ from contactsafe_server.services.file_upload_import_service import FileUploadImp
 from contactsafe_server.services.gmail_client import GmailClient
 from contactsafe_server.services.google_calendar_import_service import GoogleCalendarImportService
 from contactsafe_server.services.import_service import ImportService
+from contactsafe_server.graph_event_publishers import publish_source_sync_update
 from contactsafe_server.services.people_api_client import PeopleApiClient
 
 logger = logging.getLogger(__name__)
@@ -59,54 +60,6 @@ def is_user_sync_running(user_id: uuid.UUID) -> bool:
     return False
 
 
-async def _is_graph_ready(db: AsyncSession, user_id: uuid.UUID) -> bool:
-    """True when both phone contacts and LinkedIn connections imports are complete."""
-    from sqlalchemy import select as sa_select
-
-    result = await db.execute(
-        sa_select(Source.source_type, Source.sync_state).where(
-            Source.user_id == user_id,
-            Source.source_type.in_([
-                SourceType.PHONE_CONTACTS_UPLOAD.value,
-                SourceType.LINKEDIN_CONNECTIONS_UPLOAD.value,
-            ]),
-        )
-    )
-    completed_types: set[str] = set()
-    for source_type_val, sync_state in result.all():
-        if sync_state == SyncState.COMPLETE.value:
-            completed_types.add(source_type_val)
-    return (
-        SourceType.PHONE_CONTACTS_UPLOAD.value in completed_types
-        and SourceType.LINKEDIN_CONNECTIONS_UPLOAD.value in completed_types
-    )
-
-
-async def _maybe_start_org_enrichment(
-    db: AsyncSession,
-    ctx: object,
-    user_id: uuid.UUID,
-) -> None:
-    """Start org enrichment once the graph is ready (both imports complete)."""
-    if not await _is_graph_ready(db, user_id):
-        logger.info(
-            "Skipping org enrichment for user %s — graph not ready yet",
-            user_id,
-        )
-        return
-    from contactsafe_server.services.org_enrichment_service import (
-        OrgEnrichmentService,
-    )
-
-    org_service = OrgEnrichmentService(db, ctx.settings)  # type: ignore[attr-defined]
-    enrich_result = await org_service.start_enrichment(user_id)
-    logger.info(
-        "Auto org enrichment after graph ready for user %s: %s",
-        user_id,
-        enrich_result.message,
-    )
-
-
 async def _mark_source_sync_failed(
     db: AsyncSession,
     source_id: uuid.UUID,
@@ -118,6 +71,7 @@ async def _mark_source_sync_failed(
     source.sync_state = SyncState.FAILED.value
     source.sync_error = error[:500]
     await db.commit()
+    publish_source_sync_update(source)
 
 
 async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
@@ -166,11 +120,6 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
                         encryptor=ctx.encryptor,
                     )
                     await service.run_sync(source_id)
-                    if source_type in {
-                        SourceType.PHONE_CONTACTS_UPLOAD.value,
-                        SourceType.LINKEDIN_CONNECTIONS_UPLOAD.value,
-                    }:
-                        await _maybe_start_org_enrichment(db, ctx, user_id)
                 else:
                     logger.warning(
                         "Sync skipped for source %s with type %s",

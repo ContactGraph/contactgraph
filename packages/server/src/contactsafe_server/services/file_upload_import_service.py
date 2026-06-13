@@ -32,6 +32,8 @@ from contactsafe_server.services.phone_contacts_parser import (
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.import_write_lock import user_import_write_lock
 from contactsafe_server.services.upload_payload_crypto import read_upload_payload
+from contactsafe_server.graph_event_publishers import publish_source_sync_update
+from contactsafe_server.services.user_org_observation_service import rebuild_user_org_observations
 from contactsafe_server.services.user_person_service import ensure_user_person
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -40,6 +42,32 @@ _LINKEDIN_UPLOAD_RELATIONSHIP_TYPES: list[str] = ["linkedin_connections_upload"]
 _PHONE_UPLOAD_RELATIONSHIP_TYPES: list[str] = ["phone_contacts_upload"]
 _IMPORT_PROGRESS_COMMIT_BATCH: int = 25
 _LINKEDIN_IMPORT_COMMIT_BATCH: int = 10
+_EMAIL_AT_RE = __import__("re").compile(r"@")
+
+
+def _should_prefer_phone_name(
+    *,
+    phone_name: str,
+    existing_name: str | None,
+    primary_email: str | None,
+) -> bool:
+    """Decide whether a phone contact's display name should replace the current one.
+
+    Phone contacts are the user's authoritative address book, so their name
+    should win when the existing name is missing, is just an email, or is a
+    longer business-style expansion (e.g. "Shalom Ormsby Images Inc.").
+    """
+    if not existing_name:
+        return True
+    if existing_name == (primary_email or ""):
+        return True
+    if _EMAIL_AT_RE.search(existing_name):
+        return True
+    existing_words: list[str] = existing_name.strip().lower().split()
+    phone_words: list[str] = phone_name.strip().lower().split()
+    if len(phone_words) >= 2 and existing_words[:len(phone_words)] == phone_words:
+        return True
+    return False
 
 
 def _merged_relationship_types_on_conflict() -> text:
@@ -69,6 +97,7 @@ class FileUploadImportService:
     async def _commit_progress(self, source: Source) -> None:
         await self._db.commit()
         await self._db.refresh(source)
+        publish_source_sync_update(source)
 
     async def run_sync(self, source_id: uuid.UUID) -> None:
         source: Source | None = await self._db.get(Source, source_id)
@@ -89,6 +118,7 @@ class FileUploadImportService:
         source.contacts_resolved = 0
         source.contacts_pending = 0
         await self._db.flush()
+        publish_source_sync_update(source)
 
         try:
             filename, content = read_upload_payload(
@@ -107,12 +137,15 @@ class FileUploadImportService:
                 else:
                     await self._ingest_linkedin_connections(source, content)
 
+                await rebuild_user_org_observations(self._db, user_id)
+
                 source.upload_payload = None
                 source.sync_state = SyncState.COMPLETE.value
                 source.sync_completed_at = datetime.now(tz=UTC)
                 source.connection_status = SourceConnectionStatus.CONNECTED.value
                 source.contacts_pending = 0
                 await self._db.flush()
+                publish_source_sync_update(source)
         except Exception as exc:
             logger.exception("Upload import failed for source %s", source_id)
             await self._db.rollback()
@@ -121,6 +154,7 @@ class FileUploadImportService:
                 failed_source.sync_state = SyncState.FAILED.value
                 failed_source.sync_error = str(exc)[:500]
                 await self._db.commit()
+                publish_source_sync_update(failed_source)
             raise
 
     async def _ingest_phone_contacts(
@@ -163,9 +197,10 @@ class FileUploadImportService:
                 linkedin_url=contact.linkedin_url,
             )
 
-            if contact.display_name and (
-                not person.canonical_name
-                or person.canonical_name == (person.primary_email or "")
+            if contact.display_name and _should_prefer_phone_name(
+                phone_name=contact.display_name,
+                existing_name=person.canonical_name,
+                primary_email=person.primary_email,
             ):
                 person.canonical_name = contact.display_name
 
@@ -356,16 +391,17 @@ class FileUploadImportService:
 
             if connection.company:
                 org = await resolver.resolve_org(domain=None, name=connection.company)
-                await record_employment(
-                    self._db,
-                    person_id=person.id,
-                    org_id=org.id,
-                    role_title=connection.position,
-                    contributor_user_id=source.user_id,
-                    contributor_source_kind="linkedin_connections_upload",
-                    contributor_source_id=source.id,
-                    confidence=0.8,
-                )
+                if org is not None:
+                    await record_employment(
+                        self._db,
+                        person_id=person.id,
+                        org_id=org.id,
+                        role_title=connection.position,
+                        contributor_user_id=source.user_id,
+                        contributor_source_kind="linkedin_connections_upload",
+                        contributor_source_id=source.id,
+                        confidence=0.8,
+                    )
 
             source.contacts_resolved += 1
             source.contacts_pending = max(0, total_connections - source.contacts_resolved)
@@ -424,6 +460,8 @@ class FileUploadImportService:
 
         for exp in profile.experiences:
             org = await resolver.resolve_org(domain=None, name=exp.company)
+            if org is None:
+                continue
             await record_employment(
                 self._db,
                 person_id=person.id,

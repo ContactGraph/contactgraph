@@ -1,13 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Loader2, Plus } from "lucide-react";
-import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Loader2, Plus } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { LinkedInProfileUploadDialog } from "@/components/setup/linkedin-profile-upload-dialog";
 import { SetupStepStatusIcon } from "@/components/setup/setup-step-status-icon";
+import { JobTargetCompaniesCard } from "@/components/target-selection/job-target-companies-card";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -17,9 +17,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import type {
-  JobDiscoveryStatusResult,
   JobMonitorConfigResult,
   JobPreferencesResult,
+  JobScanStatusResult,
+  SetJobPreferencesRequest,
   ListOrgListsResult,
   ListSourcesResult,
   OrgEnrichmentStatusResult,
@@ -27,23 +28,30 @@ import type {
   SetJobMonitorConfigRequest,
   SourceSummary,
   SourceType,
-  StartJobDiscoveryResult,
   UploadSourceResult,
 } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
+import { useGraphEvents } from "@/lib/use-graph-events";
+import { useJobEvents } from "@/lib/use-job-events";
 import {
   findJobProspectsList,
   hasJobPreferences,
   hasTargetCompanies,
   isLinkedInProfileComplete,
   isOrgEnrichmentBlocking,
-  isOrgEnrichmentComplete,
   isSourceStepInProgress,
-  jobProspectsStarredCount,
   sourceForType,
 } from "@/lib/setup-utils";
 
-export function JobSetupCards() {
+export function JobSetupCards({
+  compact = false,
+  onDirtyChange,
+}: {
+  compact?: boolean;
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
+  useGraphEvents();
+  useJobEvents();
   const queryClient = useQueryClient();
   const autoStartedRef = useRef<boolean>(false);
   const [linkedinProfileDialogOpen, setLinkedinProfileDialogOpen] =
@@ -55,18 +63,12 @@ export function JobSetupCards() {
   const [preferencesText, setPreferencesText] = useState<string>("");
   const [locationPref, setLocationPref] = useState<string | null>(null);
   const [locationCity, setLocationCity] = useState<string>("");
+  const [commuteMaxMinutes, setCommuteMaxMinutes] = useState<string>("");
+  const [commuteNote, setCommuteNote] = useState<string>("");
 
   const sourcesQuery = useQuery({
     queryKey: ["sources"],
     queryFn: () => proxyPost<ListSourcesResult>("list-sources"),
-    refetchInterval: (query) => {
-      const data: ListSourcesResult | undefined = query.state.data;
-      const syncing: boolean =
-        data?.sources.some((source) => source.sync_state === "syncing") ?? false;
-      const pending: boolean =
-        data?.sources.some((source) => source.sync_state === "pending") ?? false;
-      return syncing || pending || linkedinProfileProcessing ? 4000 : false;
-    },
   });
 
   const orgListsQuery = useQuery({
@@ -78,16 +80,6 @@ export function JobSetupCards() {
     queryKey: ["org-enrichment-status"],
     queryFn: () =>
       proxyPost<OrgEnrichmentStatusResult>("get-org-enrichment-status"),
-    refetchInterval: (query) => {
-      const data: OrgEnrichmentStatusResult | undefined = query.state.data;
-      if (data === undefined) {
-        return 4000;
-      }
-      if (data.orgs_total === 0 || data.state === "failed") {
-        return false;
-      }
-      return isOrgEnrichmentComplete(data) ? false : 4000;
-    },
   });
 
   const jobPreferencesQuery = useQuery({
@@ -100,24 +92,21 @@ export function JobSetupCards() {
     queryFn: () => proxyPost<JobMonitorConfigResult>("get-job-monitor-config"),
   });
 
-  const jobDiscoveryStatusQuery = useQuery({
-    queryKey: ["job-discovery-status"],
-    queryFn: () =>
-      proxyPost<JobDiscoveryStatusResult>("get-job-discovery-status"),
-    refetchInterval: (query) =>
-      query.state.data?.state === "running" ? 2000 : false,
+  const jobScanStatusQuery = useQuery({
+    queryKey: ["job-scan-status"],
+    queryFn: () => proxyPost<JobScanStatusResult>("get-job-scan-status"),
+    enabled: jobMonitorConfigQuery.data?.enabled === true,
   });
 
   const setJobPreferencesMutation = useMutation({
-    mutationFn: (params: {
-      text: string;
-      location_pref: string | null;
-      location_city: string | null;
-    }) => proxyPost<JobPreferencesResult>("set-job-preferences", params),
+    mutationFn: (params: SetJobPreferencesRequest) =>
+      proxyPost<JobPreferencesResult>("set-job-preferences", params),
     onSuccess: async (result: JobPreferencesResult) => {
       toast.success(result.message);
       await queryClient.invalidateQueries({ queryKey: ["job-preferences"] });
       await queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
+      await queryClient.invalidateQueries({ queryKey: ["flat-jobs"] });
+      await queryClient.invalidateQueries({ queryKey: ["job-scan-status"] });
     },
     onError: (error: Error) => {
       toast.error(error.message);
@@ -130,18 +119,6 @@ export function JobSetupCards() {
     onSuccess: async (result: JobMonitorConfigResult) => {
       toast.success(result.message);
       await queryClient.invalidateQueries({ queryKey: ["job-monitor-config"] });
-    },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
-  });
-
-  const startJobDiscoveryMutation = useMutation({
-    mutationFn: () => proxyPost<StartJobDiscoveryResult>("start-job-discovery"),
-    onSuccess: async (result: StartJobDiscoveryResult) => {
-      toast.success(result.message);
-      await queryClient.invalidateQueries({ queryKey: ["job-discovery-status"] });
-      await queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
     },
     onError: (error: Error) => {
       toast.error(error.message);
@@ -173,8 +150,7 @@ export function JobSetupCards() {
     orgEnrichmentQuery.data;
   const jobMonitorConfig: JobMonitorConfigResult | undefined =
     jobMonitorConfigQuery.data;
-  const jobDiscoveryStatus: JobDiscoveryStatusResult | undefined =
-    jobDiscoveryStatusQuery.data;
+  const jobScanStatus: JobScanStatusResult | undefined = jobScanStatusQuery.data;
   const linkedinProfileSource: SourceSummary | undefined = sourceForType(
     sources,
     "linkedin_profile_upload",
@@ -182,7 +158,6 @@ export function JobSetupCards() {
   const jobProspectsList: OrgListSummary | undefined =
     findJobProspectsList(orgLists);
 
-  const starredCount: number = jobProspectsStarredCount(orgLists);
   const targetComplete: boolean = hasTargetCompanies(orgLists);
   const profileComplete: boolean = isLinkedInProfileComplete(sources);
   const preferencesComplete: boolean = hasJobPreferences(jobPreferencesQuery.data);
@@ -228,14 +203,64 @@ export function JobSetupCards() {
     if (serverCity !== null && locationCity === "") {
       setLocationCity(serverCity);
     }
+    const serverCommute: number | null =
+      jobPreferencesQuery.data?.commute_max_minutes ?? null;
+    if (serverCommute !== null && commuteMaxMinutes === "") {
+      setCommuteMaxMinutes(String(serverCommute));
+    }
+    const serverCommuteNote: string | null =
+      jobPreferencesQuery.data?.commute_note ?? null;
+    if (serverCommuteNote !== null && commuteNote === "") {
+      setCommuteNote(serverCommuteNote);
+    }
   }, [
     jobPreferencesQuery.data?.text,
     jobPreferencesQuery.data?.location_pref,
     jobPreferencesQuery.data?.location_city,
+    jobPreferencesQuery.data?.commute_max_minutes,
+    jobPreferencesQuery.data?.commute_note,
     preferencesText,
     locationPref,
     locationCity,
+    commuteMaxMinutes,
+    commuteNote,
   ]);
+
+  const preferencesDirty: boolean = useMemo(() => {
+    const serverText: string = jobPreferencesQuery.data?.text ?? "";
+    const serverLocPref: string | null =
+      jobPreferencesQuery.data?.location_pref ?? null;
+    const serverCity: string = jobPreferencesQuery.data?.location_city ?? "";
+    const serverCommute: string =
+      jobPreferencesQuery.data?.commute_max_minutes != null
+        ? String(jobPreferencesQuery.data.commute_max_minutes)
+        : "";
+    const serverCommuteNote: string =
+      jobPreferencesQuery.data?.commute_note ?? "";
+    if (!serverText && !preferencesText.trim()) return false;
+    return (
+      preferencesText !== serverText ||
+      locationPref !== serverLocPref ||
+      locationCity !== serverCity ||
+      commuteMaxMinutes !== serverCommute ||
+      commuteNote !== serverCommuteNote
+    );
+  }, [
+    preferencesText,
+    locationPref,
+    locationCity,
+    commuteMaxMinutes,
+    commuteNote,
+    jobPreferencesQuery.data?.text,
+    jobPreferencesQuery.data?.location_pref,
+    jobPreferencesQuery.data?.location_city,
+    jobPreferencesQuery.data?.commute_max_minutes,
+    jobPreferencesQuery.data?.commute_note,
+  ]);
+
+  useEffect(() => {
+    onDirtyChange?.(preferencesDirty);
+  }, [preferencesDirty, onDirtyChange]);
 
   const handleLinkedInProfileUpload = useCallback(
     async (file: File): Promise<void> => {
@@ -270,13 +295,10 @@ export function JobSetupCards() {
     }
 
     autoStartedRef.current = true;
-    void (async (): Promise<void> => {
-      await setJobMonitorConfigMutation.mutateAsync({
-        list_id: jobProspectsList.list_id,
-        enabled: true,
-      });
-      startJobDiscoveryMutation.mutate();
-    })();
+    void setJobMonitorConfigMutation.mutateAsync({
+      list_id: jobProspectsList.list_id,
+      enabled: true,
+    });
   }, [
     targetComplete,
     profileComplete,
@@ -284,7 +306,6 @@ export function JobSetupCards() {
     jobMonitorConfig?.enabled,
     jobProspectsList,
     setJobMonitorConfigMutation,
-    startJobDiscoveryMutation,
   ]);
 
   const profileInProgress: boolean =
@@ -302,60 +323,21 @@ export function JobSetupCards() {
   })();
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
-        <p className="text-muted-foreground">
-          Set up job search to monitor career pages at companies in your network.
-        </p>
-      </div>
+    <div className={compact ? "space-y-4" : "space-y-6"}>
+      {!compact ? (
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
+          <p className="text-muted-foreground">
+            Set up job search to monitor career pages at companies in your network.
+          </p>
+        </div>
+      ) : null}
 
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-4">
-          <div className="flex gap-3">
-            <div className="mt-0.5 shrink-0">
-              <SetupStepStatusIcon
-                complete={targetComplete}
-                inProgress={enrichmentInProgress && !targetComplete}
-              />
-            </div>
-            <div className="space-y-1">
-              <CardTitle className="text-base">
-                Select organizations for jobs
-              </CardTitle>
-              <CardDescription>
-                Star companies in your network that you would like to work at.
-              </CardDescription>
-              {enrichmentInProgress ? (
-                <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="size-3.5 animate-spin" />
-                  {enrichmentProgressLabel}
-                </p>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  {starredCount === 0
-                    ? "0 organizations selected for job search"
-                    : `${starredCount.toLocaleString()} organization${starredCount === 1 ? "" : "s"} selected for job search`}
-                </p>
-              )}
-            </div>
-          </div>
-          {!enrichmentInProgress ? (
-            <Button variant="outline" size="sm" asChild>
-              <Link href="/graph?tab=organizations">
-                {starredCount === 0 ? (
-                  <>
-                    Go to Organizations tab
-                    <ArrowRight className="size-4" />
-                  </>
-                ) : (
-                  "Edit"
-                )}
-              </Link>
-            </Button>
-          ) : null}
-        </CardHeader>
-      </Card>
+      <JobTargetCompaniesCard
+        targetComplete={targetComplete}
+        enrichmentInProgress={enrichmentInProgress}
+        enrichmentProgressLabel={enrichmentProgressLabel}
+      />
 
       <Card>
         <CardHeader className="flex flex-row items-start justify-between gap-4">
@@ -452,8 +434,30 @@ export function JobSetupCards() {
               />
             ) : null}
           </div>
+          {locationPref && locationPref !== "remote" ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                className="w-20 rounded-md border bg-background px-2 py-1.5 text-sm"
+                placeholder="45"
+                value={commuteMaxMinutes}
+                onChange={(e) => setCommuteMaxMinutes(e.target.value)}
+              />
+              <span className="text-sm text-muted-foreground">
+                max commute (min)
+              </span>
+            </div>
+          ) : null}
+          <input
+            type="text"
+            className="w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            placeholder="e.g. Willing to commute to Santa Clara if only 1 day/week"
+            value={commuteNote}
+            onChange={(e) => setCommuteNote(e.target.value)}
+          />
           <Button
-            variant="outline"
+            variant={preferencesDirty ? "default" : "outline"}
             size="sm"
             disabled={
               setJobPreferencesMutation.isPending || !preferencesText.trim()
@@ -463,6 +467,10 @@ export function JobSetupCards() {
                 text: preferencesText,
                 location_pref: locationPref,
                 location_city: locationCity || null,
+                commute_max_minutes: commuteMaxMinutes
+                  ? parseInt(commuteMaxMinutes, 10)
+                  : null,
+                commute_note: commuteNote.trim() || null,
               })
             }
           >
@@ -471,6 +479,8 @@ export function JobSetupCards() {
                 <Loader2 className="size-4 animate-spin" />
                 Saving…
               </>
+            ) : preferencesDirty ? (
+              "Save"
             ) : preferencesComplete ? (
               "Saved"
             ) : (
@@ -480,9 +490,15 @@ export function JobSetupCards() {
         </CardContent>
       </Card>
 
-      {jobDiscoveryStatus?.state === "running" ? (
+      {jobMonitorConfig?.enabled && jobScanStatus !== undefined && jobScanStatus.total > 0 ? (
         <p className="text-sm text-muted-foreground">
-          {jobDiscoveryStatus.progress_message ?? jobDiscoveryStatus.message}
+          {jobScanStatus.scanning_active || jobScanStatus.scanned < jobScanStatus.total
+            ? `${jobScanStatus.scanned} of ${jobScanStatus.total} companies scanned today — scanning in progress.`
+            : `${jobScanStatus.scanned} of ${jobScanStatus.total} companies scanned today.`}
+        </p>
+      ) : jobMonitorConfig?.enabled ? (
+        <p className="text-sm text-muted-foreground">
+          Your companies will be scanned automatically within a few minutes.
         </p>
       ) : null}
 

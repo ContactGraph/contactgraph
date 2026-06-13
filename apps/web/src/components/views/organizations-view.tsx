@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getCoreRowModel,
@@ -15,12 +15,10 @@ import {
   Download,
   MoreHorizontal,
   Pencil,
-  Search,
   Star,
   Users,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { toast } from "sonner";
 
 import {
   CompactCell,
@@ -28,6 +26,8 @@ import {
   CompactTableShell,
 } from "@/components/data-table/compact-table";
 import { OrgDetailPanel } from "@/components/org-detail-panel";
+import { OrgLogo } from "@/components/org-logo";
+import { useOrgListMembership } from "@/components/target-selection/use-org-list-membership";
 import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -41,7 +41,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sheet,
@@ -51,21 +51,17 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type {
-  CreateOrgListResult,
-  ListOrgListsResult,
   ListOrgsResult,
-  ModifyOrgListMembershipResult,
   OrgDetailResult,
   OrgListItem,
-  OrgListSummary,
 } from "@/lib/api-types";
 import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { formatCompanySize } from "@/lib/company-size";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { formatIndustryTag, formatIndustryTags } from "@/lib/industry-tags";
+import { formatNetworkContactsLabel } from "@/lib/format-network-contacts-label";
 import { proxyPost } from "@/lib/proxy-client";
 import {
-  findJobProspectsList,
   JOB_PROSPECTS_LIST_NAME,
 } from "@/lib/setup-utils";
 import { cn } from "@/lib/utils";
@@ -104,10 +100,15 @@ function CompactLinkCell({
   );
 }
 
-export function OrganizationsView({ embedded = false }: { embedded?: boolean }) {
+export function OrganizationsView({
+  embedded = false,
+  viewingFilter = "mine",
+}: {
+  embedded?: boolean;
+  viewingFilter?: string;
+}) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const queryClient = useQueryClient();
   const [search, setSearch] = useState<string>(searchParams.get("search") ?? "");
   const [sorting, setSorting] = useState<SortingState>([
     { id: "name", desc: false },
@@ -161,14 +162,18 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
 
   const orgsQuery = useQuery({
     queryKey: ["organizations"],
-    queryFn: () => proxyPost<ListOrgsResult>("list-orgs"),
+    queryFn: () =>
+      proxyPost<ListOrgsResult>("list-orgs", { include_shared: true }),
     staleTime: 0,
   });
 
-  const orgListsQuery = useQuery({
-    queryKey: ["org-lists"],
-    queryFn: () => proxyPost<ListOrgListsResult>("list-org-lists"),
-  });
+  const {
+    selectedOrgIds: starredOrgIds,
+    selectedCount: starredCount,
+    isPending: starMutationPending,
+    toggleOrg,
+    bulkUpdate,
+  } = useOrgListMembership(JOB_PROSPECTS_LIST_NAME);
 
   const detailQuery = useQuery({
     queryKey: ["organization", selectedOrgId],
@@ -179,161 +184,7 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     enabled: selectedOrgId !== null,
   });
 
-  const invalidateOrgLists = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: ["org-lists"] });
-  };
-
-  const ensureJobProspectsListId = useCallback(async (): Promise<string> => {
-    const existingList: OrgListSummary | undefined = findJobProspectsList(
-      orgListsQuery.data?.lists ?? [],
-    );
-    if (existingList !== undefined) {
-      return existingList.list_id;
-    }
-    const result: CreateOrgListResult = await proxyPost<CreateOrgListResult>(
-      "create-org-list",
-      { name: JOB_PROSPECTS_LIST_NAME },
-    );
-    await invalidateOrgLists();
-    return result.list_id;
-  }, [orgListsQuery.data?.lists, queryClient]);
-
-  const applyOptimisticStarUpdate = useCallback(
-    (orgIds: string[], action: "star" | "unstar"): ListOrgListsResult | undefined => {
-      const previous: ListOrgListsResult | undefined =
-        queryClient.getQueryData<ListOrgListsResult>(["org-lists"]);
-      queryClient.setQueryData<ListOrgListsResult>(["org-lists"], (old) => {
-        if (old === undefined) {
-          return old;
-        }
-        return {
-          ...old,
-          lists: old.lists.map((list) => {
-            if (list.name !== JOB_PROSPECTS_LIST_NAME) {
-              return list;
-            }
-            const currentIds = new Set(list.org_ids);
-            if (action === "star") {
-              for (const id of orgIds) {
-                currentIds.add(id);
-              }
-            } else {
-              for (const id of orgIds) {
-                currentIds.delete(id);
-              }
-            }
-            return {
-              ...list,
-              org_ids: [...currentIds],
-              org_count: currentIds.size,
-            };
-          }),
-        };
-      });
-      return previous;
-    },
-    [queryClient],
-  );
-
-  const starToggleMutation = useMutation({
-    mutationFn: async ({
-      orgId,
-      isStarred,
-    }: {
-      orgId: string;
-      isStarred: boolean;
-    }) => {
-      if (isStarred) {
-        const list: OrgListSummary | undefined = findJobProspectsList(
-          orgListsQuery.data?.lists ?? [],
-        );
-        if (list === undefined) {
-          return null;
-        }
-        return proxyPost<ModifyOrgListMembershipResult>("remove-orgs-from-list", {
-          list_id: list.list_id,
-          org_ids: [orgId],
-        });
-      }
-      const listId: string = await ensureJobProspectsListId();
-      return proxyPost<ModifyOrgListMembershipResult>("add-orgs-to-list", {
-        list_id: listId,
-        org_ids: [orgId],
-      });
-    },
-    onMutate: async ({ orgId, isStarred }) => {
-      await queryClient.cancelQueries({ queryKey: ["org-lists"] });
-      const previous = applyOptimisticStarUpdate(
-        [orgId],
-        isStarred ? "unstar" : "star",
-      );
-      return { previous };
-    },
-    onError: (_error, _variables, context) => {
-      if (context?.previous !== undefined) {
-        queryClient.setQueryData(["org-lists"], context.previous);
-      }
-      toast.error("Failed to update star");
-    },
-    onSettled: async () => {
-      await invalidateOrgLists();
-    },
-  });
-
-  const bulkStarMutation = useMutation({
-    mutationFn: async ({
-      orgIds,
-      action,
-    }: {
-      orgIds: string[];
-      action: "star" | "unstar";
-    }) => {
-      if (orgIds.length === 0) {
-        return null;
-      }
-      if (action === "unstar") {
-        const list: OrgListSummary | undefined = findJobProspectsList(
-          orgListsQuery.data?.lists ?? [],
-        );
-        if (list === undefined) {
-          return null;
-        }
-        return proxyPost<ModifyOrgListMembershipResult>("remove-orgs-from-list", {
-          list_id: list.list_id,
-          org_ids: orgIds,
-        });
-      }
-      const listId: string = await ensureJobProspectsListId();
-      return proxyPost<ModifyOrgListMembershipResult>("add-orgs-to-list", {
-        list_id: listId,
-        org_ids: orgIds,
-      });
-    },
-    onMutate: async ({ orgIds, action }) => {
-      await queryClient.cancelQueries({ queryKey: ["org-lists"] });
-      const previous = applyOptimisticStarUpdate(orgIds, action);
-      return { previous };
-    },
-    onError: (_error, _variables, context) => {
-      if (context?.previous !== undefined) {
-        queryClient.setQueryData(["org-lists"], context.previous);
-      }
-      toast.error("Failed to update stars");
-    },
-    onSettled: async () => {
-      await invalidateOrgLists();
-    },
-  });
-
   const allOrgs: OrgListItem[] = orgsQuery.data?.orgs ?? [];
-  const orgLists: OrgListSummary[] = orgListsQuery.data?.lists ?? [];
-  const jobProspectsList: OrgListSummary | undefined =
-    findJobProspectsList(orgLists);
-  const starredOrgIds: ReadonlySet<string> = useMemo(
-    () => new Set(jobProspectsList?.org_ids ?? []),
-    [jobProspectsList?.org_ids],
-  );
-  const starredCount: number = jobProspectsList?.org_count ?? 0;
 
   const availableCategories: string[] = useMemo(() => {
     const tags = new Set<string>();
@@ -357,8 +208,19 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     return [...bands].sort();
   }, [allOrgs]);
 
+
   const filteredOrgs: OrgListItem[] = useMemo(() => {
     let rows: OrgListItem[] = allOrgs;
+
+    // Filter by whose orgs we're viewing
+    if (viewingFilter === "mine") {
+      rows = rows.filter((org) => org.contact_count > 0);
+    } else if (viewingFilter !== "all") {
+      rows = rows.filter((org) =>
+        org.shared_from.includes(viewingFilter),
+      );
+    }
+
     if (selectedCategories.size > 0) {
       rows = rows.filter((org) =>
         org.categories.some((tag) => selectedCategories.has(tag)),
@@ -372,7 +234,7 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
       );
     }
     return rows;
-  }, [allOrgs, selectedCategories, selectedSizeBands]);
+  }, [allOrgs, viewingFilter, selectedCategories, selectedSizeBands]);
 
   const starAllRef = useRef<() => void>(() => {});
   const unstarAllRef = useRef<() => void>(() => {});
@@ -386,7 +248,16 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
         header: ({ column }) => (
           <CompactSortHeader column={column} label="Organization" />
         ),
-        cell: ({ row }) => <CompactCell value={row.original.name} />,
+        cell: ({ row }) => (
+          <div className="flex items-center gap-1.5 truncate">
+            <OrgLogo
+              domain={row.original.primary_domain}
+              name={row.original.name}
+              size={16}
+            />
+            <CompactCell value={row.original.name} />
+          </div>
+        ),
         meta: { width: "w-[8rem]" },
       },
       {
@@ -452,9 +323,33 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
           <CompactSortHeader column={column} label="Contacts" />
         ),
         cell: ({ row }) => (
-          <CompactCell value={row.original.contact_count.toString()} />
+          <CompactCell
+            className="text-xs"
+            value={formatNetworkContactsLabel({
+              primaryContactName: row.original.primary_contact_name,
+              contactCount: row.original.contact_count,
+              sharedPrimaryContactName: row.original.shared_primary_contact_name,
+              sharedContactCount: row.original.shared_contact_count,
+              sharedPrimaryBridgeName: row.original.shared_primary_bridge_name,
+            })}
+          />
         ),
-        meta: { width: "w-[4.5rem]" },
+        meta: { width: "w-[5.5rem]" },
+      },
+      {
+        id: "shared_by",
+        accessorFn: (row: OrgListItem) => row.shared_from.join(", "),
+        header: "Shared by",
+        cell: ({ row }) => {
+          const sharers: string[] = row.original.shared_from;
+          if (sharers.length === 0) return <CompactCell value="—" />;
+          return (
+            <span className="text-xs text-muted-foreground">
+              {sharers.map((name) => `via ${name}`).join(", ")}
+            </span>
+          );
+        },
+        meta: { width: "w-[5.5rem]" },
       },
       {
         id: "star",
@@ -488,13 +383,10 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
               variant="ghost"
               size="icon"
               className="size-6 shrink-0"
-              disabled={starToggleMutation.isPending}
+              disabled={starMutationPending}
               onClick={(event) => {
                 event.stopPropagation();
-                starToggleMutation.mutate({
-                  orgId: row.original.org_id,
-                  isStarred,
-                });
+                toggleOrg(row.original.org_id, isStarred);
               }}
               aria-label={
                 isStarred
@@ -563,7 +455,7 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     );
 
     return baseColumns;
-  }, [router, starredOrgIds, starToggleMutation]);
+  }, [router, starredOrgIds, starMutationPending, toggleOrg]);
 
   const table = useReactTable({
     data: filteredOrgs,
@@ -583,6 +475,7 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
         org.primary_domain,
         org.description,
         org.categories.map((tag) => formatIndustryTags([tag])).join(" "),
+        ...org.shared_from.map((name) => `via ${name}`),
       ]
         .filter(Boolean)
         .join(" ")
@@ -604,15 +497,15 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     const orgIdsToStar: string[] = getMatchingOrgIds().filter(
       (orgId) => !starredOrgIds.has(orgId),
     );
-    bulkStarMutation.mutate({ orgIds: orgIdsToStar, action: "star" });
-  }, [bulkStarMutation, getMatchingOrgIds, starredOrgIds]);
+    bulkUpdate(orgIdsToStar, "add");
+  }, [bulkUpdate, getMatchingOrgIds, starredOrgIds]);
 
   const handleUnstarAllMatching = useCallback((): void => {
     const orgIdsToUnstar: string[] = getMatchingOrgIds().filter((orgId) =>
       starredOrgIds.has(orgId),
     );
-    bulkStarMutation.mutate({ orgIds: orgIdsToUnstar, action: "unstar" });
-  }, [bulkStarMutation, getMatchingOrgIds, starredOrgIds]);
+    bulkUpdate(orgIdsToUnstar, "remove");
+  }, [bulkUpdate, getMatchingOrgIds, starredOrgIds]);
 
   starAllRef.current = handleStarAllMatching;
   unstarAllRef.current = handleUnstarAllMatching;
@@ -672,8 +565,6 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
     });
   };
 
-  const starMutationPending: boolean =
-    starToggleMutation.isPending || bulkStarMutation.isPending;
 
   const hasActiveFilters: boolean =
     selectedCategories.size > 0 || selectedSizeBands.size > 0;
@@ -705,15 +596,12 @@ export function OrganizationsView({ embedded = false }: { embedded?: boolean }) 
 
       {/* Toolbar: search, filters, select, actions — single row */}
       <div className="flex flex-wrap items-center gap-2">
-        <div className="relative w-48">
-          <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search…"
-            className="h-8 pl-8 text-xs"
-          />
-        </div>
+        <SearchInput
+          containerClassName="w-48"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search…"
+        />
 
         {/* Category filter */}
         <DropdownMenu>

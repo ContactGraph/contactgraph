@@ -238,6 +238,7 @@ class TrustListInviteSummary(BaseModel):
     invitee_email: str
     status: TrustListInviteStatus
     created_at: datetime
+    invite_copy: str | None = None
 
 
 class PendingInboundInvite(BaseModel):

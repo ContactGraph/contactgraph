@@ -11,7 +11,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { Download, Search } from "lucide-react";
+import { Download } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -25,7 +25,7 @@ import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { SearchInput } from "@/components/ui/search-input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Sheet,
@@ -39,7 +39,13 @@ import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { proxyPost } from "@/lib/proxy-client";
 
-export function PeopleView({ embedded = false }: { embedded?: boolean }) {
+export function PeopleView({
+  embedded = false,
+  viewingFilter = "mine",
+}: {
+  embedded?: boolean;
+  viewingFilter?: string;
+}) {
   const searchParams = useSearchParams();
   const [search, setSearch] = useState<string>(searchParams.get("search") ?? "");
   const [sorting, setSorting] = useState<SortingState>([
@@ -53,7 +59,7 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
   const [isClosingSave, setIsClosingSave] = useState<boolean>(false);
   const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
 
-  const [filter, setFilter] = useState<"all" | "phone_linkedin" | "phone_only" | "linkedin_only">("phone_linkedin");
+  const [sourceFilter, setSourceFilter] = useState<"all" | "phone_linkedin" | "phone_only" | "linkedin_only">("phone_linkedin");
 
   useEffect(() => {
     setIsDetailDirty(false);
@@ -91,7 +97,10 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
   const peopleQuery = useQuery({
     queryKey: ["people"],
     queryFn: () =>
-      proxyPost<ListPeopleResult>("list-people", { network_only: false }),
+      proxyPost<ListPeopleResult>("list-people", {
+        network_only: false,
+        include_shared: true,
+      }),
   });
 
   const detailQuery = useQuery({
@@ -113,22 +122,35 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
           const person: PersonListItem = row.original;
           return (
             <div className="flex items-center gap-1.5 truncate">
+              {person.is_claimed ? (
+                <img
+                  src={person.avatar_url ?? ""}
+                  alt=""
+                  className="size-5 shrink-0 rounded-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              ) : null}
               <span className="truncate">{person.display_name}</span>
-              {person.is_strong_tie ? (
-                <Badge variant="secondary" className="shrink-0 px-1 py-0 text-[10px]">
-                  Pro
+              {person.is_claimed ? (
+                <Badge variant="secondary" className="shrink-0 px-1 py-0 text-[10px] font-medium uppercase tracking-wide">
+                  Active
+                </Badge>
+              ) : null}
+              {person.shared_from ? (
+                <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px] text-muted-foreground">
+                  via {person.shared_from}
                 </Badge>
               ) : null}
             </div>
           );
         },
-        meta: { width: "w-[10rem]" },
+        meta: { width: "w-[12rem]" },
       },
       {
         accessorKey: "phone",
         header: "Phone",
         cell: ({ row }) => (
-          <CompactCell value={row.original.phone ?? "—"} />
+          <CompactCell value={row.original.shared_from ? "—" : (row.original.phone ?? "—")} />
         ),
         meta: { width: "w-[5.5rem]" },
       },
@@ -138,7 +160,9 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
         cell: ({ row }) => (
           <CompactCell
             value={
-              row.original.primary_email ?? row.original.emails[0] ?? "—"
+              row.original.shared_from
+                ? "—"
+                : (row.original.primary_email ?? row.original.emails[0] ?? "—")
             }
           />
         ),
@@ -176,6 +200,7 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
         accessorFn: (row: PersonListItem) => row.linkedin_url ?? "",
         header: "LinkedIn",
         cell: ({ row }) => {
+          if (row.original.shared_from) return <CompactCell value="—" />;
           const url: string | null = row.original.linkedin_url;
           if (!url) return <CompactCell value="—" />;
           return (
@@ -196,15 +221,18 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
         id: "actions",
         header: "",
         enableSorting: false,
-        cell: ({ row }) => (
-          <div className="flex justify-end">
-            <EntityActionsMenu
-              entityLabel={row.original.display_name}
-              personId={row.original.person_id}
-              onEdit={() => setSelectedPersonId(row.original.person_id)}
-            />
-          </div>
-        ),
+        cell: ({ row }) => {
+          if (row.original.shared_from) return null;
+          return (
+            <div className="flex justify-end">
+              <EntityActionsMenu
+                entityLabel={row.original.display_name}
+                personId={row.original.person_id}
+                onEdit={() => setSelectedPersonId(row.original.person_id)}
+              />
+            </div>
+          );
+        },
         meta: { width: "w-[2rem]", stickyRight: true },
       },
     ],
@@ -213,22 +241,37 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
 
   const filteredPeople: PersonListItem[] = useMemo(() => {
     const all: PersonListItem[] = peopleQuery.data?.people ?? [];
-    if (filter === "all") return all;
-    return all.filter((p: PersonListItem) => {
-      const hasPhone: boolean = !!p.phone;
-      const hasLinkedin: boolean = !!p.linkedin_url;
-      switch (filter) {
-        case "phone_linkedin":
-          return hasPhone && hasLinkedin;
-        case "phone_only":
-          return hasPhone && !hasLinkedin;
-        case "linkedin_only":
-          return !hasPhone && hasLinkedin;
-        default:
-          return true;
-      }
-    });
-  }, [peopleQuery.data?.people, filter]);
+
+    // First: filter by whose contacts we're viewing
+    let rows: PersonListItem[];
+    if (viewingFilter === "all") {
+      rows = all;
+    } else if (viewingFilter === "mine") {
+      rows = all.filter((p: PersonListItem) => !p.shared_from);
+    } else {
+      rows = all.filter((p: PersonListItem) => p.shared_from === viewingFilter);
+    }
+
+    // Second: apply source filter (only meaningful for own contacts)
+    if (viewingFilter === "mine" && sourceFilter !== "all") {
+      rows = rows.filter((p: PersonListItem) => {
+        const hasPhone: boolean = !!p.phone;
+        const hasLinkedin: boolean = !!p.linkedin_url;
+        switch (sourceFilter) {
+          case "phone_linkedin":
+            return hasPhone && hasLinkedin;
+          case "phone_only":
+            return hasPhone && !hasLinkedin;
+          case "linkedin_only":
+            return !hasPhone && hasLinkedin;
+          default:
+            return true;
+        }
+      });
+    }
+
+    return rows;
+  }, [peopleQuery.data?.people, viewingFilter, sourceFilter]);
 
   const table = useReactTable({
     data: filteredPeople,
@@ -249,6 +292,7 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
         person.org_name,
         person.current_role,
         person.is_strong_tie ? "professional tie" : "",
+        person.shared_from ? `via ${person.shared_from}` : "",
         person.emails.join(" "),
       ]
         .filter(Boolean)
@@ -294,44 +338,10 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
   };
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {!embedded ? (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h1 className="text-xl font-semibold tracking-tight">People</h1>
-            <p className="text-xs text-muted-foreground">
-              {peopleQuery.isLoading
-                ? "Loading your network…"
-                : peopleQuery.data
-                  ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
-                  : "No network data available."}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="relative w-64">
-              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search people…"
-                className="h-8 pl-8 text-sm focus:w-80 transition-all duration-200"
-              />
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 shrink-0 text-xs"
-              onClick={handleDownloadCsv}
-              disabled={peopleQuery.isLoading || table.getRowModel().rows.length === 0}
-            >
-              <Download />
-              CSV
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-xl font-semibold tracking-tight">People</h1>
           <p className="text-xs text-muted-foreground">
             {peopleQuery.isLoading
               ? "Loading your network…"
@@ -339,56 +349,67 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
                 ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
                 : "No network data available."}
           </p>
-          <div className="flex items-center gap-2">
-            <div className="relative w-64">
-              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder="Search people…"
-                className="h-8 pl-8 text-sm focus:w-80 transition-all duration-200"
-              />
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-8 shrink-0 text-xs"
-              onClick={handleDownloadCsv}
-              disabled={peopleQuery.isLoading || table.getRowModel().rows.length === 0}
-            >
-              <Download />
-              CSV
-            </Button>
-          </div>
         </div>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          {peopleQuery.isLoading
+            ? "Loading your network…"
+            : peopleQuery.data
+              ? `${table.getFilteredRowModel().rows.length.toLocaleString()} contacts shown`
+              : "No network data available."}
+        </p>
       )}
-
-      <div className="flex gap-1">
-        {([
-          ["phone_linkedin", "Phone + LinkedIn"],
-          ["phone_only", "Phone only"],
-          ["linkedin_only", "LinkedIn only"],
-          ["all", "All"],
-        ] as const).map(([value, label]) => (
-          <Button
-            key={value}
-            type="button"
-            variant={filter === value ? "default" : "outline"}
-            size="sm"
-            className="h-8 text-xs px-2.5"
-            onClick={() => setFilter(value)}
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
 
       {peopleQuery.error ? (
         <Alert variant="destructive">
           <AlertDescription>{peopleQuery.error.message}</AlertDescription>
         </Alert>
       ) : null}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <SearchInput
+          containerClassName="w-48"
+          value={search}
+          onChange={(event) => setSearch(event.target.value)}
+          placeholder="Search people…"
+        />
+
+        {viewingFilter === "mine" ? (
+          <>
+            {([
+              ["phone_linkedin", "Phone + LinkedIn"],
+              ["phone_only", "Phone only"],
+              ["linkedin_only", "LinkedIn only"],
+              ["all", "All sources"],
+            ] as const).map(([value, label]) => (
+              <Button
+                key={value}
+                type="button"
+                variant={sourceFilter === value ? "default" : "outline"}
+                size="sm"
+                className="h-8 text-xs px-2.5"
+                onClick={() => setSourceFilter(value)}
+              >
+                {label}
+              </Button>
+            ))}
+          </>
+        ) : null}
+
+        <div className="ml-auto flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            onClick={handleDownloadCsv}
+            disabled={peopleQuery.isLoading || table.getRowModel().rows.length === 0}
+          >
+            <Download className="size-3.5" />
+            CSV
+          </Button>
+        </div>
+      </div>
 
       <div className="overflow-hidden rounded-md border bg-card">
         {peopleQuery.isLoading ? (
@@ -418,10 +439,34 @@ export function PeopleView({ embedded = false }: { embedded?: boolean }) {
           <SheetHeader>
             <SheetTitle>{selectedPerson?.display_name ?? "Contact"}</SheetTitle>
             <SheetDescription>
-              {selectedPerson?.primary_email ?? "Contact details"}
+              {selectedPerson?.shared_from
+                ? `Shared by ${selectedPerson.shared_from}`
+                : (selectedPerson?.primary_email ?? "Contact details")}
             </SheetDescription>
           </SheetHeader>
-          {detailQuery.isLoading ? (
+          {selectedPerson?.shared_from ? (
+            <div className="space-y-4 px-6 py-4">
+              <div className="rounded-md border bg-muted/50 p-4 text-sm text-muted-foreground">
+                <p className="font-medium text-foreground">
+                  {selectedPerson.display_name}
+                </p>
+                {selectedPerson.current_role || selectedPerson.org_name ? (
+                  <p className="mt-1">
+                    {[selectedPerson.current_role, selectedPerson.org_name]
+                      .filter(Boolean)
+                      .join(" at ")}
+                  </p>
+                ) : null}
+                <p className="mt-3">
+                  Contact info is not shared. Ask{" "}
+                  <span className="font-medium text-foreground">
+                    {selectedPerson.shared_from}
+                  </span>{" "}
+                  for an intro if you&rsquo;d like to connect.
+                </p>
+              </div>
+            </div>
+          ) : detailQuery.isLoading ? (
             <div className="space-y-3 px-6 py-4">
               <Skeleton className="h-6 w-40" />
               <Skeleton className="h-24 w-full" />

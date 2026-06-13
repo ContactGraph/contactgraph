@@ -19,6 +19,28 @@ _LINKEDIN_URL_RE: re.Pattern[str] = re.compile(
     r"linkedin\.com/in/", re.IGNORECASE
 )
 
+_VCARD_PARAM_SPACE_RE: re.Pattern[str] = re.compile(
+    r"^([A-Za-z][A-Za-z0-9-]*;)([^:]+)(:.*)",
+    re.MULTILINE,
+)
+
+
+def _sanitize_vcard_content(content: str) -> str:
+    """Fix malformed vCard lines produced by some Android phones.
+
+    Android may export custom TEL type params with spaces (e.g.
+    ``TEL;X-Linda Cell:207-552-1552``).  Spaces in parameter names are
+    illegal per RFC 6350 / RFC 2426 and cause vobject to throw ParseError.
+    Replace spaces in the parameter portion with dashes.
+    """
+    def _fix_params(m: re.Match[str]) -> str:
+        prop: str = m.group(1)
+        params: str = m.group(2).replace(" ", "-")
+        value: str = m.group(3)
+        return f"{prop}{params}{value}"
+
+    return _VCARD_PARAM_SPACE_RE.sub(_fix_params, content)
+
 
 @dataclass(frozen=True, slots=True)
 class ParsedPhoneContact:
@@ -54,8 +76,14 @@ def parse_phone_contacts_upload(content: str, filename: str) -> list[ParsedPhone
 
 
 def _parse_vcard(content: str) -> list[ParsedPhoneContact]:
+    sanitized: str = _sanitize_vcard_content(content)
     contacts: list[ParsedPhoneContact] = []
-    for component in vobject.readComponents(content):
+    try:
+        components = list(vobject.readComponents(sanitized))
+    except Exception:
+        logger.warning("vobject failed to parse vCard stream, attempting line-level recovery", exc_info=True)
+        components = list(_resilient_read_components(sanitized))
+    for component in components:
         if component.name.upper() != "VCARD":
             continue
         try:
@@ -65,6 +93,22 @@ def _parse_vcard(content: str) -> list[ParsedPhoneContact]:
         except Exception:
             logger.debug("Skipping malformed vCard entry", exc_info=True)
     return contacts
+
+
+def _resilient_read_components(content: str) -> list[vobject.base.Component]:
+    """Parse individual vCard blocks independently so one bad entry doesn't kill the whole file."""
+    blocks: list[str] = re.split(r"(?m)^(?=BEGIN:VCARD)", content)
+    components: list[vobject.base.Component] = []
+    for block in blocks:
+        block = block.strip()
+        if not block:
+            continue
+        try:
+            for comp in vobject.readComponents(block):
+                components.append(comp)
+        except Exception:
+            logger.debug("Skipping unparseable vCard block", exc_info=True)
+    return components
 
 
 def _vcard_to_contact(component: vobject.base.Component) -> ParsedPhoneContact | None:

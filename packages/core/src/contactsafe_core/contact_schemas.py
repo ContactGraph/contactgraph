@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -14,6 +14,11 @@ def split_display_name(display_name: str) -> tuple[str, str]:
     if len(parts) == 1:
         return parts[0], ""
     return parts[0], parts[1]
+
+
+def join_display_name(first_name: str, last_name: str) -> str:
+    """Combine first and last name for API display_name (inverse of split_display_name)."""
+    return f"{first_name} {last_name}".strip()
 
 
 class PersonListItem(BaseModel):
@@ -34,12 +39,17 @@ class PersonListItem(BaseModel):
     is_broadcast: bool = False
     is_automated: bool = False
     is_strong_tie: bool = False
+    is_claimed: bool = False
+    avatar_url: str | None = None
     linkedin_url: str | None = None
     scrapingdog_enriched: bool = False
+    shared_from: str | None = None
+    shared_from_user_id: UUID | None = None
 
 
 class ListPeopleRequest(BaseModel):
     network_only: bool = True
+    include_shared: bool = True
 
 
 class ListPeopleResult(BaseModel):
@@ -159,7 +169,13 @@ class PersonDetailResult(BaseModel):
     is_human: bool = False
     is_broadcast: bool = False
     is_automated: bool = False
+    is_claimed: bool = False
+    avatar_url: str | None = None
     message: str
+
+
+class ListOrgsRequest(BaseModel):
+    include_shared: bool = True
 
 
 class OrgListItem(BaseModel):
@@ -173,6 +189,11 @@ class OrgListItem(BaseModel):
     employee_count: int | None = None
     company_size_band: str | None = None
     contact_count: int = 0
+    primary_contact_name: str | None = None
+    shared_from: list[str] = Field(default_factory=list)
+    shared_contact_count: int = 0
+    shared_primary_contact_name: str | None = None
+    shared_primary_bridge_name: str | None = None
 
 
 class ListOrgsResult(BaseModel):
@@ -186,6 +207,7 @@ class OrgPersonSummary(BaseModel):
     display_name: str
     primary_email: str | None = None
     current_role: str | None = None
+    shared_from: str | None = None
 
 
 class OrgDetailResult(BaseModel):
@@ -348,11 +370,21 @@ class JobDiscoveryStatusResult(BaseModel):
     message: str
 
 
+class JobScanStatusResult(BaseModel):
+    scanned: int = 0
+    total: int = 0
+    scanning_active: bool = False
+    message: str
+
+
 class OrgJobItem(BaseModel):
     job_id: UUID
     external_job_id: str
     source: str
     title: str
+    org_name: str | None = None
+    org_id: UUID | None = None
+    org_primary_domain: str | None = None
     location: str | None = None
     department: str | None = None
     url: str
@@ -365,7 +397,19 @@ class OrgJobItem(BaseModel):
     last_seen_at: datetime
     is_active: bool = True
     is_relevant: bool | None = None
+    match_score: int | None = None
     relevance_reason: str | None = None
+    role_score: int | None = None
+    role_reason: str | None = None
+    seniority_score: int | None = None
+    seniority_reason: str | None = None
+    location_score: int | None = None
+    location_reason: str | None = None
+    contact_count: int = 0
+    primary_contact_name: str | None = None
+    shared_contact_count: int = 0
+    shared_primary_contact_name: str | None = None
+    shared_primary_bridge_name: str | None = None
 
 
 class OrgJobsByCompany(BaseModel):
@@ -395,15 +439,91 @@ class ListOrgJobsResult(BaseModel):
     message: str
 
 
+class FlatJobListResult(BaseModel):
+    jobs: list[OrgJobItem] = Field(default_factory=list)
+    total_jobs: int = 0
+    total_relevant: int = 0
+    message: str
+
+
+class JobDetailResult(BaseModel):
+    job: OrgJobItem
+    org_description: str | None = None
+    org_primary_domain: str | None = None
+    contacts: list[OrgPersonSummary] = Field(default_factory=list)
+    contact_count: int = 0
+    message: str
+
+
 class SetJobPreferencesRequest(BaseModel):
     text: str
     location_pref: str | None = None
     location_city: str | None = None
+    commute_max_minutes: int | None = None
+    commute_note: str | None = None
+
+
+class JobTargetScope(BaseModel):
+    industry_tags: list[str] = Field(default_factory=list)
+    sharer_names: list[str] = Field(default_factory=list)
+    size_bands: list[str] = Field(default_factory=list)
+
+
+class SetJobTargetScopeRequest(BaseModel):
+    target_scope: JobTargetScope
 
 
 class JobPreferencesResult(BaseModel):
     text: str | None = None
     location_pref: str | None = None
     location_city: str | None = None
+    commute_max_minutes: int | None = None
+    commute_note: str | None = None
+    target_scope: JobTargetScope | None = None
     classified_job_count: int = 0
     message: str
+
+
+class SetNotificationPreferencesRequest(BaseModel):
+    job_digest_frequency: Literal["daily", "weekly", "off"]
+
+
+class NotificationPreferencesResult(BaseModel):
+    job_digest_frequency: Literal["daily", "weekly", "off"]
+    message: str
+
+
+class PipelineStatus(BaseModel):
+    name: str
+    queued: int = 0
+    active: int = 0
+    completed_24h: int = 0
+    failed_24h: int = 0
+    last_run_at: datetime | None = None
+    last_run_duration_ms: int | None = None
+    items_processed: int | None = None
+    items_total: int | None = None
+
+
+class WorkerStatusResult(BaseModel):
+    pipelines: list[PipelineStatus] = Field(default_factory=list)
+    worker_connected: bool = False
+    redis_connected: bool = False
+    message: str = "OK"
+
+
+class AdminUserItem(BaseModel):
+    user_id: str
+    email: str
+    display_name: str | None = None
+    has_vcf: bool = False
+    has_linkedin: bool = False
+    person_count: int = 0
+    org_count: int = 0
+    first_seen_at: datetime | None = None
+    last_seen_at: datetime | None = None
+
+
+class AdminUsersResult(BaseModel):
+    users: list[AdminUserItem] = Field(default_factory=list)
+    message: str = "OK"

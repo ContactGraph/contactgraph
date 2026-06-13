@@ -51,6 +51,11 @@ class User(Base):
     job_preferences_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     job_location_pref: Mapped[str | None] = mapped_column(Text, nullable=True)
     job_location_city: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_commute_max_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    job_commute_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_target_scope: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    job_digest_frequency: Mapped[str] = mapped_column(Text, nullable=False, default="daily")
+    job_digest_last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
@@ -313,6 +318,10 @@ class Org(Base):
     employment_claims: Mapped[list["EmploymentClaim"]] = relationship(back_populates="org", cascade="all, delete-orphan")
     jobs: Mapped[list["OrgJob"]] = relationship(back_populates="org", cascade="all, delete-orphan")
     job_scrape_runs: Mapped[list["JobScrapeRun"]] = relationship(back_populates="org", cascade="all, delete-orphan")
+    enrichment_scrape_runs: Mapped[list["OrgEnrichmentScrapeRun"]] = relationship(
+        back_populates="org",
+        cascade="all, delete-orphan",
+    )
 
 
 class OrgJob(Base):
@@ -356,6 +365,20 @@ class JobScrapeRun(Base):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     org: Mapped["Org"] = relationship(back_populates="job_scrape_runs")
+
+
+class OrgEnrichmentScrapeRun(Base):
+    __tablename__ = "org_enrichment_scrape_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="CASCADE"), nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fields_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    org: Mapped["Org"] = relationship(back_populates="enrichment_scrape_runs")
 
 
 class JobDiscoveryRun(Base):
@@ -706,5 +729,12 @@ class UserJobRelevance(Base):
     )
     is_relevant: Mapped[bool] = mapped_column(Boolean, nullable=False)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    role_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    role_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    location_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    location_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seniority_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    seniority_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     classified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

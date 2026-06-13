@@ -1,7 +1,16 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Briefcase, Loader2, LogOut, Pencil, Plus, Trash2, X } from "lucide-react";
+import {
+  Briefcase,
+  Loader2,
+  LogOut,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -18,10 +27,12 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { LinkedInProfileUploadDialog } from "@/components/setup/linkedin-profile-upload-dialog";
 import { FileDropZone } from "@/components/ui/file-drop-zone";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,8 +42,11 @@ import { Textarea } from "@/components/ui/textarea";
 import type {
   DeleteUserAccountResult,
   DeleteUserExperienceRequest,
+  JobDigestFrequency,
   ListSourcesResult,
+  NotificationPreferencesResult,
   SaveUserExperienceRequest,
+  SetNotificationPreferencesRequest,
   SourceType,
   UpdateUserProfileRequest,
   UploadSourceResult,
@@ -40,6 +54,8 @@ import type {
   UserProfileResult,
 } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
+import { useGraphEvents } from "@/lib/use-graph-events";
+import { isLinkedInProfileComplete, sourceForType } from "@/lib/setup-utils";
 import {
   createEmptySocialProfileEntry,
   socialProfilesFromRecord,
@@ -89,7 +105,30 @@ const EMPTY_FORM: ExperienceFormState = {
   ended_at: "",
 };
 
+const DIGEST_FREQUENCY_OPTIONS: ReadonlyArray<{
+  value: JobDigestFrequency;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "daily",
+    label: "Daily",
+    description: "A morning digest of new matching jobs at your target companies.",
+  },
+  {
+    value: "weekly",
+    label: "Weekly",
+    description: "A weekly summary of new matches.",
+  },
+  {
+    value: "off",
+    label: "Off",
+    description: "No job-match emails.",
+  },
+];
+
 export default function ProfilePage() {
+  useGraphEvents();
   const router = useRouter();
   const queryClient = useQueryClient();
   const [dialogOpen, setDialogOpen] = useState<boolean>(false);
@@ -99,6 +138,7 @@ export default function ProfilePage() {
   const [awaitingSync, setAwaitingSync] = useState<boolean>(false);
   const [deleteAccountDialogOpen, setDeleteAccountDialogOpen] =
     useState<boolean>(false);
+  const [uploadDialogOpen, setUploadDialogOpen] = useState<boolean>(false);
 
   const [profileName, setProfileName] = useState<string>("");
   const [profileLocation, setProfileLocation] = useState<string>("");
@@ -116,8 +156,16 @@ export default function ProfilePage() {
   const sourcesQuery = useQuery({
     queryKey: ["sources"],
     queryFn: () => proxyPost<ListSourcesResult>("list-sources"),
-    refetchInterval: awaitingSync ? 2000 : false,
   });
+
+  const notificationPrefsQuery = useQuery({
+    queryKey: ["notification-preferences"],
+    queryFn: () =>
+      proxyPost<NotificationPreferencesResult>("get-notification-preferences"),
+  });
+
+  const [digestFrequency, setDigestFrequency] = useState<JobDigestFrequency>("daily");
+  const notificationPrefsInitialized = useRef<boolean>(false);
 
   useEffect(() => {
     if (!awaitingSync) {
@@ -149,6 +197,14 @@ export default function ProfilePage() {
     setProfileLinkedin(profile.linkedin_url ?? "");
     setProfileBio(profile.bio_summary ?? "");
     setSocialEntries(socialProfilesFromRecord(profile.social_profiles ?? {}));
+  }
+
+  const notificationPrefs: NotificationPreferencesResult | undefined =
+    notificationPrefsQuery.data;
+
+  if (notificationPrefs && !notificationPrefsInitialized.current) {
+    notificationPrefsInitialized.current = true;
+    setDigestFrequency(notificationPrefs.job_digest_frequency);
   }
 
   const profileMutation = useMutation({
@@ -240,6 +296,29 @@ export default function ProfilePage() {
     },
   });
 
+  const notificationPrefsMutation = useMutation({
+    mutationFn: (payload: SetNotificationPreferencesRequest) =>
+      proxyPost<NotificationPreferencesResult>(
+        "set-notification-preferences",
+        payload,
+      ),
+    onSuccess: async (result: NotificationPreferencesResult) => {
+      setDigestFrequency(result.job_digest_frequency);
+      notificationPrefsInitialized.current = true;
+      await queryClient.invalidateQueries({
+        queryKey: ["notification-preferences"],
+      });
+    },
+  });
+
+  const handleDigestFrequencyChange = useCallback(
+    (frequency: JobDigestFrequency): void => {
+      setDigestFrequency(frequency);
+      notificationPrefsMutation.mutate({ job_digest_frequency: frequency });
+    },
+    [notificationPrefsMutation],
+  );
+
   const handleSignOut = useCallback(async (): Promise<void> => {
     await fetch("/api/auth/logout", { method: "POST" });
     router.push("/");
@@ -280,6 +359,12 @@ export default function ProfilePage() {
     [uploadMutation],
   );
 
+  const sources = sourcesQuery.data?.sources ?? [];
+  const linkedinProfileSource = sourceForType(sources, "linkedin_profile_upload");
+  const linkedinProfileComplete: boolean = isLinkedInProfileComplete(sources);
+  const linkedinProfileBusy: boolean =
+    uploadMutation.isPending || awaitingSync;
+
   const openEditDialog = useCallback((exp: UserExperience): void => {
     setForm({
       id: exp.id,
@@ -315,28 +400,50 @@ export default function ProfilePage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Your Profile</h1>
-        <p className="text-muted-foreground">
-          Your professional background helps identify the right version of your
-          contacts during enrichment.
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold tracking-tight">Your Profile</h1>
+          <p className="text-muted-foreground">
+            Your professional background helps identify the right version of your
+            contacts during enrichment.
+          </p>
+        </div>
+        {linkedinProfileComplete ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            disabled={linkedinProfileBusy}
+            onClick={() => setUploadDialogOpen(true)}
+          >
+            {linkedinProfileBusy ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <Upload className="size-4" />
+            )}
+            Re-upload
+          </Button>
+        ) : null}
       </div>
 
-      <FileDropZone
-        accept=".pdf,application/pdf"
-        onFileSelect={(file: File) => void handlePdfUpload(file)}
-        disabled={uploadMutation.isPending || awaitingSync}
-        busy={uploadMutation.isPending || awaitingSync}
-        busyMessage={awaitingSync ? "Processing PDF…" : "Uploading…"}
-        idleMessage="Drag and drop your LinkedIn PDF here"
-        idleHint="or click to choose a file"
-      />
+      {!linkedinProfileComplete ? (
+        <>
+          <FileDropZone
+            accept=".pdf,application/pdf"
+            onFileSelect={(file: File) => void handlePdfUpload(file)}
+            disabled={linkedinProfileBusy}
+            busy={linkedinProfileBusy}
+            busyMessage={awaitingSync ? "Processing PDF…" : "Uploading…"}
+            idleMessage="Drag and drop your LinkedIn PDF here"
+            idleHint="or click to choose a file"
+          />
 
-      {uploadError ? (
-        <Alert variant="destructive">
-          <AlertDescription>{uploadError}</AlertDescription>
-        </Alert>
+          {uploadError ? (
+            <Alert variant="destructive">
+              <AlertDescription>{uploadError}</AlertDescription>
+            </Alert>
+          ) : null}
+        </>
       ) : null}
 
       {/* Basic info */}
@@ -582,6 +689,58 @@ export default function ProfilePage() {
         </CardContent>
       </Card>
 
+      {/* Email notifications */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Email notifications</CardTitle>
+          <CardDescription>
+            Get a digest of new matching jobs at your target companies.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {notificationPrefsQuery.isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : (
+            <>
+              {DIGEST_FREQUENCY_OPTIONS.map((option) => (
+                <label
+                  key={option.value}
+                  className="flex cursor-pointer items-start gap-3 rounded-md border p-3 has-[:checked]:border-primary has-[:checked]:bg-muted/40"
+                >
+                  <input
+                    type="radio"
+                    name="job-digest-frequency"
+                    value={option.value}
+                    checked={digestFrequency === option.value}
+                    disabled={notificationPrefsMutation.isPending}
+                    className="mt-1"
+                    onChange={() => handleDigestFrequencyChange(option.value)}
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block text-sm font-medium">
+                      {option.label}
+                    </span>
+                    <span className="block text-sm text-muted-foreground">
+                      {option.description}
+                    </span>
+                  </span>
+                </label>
+              ))}
+              {notificationPrefsMutation.isPending ? (
+                <p className="text-sm text-muted-foreground">Saving…</p>
+              ) : null}
+              {notificationPrefsMutation.error ? (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    {notificationPrefsMutation.error.message}
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Account */}
       <Card>
         <CardHeader>
@@ -703,15 +862,27 @@ export default function ProfilePage() {
         </DialogContent>
       </Dialog>
 
+      <LinkedInProfileUploadDialog
+        open={uploadDialogOpen}
+        onOpenChange={setUploadDialogOpen}
+        onFileSelect={(file: File) => {
+          void handlePdfUpload(file);
+        }}
+        isPending={uploadMutation.isPending}
+        isProcessing={awaitingSync}
+        error={uploadError}
+        isComplete={linkedinProfileSource?.sync_state === "complete"}
+      />
+
       <Dialog open={deleteAccountDialogOpen} onOpenChange={setDeleteAccountDialogOpen}>
-        <DialogContent>
+        <DialogContent className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Delete your account?</DialogTitle>
+            <DialogDescription>
+              This permanently deletes your account, imports, lists, job preferences,
+              and network observations. This cannot be undone.
+            </DialogDescription>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            This permanently deletes your account, imports, lists, job preferences,
-            and network observations. This cannot be undone.
-          </p>
           {deleteAccountMutation.error ? (
             <Alert variant="destructive">
               <AlertDescription>{deleteAccountMutation.error.message}</AlertDescription>

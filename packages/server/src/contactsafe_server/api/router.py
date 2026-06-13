@@ -8,13 +8,15 @@ Authentication uses the same JWT tokens as the MCP endpoint.  Admin users
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -33,20 +35,26 @@ from contactsafe_core.contact_schemas import (
     GetOrgRequest,
     GetPersonRequest,
     ListOrgListsResult,
+    ListOrgsRequest,
     ListOrgsResult,
     ListPeopleRequest,
     ListPeopleResult,
     ListStrongTiesResult,
-    JobDiscoveryStatusResult,
+    FlatJobListResult,
+    JobDetailResult,
     JobMonitorConfigResult,
+    JobScanStatusResult,
     JobPreferencesResult,
+    JobTargetScope,
     ListOrgJobsResult,
+    NotificationPreferencesResult,
+    SetNotificationPreferencesRequest,
     ModifyOrgListMembershipRequest,
     ModifyOrgListMembershipResult,
     NetworkStatusResult,
     SetJobMonitorConfigRequest,
     SetJobPreferencesRequest,
-    StartJobDiscoveryResult,
+    SetJobTargetScopeRequest,
     StartSingleOrgDiscoveryRequest,
     StartSingleOrgDiscoveryResult,
     OrgDetailResult,
@@ -93,7 +101,9 @@ from contactsafe_core.schemas import (
 from contactsafe_server import actions
 from contactsafe_server.db.models import User
 from contactsafe_server.deps import AppContext
+from contactsafe_server.events import GraphEvent, JobEvent, graph_event_bus, job_event_bus
 from contactsafe_server.services.jwt_service import JWTService
+from contactsafe_server.services.job_digest_service import JobDigestService
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -526,6 +536,7 @@ async def api_list_people(
         ctx,
         user_id,
         network_only=request.network_only,
+        include_shared=request.include_shared,
     )
 
 
@@ -602,8 +613,13 @@ async def api_enrich_person(
 
 
 @router.post("/list-orgs", response_model=ListOrgsResult)
-async def api_list_orgs(ctx: Ctx, user_id: EffectiveUser) -> ListOrgsResult:
-    return await actions.list_orgs(ctx, user_id)
+async def api_list_orgs(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: ListOrgsRequest | None = None,
+) -> ListOrgsResult:
+    request: ListOrgsRequest = body or ListOrgsRequest()
+    return await actions.list_orgs(ctx, user_id, include_shared=request.include_shared)
 
 
 @router.post("/get-org", response_model=OrgDetailResult)
@@ -736,12 +752,12 @@ async def api_set_job_monitor_config(
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-@router.post("/start-job-discovery", response_model=StartJobDiscoveryResult)
-async def api_start_job_discovery(
+@router.post("/get-job-scan-status", response_model=JobScanStatusResult)
+async def api_get_job_scan_status(
     ctx: Ctx,
     user_id: EffectiveUser,
-) -> StartJobDiscoveryResult:
-    return await actions.start_job_discovery(ctx, user_id)
+) -> JobScanStatusResult:
+    return await actions.get_job_scan_status(ctx, user_id)
 
 
 @router.post(
@@ -756,21 +772,143 @@ async def api_start_single_org_job_discovery(
     return await actions.start_single_org_job_discovery(ctx, user_id, org_id=body.org_id)
 
 
-@router.post("/cancel-job-discovery")
-async def api_cancel_job_discovery(
-    ctx: Ctx,
-    user_id: EffectiveUser,
-) -> dict[str, bool]:
-    await actions.cancel_job_discovery(ctx, user_id)
-    return {"ok": True}
+def _format_sse_event(event: JobEvent | GraphEvent) -> str:
+    return f"data: {json.dumps(event)}\n\n"
 
 
-@router.post("/get-job-discovery-status", response_model=JobDiscoveryStatusResult)
-async def api_get_job_discovery_status(
+@router.get("/events/jobs")
+async def api_job_events(
+    request: Request,
     ctx: Ctx,
     user_id: EffectiveUser,
-) -> JobDiscoveryStatusResult:
-    return await actions.get_job_discovery_status(ctx, user_id)
+) -> StreamingResponse:
+    async def event_generator():
+        queue = job_event_bus.register(user_id)
+        try:
+            async with ctx.session_factory() as db:
+                from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+                from contactsafe_server.services.job_relevance_service import (
+                    get_scoring_progress_async,
+                )
+
+                discovery_service = JobDiscoveryService(db, ctx.settings)
+                scan_status = await discovery_service.get_scan_status(user_id)
+                if scan_status.scanning_active:
+                    yield _format_sse_event(
+                        {
+                            "type": "scan_progress",
+                            "scanning_active": True,
+                            "current_org_name": None,
+                        },
+                    )
+
+                scoring_progress: tuple[int, int] | None = await get_scoring_progress_async(
+                    user_id,
+                )
+                if scoring_progress is not None:
+                    scored, total = scoring_progress
+                    yield _format_sse_event(
+                        {
+                            "type": "scoring_progress",
+                            "scored": scored,
+                            "total": total,
+                        },
+                    )
+
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event: JobEvent | None = await asyncio.wait_for(queue.get(), timeout=15.0)
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                if event is None:
+                    break
+                yield _format_sse_event(event)
+        finally:
+            job_event_bus.unregister(user_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/events/graph")
+async def api_graph_events(
+    request: Request,
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> StreamingResponse:
+    async def event_generator():
+        queue = graph_event_bus.register(user_id)
+        try:
+            async with ctx.session_factory() as db:
+                from contactsafe_core.enums import SyncState
+                from contactsafe_server.db.models import Source
+                from contactsafe_server.graph_event_publishers import source_sync_event_for
+                from contactsafe_server.services.org_enrichment_service import OrgEnrichmentService
+
+                sources_result = await db.execute(
+                    select(Source).where(
+                        Source.user_id == user_id,
+                        Source.sync_state.in_(
+                            [
+                                SyncState.SYNCING.value,
+                                SyncState.PENDING.value,
+                                SyncState.PARTIAL.value,
+                            ],
+                        ),
+                    ),
+                )
+                for source in sources_result.scalars().all():
+                    yield _format_sse_event(source_sync_event_for(source))
+
+                org_service = OrgEnrichmentService(db, ctx.settings)
+                enrichment_status = await org_service.get_status(user_id)
+                if enrichment_status.state == "running":
+                    yield _format_sse_event(
+                        {
+                            "type": "org_enrichment_progress",
+                            "orgs_enriched": enrichment_status.orgs_enriched,
+                            "orgs_total": enrichment_status.orgs_total,
+                            "progress_message": enrichment_status.progress_message,
+                            "state": "running",
+                        },
+                    )
+
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event: GraphEvent | None = await asyncio.wait_for(
+                        queue.get(),
+                        timeout=15.0,
+                    )
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                if event is None:
+                    break
+                yield _format_sse_event(event)
+        finally:
+            graph_event_bus.unregister(user_id, queue)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 class _ListOrgJobsBody(BaseModel):
@@ -784,6 +922,27 @@ async def api_list_org_jobs(
     body: _ListOrgJobsBody = _ListOrgJobsBody(),
 ) -> ListOrgJobsResult:
     return await actions.list_org_jobs(ctx, user_id, relevant_only=body.relevant_only)
+
+
+@router.post("/list-flat-jobs", response_model=FlatJobListResult)
+async def api_list_flat_jobs(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> FlatJobListResult:
+    return await actions.list_flat_jobs(ctx, user_id)
+
+
+class _GetJobDetailBody(BaseModel):
+    job_id: UUID
+
+
+@router.post("/get-job-detail", response_model=JobDetailResult)
+async def api_get_job_detail(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: _GetJobDetailBody,
+) -> JobDetailResult:
+    return await actions.get_job_detail(ctx, user_id, job_id=body.job_id)
 
 
 @router.post("/get-job-preferences", response_model=JobPreferencesResult)
@@ -801,6 +960,74 @@ async def api_set_job_preferences(
         ctx, user_id, body.text,
         location_pref=body.location_pref,
         location_city=body.location_city,
+        commute_max_minutes=body.commute_max_minutes,
+        commute_note=body.commute_note,
+    )
+
+
+@router.post("/set-job-target-scope", response_model=JobPreferencesResult)
+async def api_set_job_target_scope(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: SetJobTargetScopeRequest,
+) -> JobPreferencesResult:
+    return await actions.set_job_target_scope(ctx, user_id, body.target_scope)
+
+
+@router.post("/get-notification-preferences", response_model=NotificationPreferencesResult)
+async def api_get_notification_preferences(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> NotificationPreferencesResult:
+    return await actions.get_notification_preferences(ctx, user_id)
+
+
+@router.post("/set-notification-preferences", response_model=NotificationPreferencesResult)
+async def api_set_notification_preferences(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: SetNotificationPreferencesRequest,
+) -> NotificationPreferencesResult:
+    return await actions.set_notification_preferences(
+        ctx,
+        user_id,
+        body.job_digest_frequency,
+    )
+
+
+@router.get("/unsubscribe", response_class=HTMLResponse)
+@router.post("/unsubscribe", response_class=HTMLResponse)
+async def api_unsubscribe(
+    request: Request,
+    ctx: Ctx,
+    token: str = Query(...),
+) -> HTMLResponse:
+    jwt_service: JWTService = ctx.jwt_service
+    try:
+        user_id: UUID = jwt_service.decode_unsubscribe_token(token)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid or expired unsubscribe link")
+
+    async with ctx.session_factory() as db:
+        service = JobDigestService(db, ctx.settings, jwt_service=jwt_service)
+        updated: bool = await service.unsubscribe_user(user_id)
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    from pathlib import Path
+
+    from fastapi.templating import Jinja2Templates
+
+    templates_dir: Path = (
+        Path(__file__).resolve().parents[1] / "templates" / "email"
+    )
+    templates: Jinja2Templates = Jinja2Templates(directory=str(templates_dir))
+    return templates.TemplateResponse(
+        request,
+        "unsubscribed.html",
+        {
+            "profile_url": f"{ctx.settings.effective_web_base_url}/profile",
+        },
     )
 
 
