@@ -29,13 +29,21 @@ async function refreshAccessToken(): Promise<boolean> {
     refresh_token: refreshToken,
   });
 
-  const response: Response = await fetch(`${env.apiUrl}/oauth/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${env.apiUrl}/oauth/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+  } catch {
+    return false;
+  }
 
   if (!response.ok) {
+    if (response.status >= 500) {
+      return false;
+    }
     session.destroy();
     await session.save();
     return false;
