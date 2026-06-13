@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getCoreRowModel,
@@ -19,7 +19,6 @@ import {
   Users,
 } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { toast } from "sonner";
 
 import {
   CompactCell,
@@ -28,6 +27,7 @@ import {
 } from "@/components/data-table/compact-table";
 import { OrgDetailPanel } from "@/components/org-detail-panel";
 import { OrgLogo } from "@/components/org-logo";
+import { useOrgListMembership } from "@/components/target-selection/use-org-list-membership";
 import { UnsavedChangesDialog } from "@/components/unsaved-changes-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -51,21 +51,17 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import type {
-  CreateOrgListResult,
-  ListOrgListsResult,
   ListOrgsResult,
-  ModifyOrgListMembershipResult,
   OrgDetailResult,
   OrgListItem,
-  OrgListSummary,
 } from "@/lib/api-types";
 import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { formatCompanySize } from "@/lib/company-size";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { formatIndustryTag, formatIndustryTags } from "@/lib/industry-tags";
+import { formatNetworkContactsLabel } from "@/lib/format-network-contacts-label";
 import { proxyPost } from "@/lib/proxy-client";
 import {
-  findJobProspectsList,
   JOB_PROSPECTS_LIST_NAME,
 } from "@/lib/setup-utils";
 import { cn } from "@/lib/utils";
@@ -113,7 +109,6 @@ export function OrganizationsView({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const queryClient = useQueryClient();
   const [search, setSearch] = useState<string>(searchParams.get("search") ?? "");
   const [sorting, setSorting] = useState<SortingState>([
     { id: "name", desc: false },
@@ -172,10 +167,13 @@ export function OrganizationsView({
     staleTime: 0,
   });
 
-  const orgListsQuery = useQuery({
-    queryKey: ["org-lists"],
-    queryFn: () => proxyPost<ListOrgListsResult>("list-org-lists"),
-  });
+  const {
+    selectedOrgIds: starredOrgIds,
+    selectedCount: starredCount,
+    isPending: starMutationPending,
+    toggleOrg,
+    bulkUpdate,
+  } = useOrgListMembership(JOB_PROSPECTS_LIST_NAME);
 
   const detailQuery = useQuery({
     queryKey: ["organization", selectedOrgId],
@@ -186,161 +184,7 @@ export function OrganizationsView({
     enabled: selectedOrgId !== null,
   });
 
-  const invalidateOrgLists = async (): Promise<void> => {
-    await queryClient.invalidateQueries({ queryKey: ["org-lists"] });
-  };
-
-  const ensureJobProspectsListId = useCallback(async (): Promise<string> => {
-    const existingList: OrgListSummary | undefined = findJobProspectsList(
-      orgListsQuery.data?.lists ?? [],
-    );
-    if (existingList !== undefined) {
-      return existingList.list_id;
-    }
-    const result: CreateOrgListResult = await proxyPost<CreateOrgListResult>(
-      "create-org-list",
-      { name: JOB_PROSPECTS_LIST_NAME },
-    );
-    await invalidateOrgLists();
-    return result.list_id;
-  }, [orgListsQuery.data?.lists, queryClient]);
-
-  const applyOptimisticStarUpdate = useCallback(
-    (orgIds: string[], action: "star" | "unstar"): ListOrgListsResult | undefined => {
-      const previous: ListOrgListsResult | undefined =
-        queryClient.getQueryData<ListOrgListsResult>(["org-lists"]);
-      queryClient.setQueryData<ListOrgListsResult>(["org-lists"], (old) => {
-        if (old === undefined) {
-          return old;
-        }
-        return {
-          ...old,
-          lists: old.lists.map((list) => {
-            if (list.name !== JOB_PROSPECTS_LIST_NAME) {
-              return list;
-            }
-            const currentIds = new Set(list.org_ids);
-            if (action === "star") {
-              for (const id of orgIds) {
-                currentIds.add(id);
-              }
-            } else {
-              for (const id of orgIds) {
-                currentIds.delete(id);
-              }
-            }
-            return {
-              ...list,
-              org_ids: [...currentIds],
-              org_count: currentIds.size,
-            };
-          }),
-        };
-      });
-      return previous;
-    },
-    [queryClient],
-  );
-
-  const starToggleMutation = useMutation({
-    mutationFn: async ({
-      orgId,
-      isStarred,
-    }: {
-      orgId: string;
-      isStarred: boolean;
-    }) => {
-      if (isStarred) {
-        const list: OrgListSummary | undefined = findJobProspectsList(
-          orgListsQuery.data?.lists ?? [],
-        );
-        if (list === undefined) {
-          return null;
-        }
-        return proxyPost<ModifyOrgListMembershipResult>("remove-orgs-from-list", {
-          list_id: list.list_id,
-          org_ids: [orgId],
-        });
-      }
-      const listId: string = await ensureJobProspectsListId();
-      return proxyPost<ModifyOrgListMembershipResult>("add-orgs-to-list", {
-        list_id: listId,
-        org_ids: [orgId],
-      });
-    },
-    onMutate: async ({ orgId, isStarred }) => {
-      await queryClient.cancelQueries({ queryKey: ["org-lists"] });
-      const previous = applyOptimisticStarUpdate(
-        [orgId],
-        isStarred ? "unstar" : "star",
-      );
-      return { previous };
-    },
-    onError: (_error, _variables, context) => {
-      if (context?.previous !== undefined) {
-        queryClient.setQueryData(["org-lists"], context.previous);
-      }
-      toast.error("Failed to update star");
-    },
-    onSettled: async () => {
-      await invalidateOrgLists();
-    },
-  });
-
-  const bulkStarMutation = useMutation({
-    mutationFn: async ({
-      orgIds,
-      action,
-    }: {
-      orgIds: string[];
-      action: "star" | "unstar";
-    }) => {
-      if (orgIds.length === 0) {
-        return null;
-      }
-      if (action === "unstar") {
-        const list: OrgListSummary | undefined = findJobProspectsList(
-          orgListsQuery.data?.lists ?? [],
-        );
-        if (list === undefined) {
-          return null;
-        }
-        return proxyPost<ModifyOrgListMembershipResult>("remove-orgs-from-list", {
-          list_id: list.list_id,
-          org_ids: orgIds,
-        });
-      }
-      const listId: string = await ensureJobProspectsListId();
-      return proxyPost<ModifyOrgListMembershipResult>("add-orgs-to-list", {
-        list_id: listId,
-        org_ids: orgIds,
-      });
-    },
-    onMutate: async ({ orgIds, action }) => {
-      await queryClient.cancelQueries({ queryKey: ["org-lists"] });
-      const previous = applyOptimisticStarUpdate(orgIds, action);
-      return { previous };
-    },
-    onError: (_error, _variables, context) => {
-      if (context?.previous !== undefined) {
-        queryClient.setQueryData(["org-lists"], context.previous);
-      }
-      toast.error("Failed to update stars");
-    },
-    onSettled: async () => {
-      await invalidateOrgLists();
-    },
-  });
-
   const allOrgs: OrgListItem[] = orgsQuery.data?.orgs ?? [];
-  const orgLists: OrgListSummary[] = orgListsQuery.data?.lists ?? [];
-  const jobProspectsList: OrgListSummary | undefined =
-    findJobProspectsList(orgLists);
-  const starredOrgIds: ReadonlySet<string> = useMemo(
-    () => new Set(jobProspectsList?.org_ids ?? []),
-    [jobProspectsList?.org_ids],
-  );
-  const starredCount: number = jobProspectsList?.org_count ?? 0;
 
   const availableCategories: string[] = useMemo(() => {
     const tags = new Set<string>();
@@ -478,19 +322,18 @@ export function OrganizationsView({
         header: ({ column }) => (
           <CompactSortHeader column={column} label="Contacts" />
         ),
-        cell: ({ row }) => {
-          const own: number = row.original.contact_count;
-          const shared: number = row.original.shared_contact_count;
-          if (shared > 0) {
-            return (
-              <span className="text-xs">
-                {own > 0 ? `${own} + ` : ""}
-                <span className="text-muted-foreground">{shared} shared</span>
-              </span>
-            );
-          }
-          return <CompactCell value={own.toString()} />;
-        },
+        cell: ({ row }) => (
+          <CompactCell
+            className="text-xs"
+            value={formatNetworkContactsLabel({
+              primaryContactName: row.original.primary_contact_name,
+              contactCount: row.original.contact_count,
+              sharedPrimaryContactName: row.original.shared_primary_contact_name,
+              sharedContactCount: row.original.shared_contact_count,
+              sharedPrimaryBridgeName: row.original.shared_primary_bridge_name,
+            })}
+          />
+        ),
         meta: { width: "w-[5.5rem]" },
       },
       {
@@ -540,13 +383,10 @@ export function OrganizationsView({
               variant="ghost"
               size="icon"
               className="size-6 shrink-0"
-              disabled={starToggleMutation.isPending}
+              disabled={starMutationPending}
               onClick={(event) => {
                 event.stopPropagation();
-                starToggleMutation.mutate({
-                  orgId: row.original.org_id,
-                  isStarred,
-                });
+                toggleOrg(row.original.org_id, isStarred);
               }}
               aria-label={
                 isStarred
@@ -615,7 +455,7 @@ export function OrganizationsView({
     );
 
     return baseColumns;
-  }, [router, starredOrgIds, starToggleMutation]);
+  }, [router, starredOrgIds, starMutationPending, toggleOrg]);
 
   const table = useReactTable({
     data: filteredOrgs,
@@ -657,15 +497,15 @@ export function OrganizationsView({
     const orgIdsToStar: string[] = getMatchingOrgIds().filter(
       (orgId) => !starredOrgIds.has(orgId),
     );
-    bulkStarMutation.mutate({ orgIds: orgIdsToStar, action: "star" });
-  }, [bulkStarMutation, getMatchingOrgIds, starredOrgIds]);
+    bulkUpdate(orgIdsToStar, "add");
+  }, [bulkUpdate, getMatchingOrgIds, starredOrgIds]);
 
   const handleUnstarAllMatching = useCallback((): void => {
     const orgIdsToUnstar: string[] = getMatchingOrgIds().filter((orgId) =>
       starredOrgIds.has(orgId),
     );
-    bulkStarMutation.mutate({ orgIds: orgIdsToUnstar, action: "unstar" });
-  }, [bulkStarMutation, getMatchingOrgIds, starredOrgIds]);
+    bulkUpdate(orgIdsToUnstar, "remove");
+  }, [bulkUpdate, getMatchingOrgIds, starredOrgIds]);
 
   starAllRef.current = handleStarAllMatching;
   unstarAllRef.current = handleUnstarAllMatching;
@@ -725,9 +565,6 @@ export function OrganizationsView({
     });
   };
 
-
-  const starMutationPending: boolean =
-    starToggleMutation.isPending || bulkStarMutation.isPending;
 
   const hasActiveFilters: boolean =
     selectedCategories.size > 0 || selectedSizeBands.size > 0;

@@ -55,6 +55,7 @@ import type {
 } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
+import { formatNetworkContactsLabel } from "@/lib/format-network-contacts-label";
 import { useOnboardingPhase } from "@/lib/use-onboarding-phase";
 import { useJobBookmarks } from "@/lib/use-job-bookmarks";
 import { useJobEvents } from "@/lib/use-job-events";
@@ -110,28 +111,6 @@ function MatchBadge({
 }
 
 type JobFilter = "bookmarked" | "relevant" | "all";
-
-function formatMyContactsLabel(
-  primaryContactName: string | null | undefined,
-  contactCount: number | null | undefined,
-): string {
-  const count: number =
-    typeof contactCount === "number" && Number.isFinite(contactCount)
-      ? contactCount
-      : 0;
-  const name: string | null =
-    typeof primaryContactName === "string" && primaryContactName.trim() !== ""
-      ? primaryContactName.trim()
-      : null;
-  if (count === 0 || name === null) {
-    return "—";
-  }
-  if (count === 1) {
-    return name;
-  }
-  const othersCount: number = count - 1;
-  return `${name} and ${othersCount} ${othersCount === 1 ? "other" : "others"}`;
-}
 
 function JobsTable() {
   const [search, setSearch] = useState<string>("");
@@ -241,10 +220,13 @@ function JobsTable() {
         cell: ({ row }) => (
           <CompactCell
             className="text-xs"
-            value={formatMyContactsLabel(
-              row.original.primary_contact_name,
-              row.original.contact_count,
-            )}
+            value={formatNetworkContactsLabel({
+              primaryContactName: row.original.primary_contact_name,
+              contactCount: row.original.contact_count,
+              sharedPrimaryContactName: row.original.shared_primary_contact_name,
+              sharedContactCount: row.original.shared_contact_count,
+              sharedPrimaryBridgeName: row.original.shared_primary_bridge_name,
+            })}
           />
         ),
         meta: { width: "w-[7rem]" },
@@ -528,7 +510,7 @@ function JobsTable() {
           columnCount={columns.length}
           emptyMessage={
             totalCount === 0
-              ? "No jobs found yet. Star companies and run Check All."
+              ? "No jobs found yet. Select companies and jobs will appear automatically once scanned."
               : "No jobs match the current filter."
           }
           onRowClick={(job: OrgJobItem) => setSelectedJobId(job.job_id)}

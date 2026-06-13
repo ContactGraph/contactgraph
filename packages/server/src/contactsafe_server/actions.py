@@ -8,6 +8,7 @@ obtain those two values.
 from __future__ import annotations
 
 import logging
+from typing import Literal, cast
 from uuid import UUID
 
 from datetime import UTC, datetime
@@ -42,8 +43,11 @@ from contactsafe_core.contact_schemas import (
     JobMonitorConfigResult,
     JobScanStatusResult,
     JobPreferencesResult,
+    JobTargetScope,
     ListOrgJobsResult,
+    NotificationPreferencesResult,
     SetJobMonitorConfigRequest,
+    SetJobTargetScopeRequest,
     UpdateOrgRequest,
     UpdatePersonRequest,
 )
@@ -1768,12 +1772,21 @@ async def get_job_preferences(
             select(func.count()).select_from(UserJobRelevance).where(UserJobRelevance.user_id == user_id),
         )
         count: int = count_result.scalar() or 0
+        raw_scope: dict | None = user.job_target_scope
+        target_scope: JobTargetScope | None = None
+        if raw_scope is not None:
+            target_scope = JobTargetScope(
+                industry_tags=list(raw_scope.get("industry_tags") or []),
+                sharer_names=list(raw_scope.get("sharer_names") or []),
+                size_bands=list(raw_scope.get("size_bands") or []),
+            )
         return JobPreferencesResult(
             text=user.job_preferences_text,
             location_pref=user.job_location_pref,
             location_city=user.job_location_city,
             commute_max_minutes=user.job_commute_max_minutes,
             commute_note=user.job_commute_note,
+            target_scope=target_scope,
             classified_job_count=count,
             message="OK",
         )
@@ -1837,3 +1850,87 @@ async def set_job_preferences(
         classified_job_count=0,
         message="Preferences saved. Rescoring jobs in background…",
     )
+
+
+async def set_job_target_scope(
+    ctx: AppContext,
+    user_id: UUID | None,
+    target_scope: JobTargetScope,
+) -> JobPreferencesResult:
+    if user_id is None:
+        return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.db.models import User
+
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return JobPreferencesResult(text=None, classified_job_count=0, message="User not found.")
+        user.job_target_scope = {
+            "industry_tags": target_scope.industry_tags,
+            "sharer_names": target_scope.sharer_names,
+            "size_bands": target_scope.size_bands,
+        }
+        await db.commit()
+
+    return await get_job_preferences(ctx, user_id)
+
+
+async def get_notification_preferences(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> NotificationPreferencesResult:
+    if user_id is None:
+        return NotificationPreferencesResult(
+            job_digest_frequency="off",
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_core.enums import JobDigestFrequency
+        from contactsafe_server.db.models import User
+
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return NotificationPreferencesResult(
+                job_digest_frequency="off",
+                message="User not found.",
+            )
+        frequency: str = user.job_digest_frequency
+        if frequency not in {item.value for item in JobDigestFrequency}:
+            frequency = JobDigestFrequency.DAILY
+        return NotificationPreferencesResult(
+            job_digest_frequency=cast(Literal["daily", "weekly", "off"], frequency),
+            message="OK",
+        )
+
+
+async def set_notification_preferences(
+    ctx: AppContext,
+    user_id: UUID | None,
+    frequency: str,
+) -> NotificationPreferencesResult:
+    if user_id is None:
+        return NotificationPreferencesResult(
+            job_digest_frequency="off",
+            message="Authentication required.",
+        )
+    from contactsafe_core.enums import JobDigestFrequency
+
+    if frequency not in {item.value for item in JobDigestFrequency}:
+        return NotificationPreferencesResult(
+            job_digest_frequency="off",
+            message="Invalid digest frequency.",
+        )
+
+    async with ctx.session_factory() as db:
+        from contactsafe_server.db.models import User
+
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return NotificationPreferencesResult(
+                job_digest_frequency="off",
+                message="User not found.",
+            )
+        user.job_digest_frequency = frequency
+        await db.commit()
+
+    return await get_notification_preferences(ctx, user_id)

@@ -124,6 +124,21 @@ async def test_mcp_valid_bearer_reaches_app(jwt_service: JWTService) -> None:
 
 
 @pytest.mark.asyncio
+async def test_mcp_unsubscribe_bearer_returns_401(jwt_service: JWTService) -> None:
+    user_id: uuid.UUID = uuid.uuid4()
+    token: str = jwt_service.create_unsubscribe_token(user_id)
+    settings = get_settings()
+    inner: Starlette = Starlette(routes=[Route("/", _ok_handler)])
+    app = McpAuthMiddleware(inner, settings=settings, jwt_service=jwt_service)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://testserver") as ac:
+        response = await ac.get("/", headers={"Authorization": f"Bearer {token}"})
+    assert response.status_code == 401
+    assert "WWW-Authenticate" in response.headers
+    body: dict[str, str] = response.json()
+    assert body["error"] == "invalid_token"
+
+@pytest.mark.asyncio
 async def test_oauth_token_rejects_invalid_grant(
     db_session: AsyncSession,
     postgres_available: bool,

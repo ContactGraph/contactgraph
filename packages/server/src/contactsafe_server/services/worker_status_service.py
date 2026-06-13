@@ -5,7 +5,6 @@ from __future__ import annotations
 import pickletools
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from typing import Any
 
 from contactsafe_core.contact_schemas import (
     AdminUserItem,
@@ -92,27 +91,37 @@ async def _count_arq_jobs() -> tuple[dict[str, int], dict[str, int], bool]:
 
 
 def _function_name_from_job(raw: bytes) -> str | None:
-    """Extract an ARQ job function name without executing pickle opcodes.
+    """Extract an arq function name without deserializing the pickle payload.
 
-    ARQ's default job serializer stores a pickled dictionary with the function
-    name under the ``"f"`` key.  ``pickle.loads`` is intentionally avoided here
-    because these bytes come from Redis and unpickling attacker-controlled data
-    can execute arbitrary code.  ``pickletools.genops`` disassembles the pickle
-    stream without constructing objects, which is enough for the dashboard's
-    best-effort queue counts.
+    arq's default job serializer stores jobs as pickled dictionaries containing an
+    ``"f"`` key for the function name.  Calling ``pickle.loads`` on Redis data is
+    unsafe because Redis contents are not trusted by the admin API process, so this
+    parser only walks pickle opcodes and returns the string value for the first
+    ``"f"`` key when the surrounding arq job shape is present.  ``pickletools``
+    disassembles the byte stream without importing or constructing
+    attacker-controlled objects.
     """
+    _structural_after_value_opcodes: set[str] = {"SETITEM"}
+    _expected_next_keys: set[str] = {"a", "k", "et"}
+    saw_function_key: bool = False
+    function_name: str | None = None
     try:
-        next_string_is_function_name = False
-        for opcode, arg, _position in pickletools.genops(raw):
-            if next_string_is_function_name and opcode.name in _PICKLE_MEMO_OPCODES:
-                continue
-            if opcode.name in _PICKLE_STRING_OPCODES:
-                if next_string_is_function_name:
-                    function_name = str(arg)
-                    return function_name if function_name in _KNOWN_WORKER_FUNCTIONS else None
-                next_string_is_function_name = arg == "f"
-            elif next_string_is_function_name:
+        for opcode, arg, _pos in pickletools.genops(raw):
+            if function_name is not None:
+                if opcode.name in _PICKLE_MEMO_OPCODES | _structural_after_value_opcodes:
+                    continue
+                if opcode.name in _PICKLE_STRING_OPCODES and arg in _expected_next_keys:
+                    return function_name
                 return None
+            if saw_function_key:
+                if opcode.name in _PICKLE_MEMO_OPCODES:
+                    continue
+                if opcode.name in _PICKLE_STRING_OPCODES:
+                    function_name = str(arg)
+                    continue
+                return None
+            if opcode.name in _PICKLE_STRING_OPCODES and arg == "f":
+                saw_function_key = True
     except Exception:
         return None
     return None

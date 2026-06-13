@@ -33,6 +33,7 @@ from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.import_write_lock import user_import_write_lock
 from contactsafe_server.services.upload_payload_crypto import read_upload_payload
 from contactsafe_server.graph_event_publishers import publish_source_sync_update
+from contactsafe_server.services.user_org_observation_service import rebuild_user_org_observations
 from contactsafe_server.services.user_person_service import ensure_user_person
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -135,6 +136,8 @@ class FileUploadImportService:
                     await self._ingest_linkedin_profile(source, content)
                 else:
                     await self._ingest_linkedin_connections(source, content)
+
+                await rebuild_user_org_observations(self._db, user_id)
 
                 source.upload_payload = None
                 source.sync_state = SyncState.COMPLETE.value

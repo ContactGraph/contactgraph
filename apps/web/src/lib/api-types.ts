@@ -469,8 +469,11 @@ export interface OrgListItem {
   employee_count: number | null;
   company_size_band: string | null;
   contact_count: number;
+  primary_contact_name: string | null;
   shared_from: string[];
   shared_contact_count: number;
+  shared_primary_contact_name: string | null;
+  shared_primary_bridge_name: string | null;
 }
 
 export interface ListOrgsResult {
@@ -695,6 +698,9 @@ export interface OrgJobItem {
   location_reason: string | null;
   contact_count: number;
   primary_contact_name: string | null;
+  shared_contact_count: number;
+  shared_primary_contact_name: string | null;
+  shared_primary_bridge_name: string | null;
 }
 
 export interface OrgJobsByCompany {
@@ -750,14 +756,36 @@ export interface SetJobPreferencesRequest {
   commute_note: string | null;
 }
 
+export interface JobTargetScopePayload {
+  industry_tags: string[];
+  sharer_names: string[];
+  size_bands: string[];
+}
+
+export interface SetJobTargetScopeRequest {
+  target_scope: JobTargetScopePayload;
+}
+
 export interface JobPreferencesResult {
   text: string | null;
   location_pref: string | null;
   location_city: string | null;
   commute_max_minutes: number | null;
   commute_note: string | null;
+  target_scope: JobTargetScopePayload | null;
   classified_job_count: number;
   message: string;
+}
+
+export type JobDigestFrequency = "daily" | "weekly" | "off";
+
+export interface NotificationPreferencesResult {
+  job_digest_frequency: JobDigestFrequency;
+  message: string;
+}
+
+export interface SetNotificationPreferencesRequest {
+  job_digest_frequency: JobDigestFrequency;
 }
 
 export interface PipelineStatus {

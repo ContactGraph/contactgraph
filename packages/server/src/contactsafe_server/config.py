@@ -291,6 +291,37 @@ class Settings(BaseSettings):
         description="Default arq job timeout in seconds",
     )
 
+    resend_api_key: str | None = Field(
+        default=None,
+        description="Resend API key for transactional email; unset disables outbound email",
+    )
+    email_from_address: str = Field(
+        default="ContactGraph <notifications@contactsafe.com>",
+        description="From address for transactional emails",
+    )
+    email_digest_send_hour_utc: int = Field(
+        default=15,
+        ge=0,
+        le=23,
+        description="UTC hour when daily/weekly job digests are enqueued (~morning US)",
+    )
+    email_digest_min_match_score: int = Field(
+        default=60,
+        ge=0,
+        le=100,
+        description="Minimum match score for jobs included in email digests",
+    )
+    email_digest_max_jobs: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description="Maximum jobs included in a single digest email",
+    )
+    email_unsubscribe_token_expire_days: int = Field(
+        default=365,
+        description="Lifetime of one-click unsubscribe tokens in email footers",
+    )
+
     @field_validator("database_url", mode="before")
     @classmethod
     def ensure_asyncpg_driver(cls, value: str) -> str:

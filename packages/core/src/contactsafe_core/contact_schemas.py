@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, cast
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -189,8 +189,11 @@ class OrgListItem(BaseModel):
     employee_count: int | None = None
     company_size_band: str | None = None
     contact_count: int = 0
+    primary_contact_name: str | None = None
     shared_from: list[str] = Field(default_factory=list)
     shared_contact_count: int = 0
+    shared_primary_contact_name: str | None = None
+    shared_primary_bridge_name: str | None = None
 
 
 class ListOrgsResult(BaseModel):
@@ -404,6 +407,9 @@ class OrgJobItem(BaseModel):
     location_reason: str | None = None
     contact_count: int = 0
     primary_contact_name: str | None = None
+    shared_contact_count: int = 0
+    shared_primary_contact_name: str | None = None
+    shared_primary_bridge_name: str | None = None
 
 
 class OrgJobsByCompany(BaseModel):
@@ -457,13 +463,33 @@ class SetJobPreferencesRequest(BaseModel):
     commute_note: str | None = None
 
 
+class JobTargetScope(BaseModel):
+    industry_tags: list[str] = Field(default_factory=list)
+    sharer_names: list[str] = Field(default_factory=list)
+    size_bands: list[str] = Field(default_factory=list)
+
+
+class SetJobTargetScopeRequest(BaseModel):
+    target_scope: JobTargetScope
+
+
 class JobPreferencesResult(BaseModel):
     text: str | None = None
     location_pref: str | None = None
     location_city: str | None = None
     commute_max_minutes: int | None = None
     commute_note: str | None = None
+    target_scope: JobTargetScope | None = None
     classified_job_count: int = 0
+    message: str
+
+
+class SetNotificationPreferencesRequest(BaseModel):
+    job_digest_frequency: Literal["daily", "weekly", "off"]
+
+
+class NotificationPreferencesResult(BaseModel):
+    job_digest_frequency: Literal["daily", "weekly", "off"]
     message: str
 
 
