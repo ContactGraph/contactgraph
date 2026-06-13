@@ -642,3 +642,7 @@ export function getAlternativesPage(
 export function getAllAlternativesSlugs(): readonly string[] {
   return PAGES.map((p: AlternativesPageData) => p.slug);
 }
+
+export function getAllAlternativesPages(): readonly AlternativesPageData[] {
+  return PAGES;
+}

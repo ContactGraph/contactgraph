@@ -14,6 +14,7 @@ _DEFAULT_WINDOW_SECONDS: float = 60.0
 
 _PROTECTED_PREFIXES: tuple[str, ...] = (
     "/api/poll-connect/",
+    "/api/public/",
     "/oauth/token",
     "/oauth/authorize",
 )
