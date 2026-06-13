@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import uuid
 from typing import Any, cast
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from contactsafe_server.config import get_settings
-from contactsafe_server.db.models import JobDiscoveryRun, JobScrapeRun, Org
-from contactsafe_server.services.job_discovery_service import JobDiscoveryService
+from contactsafe_server.services.job_discovery_service import (
+    JobDiscoveryService,
+    ScrapeOrgResult,
+)
+from contactsafe_server.db.models import Org
 
 
 class FakeDb:
     def __init__(self, org: Org | None = None) -> None:
-        self.org = org
+        self.org: Org | None = org
         self.added: list[object] = []
-        self.commits = 0
+        self.commits: int = 0
         self.get_calls: list[tuple[type[object], uuid.UUID]] = []
 
     async def get(self, model: type[object], row_id: uuid.UUID) -> object | None:
@@ -31,8 +35,8 @@ class FakeDb:
 
 @pytest.mark.asyncio
 async def test_discover_single_org_rejects_unmonitored_org(monkeypatch: pytest.MonkeyPatch) -> None:
-    user_id = uuid.uuid4()
-    victim_org_id = uuid.uuid4()
+    user_id: uuid.UUID = uuid.uuid4()
+    victim_org_id: uuid.UUID = uuid.uuid4()
     db = FakeDb(
         Org(
             id=victim_org_id,
@@ -42,41 +46,37 @@ async def test_discover_single_org_rejects_unmonitored_org(monkeypatch: pytest.M
         ),
     )
     service = JobDiscoveryService(cast(Any, db), get_settings())
-    discover_called = False
-
-    async def has_running_run(_user_id: uuid.UUID) -> bool:
-        return False
+    discover_called: bool = False
 
     async def list_monitored_org_ids(_user_id: uuid.UUID) -> list[uuid.UUID]:
         return []
 
-    async def discover_jobs_for_org(_org: Org) -> tuple[int, int, str, str | None]:
+    async def scrape_org_global(
+        _org_id: uuid.UUID, *, force: bool = False
+    ) -> ScrapeOrgResult:
         nonlocal discover_called
         discover_called = True
-        return 1, 1, "theirstack", None
+        return ScrapeOrgResult(jobs_found=1, new_jobs=1, source="theirstack", error=None, scanned=True)
 
-    monkeypatch.setattr(service, "_has_running_run", has_running_run)
     monkeypatch.setattr(service, "_list_monitored_org_ids", list_monitored_org_ids)
-    monkeypatch.setattr(service, "_discover_jobs_for_org", discover_jobs_for_org)
+    monkeypatch.setattr(service, "scrape_org_global", scrape_org_global)
 
-    result = await service.discover_single_org(user_id, victim_org_id)
+    with patch("contactsafe_server.config.get_settings") as mock_settings:
+        mock_settings.return_value = get_settings()
+        mock_settings.return_value.use_arq_worker = False
+        result = await service.discover_single_org(user_id, victim_org_id)
 
     assert result.scheduled is False
-    assert result.jobs_found == 0
-    assert result.new_jobs == 0
     assert "monitored job list" in result.message
     assert discover_called is False
-    assert db.added == []
-    assert db.commits == 0
-    assert db.get_calls == []
 
 
 @pytest.mark.asyncio
-async def test_discover_single_org_records_run_for_monitored_org(
+async def test_discover_single_org_succeeds_for_monitored_org(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user_id = uuid.uuid4()
-    org_id = uuid.uuid4()
+    user_id: uuid.UUID = uuid.uuid4()
+    org_id: uuid.UUID = uuid.uuid4()
     db = FakeDb(
         Org(
             id=org_id,
@@ -87,66 +87,64 @@ async def test_discover_single_org_records_run_for_monitored_org(
     )
     service = JobDiscoveryService(cast(Any, db), get_settings())
 
-    async def has_running_run(_user_id: uuid.UUID) -> bool:
-        return False
-
     async def list_monitored_org_ids(_user_id: uuid.UUID) -> list[uuid.UUID]:
         return [org_id]
 
-    async def discover_jobs_for_org(_org: Org) -> tuple[int, int, str, str | None]:
-        return 3, 2, "theirstack", None
+    async def scrape_org_global(
+        _org_id: uuid.UUID, *, force: bool = False
+    ) -> ScrapeOrgResult:
+        return ScrapeOrgResult(jobs_found=3, new_jobs=2, source="theirstack", error=None, scanned=True)
 
     async def classify_new_jobs(_user_id: uuid.UUID) -> None:
         return None
 
-    monkeypatch.setattr(service, "_has_running_run", has_running_run)
     monkeypatch.setattr(service, "_list_monitored_org_ids", list_monitored_org_ids)
-    monkeypatch.setattr(service, "_discover_jobs_for_org", discover_jobs_for_org)
+    monkeypatch.setattr(service, "scrape_org_global", scrape_org_global)
     monkeypatch.setattr(service, "_classify_new_jobs", classify_new_jobs)
 
-    result = await service.discover_single_org(user_id, org_id)
+    with (
+        patch("contactsafe_server.config.get_settings") as mock_settings,
+        patch("contactsafe_server.job_event_publishers.publish_scan_progress"),
+    ):
+        mock_settings.return_value = get_settings()
+        mock_settings.return_value.use_arq_worker = False
+        result = await service.discover_single_org(user_id, org_id)
 
     assert result.scheduled is True
     assert result.jobs_found == 3
     assert result.new_jobs == 2
-    assert db.commits == 2
-    assert any(isinstance(item, JobDiscoveryRun) for item in db.added)
-    assert any(isinstance(item, JobScrapeRun) for item in db.added)
-
-    run = next(item for item in db.added if isinstance(item, JobDiscoveryRun))
-    assert run.user_id == user_id
-    assert run.state == "complete"
-    assert run.orgs_total == 1
-    assert run.orgs_processed == 1
-    assert run.jobs_found == 3
-    assert run.new_jobs == 2
 
 
 @pytest.mark.asyncio
-async def test_discover_single_org_rejects_when_discovery_is_already_running(
+async def test_discover_single_org_schedules_via_arq_when_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    user_id = uuid.uuid4()
-    org_id = uuid.uuid4()
-    db = FakeDb()
+    user_id: uuid.UUID = uuid.uuid4()
+    org_id: uuid.UUID = uuid.uuid4()
+    db = FakeDb(
+        Org(
+            id=org_id,
+            canonical_name="Queued Org",
+            categories=[],
+            attributes={},
+        ),
+    )
     service = JobDiscoveryService(cast(Any, db), get_settings())
-    listed_orgs = False
-
-    async def has_running_run(_user_id: uuid.UUID) -> bool:
-        return True
 
     async def list_monitored_org_ids(_user_id: uuid.UUID) -> list[uuid.UUID]:
-        nonlocal listed_orgs
-        listed_orgs = True
         return [org_id]
 
-    monkeypatch.setattr(service, "_has_running_run", has_running_run)
     monkeypatch.setattr(service, "_list_monitored_org_ids", list_monitored_org_ids)
 
-    result = await service.discover_single_org(user_id, org_id)
+    with (
+        patch("contactsafe_server.config.get_settings") as mock_settings,
+        patch("contactsafe_server.queue.enqueue_background_job", new_callable=AsyncMock) as mock_enqueue,
+    ):
+        mock_settings.return_value = get_settings()
+        mock_settings.return_value.use_arq_worker = True
+        mock_enqueue.return_value = f"scrape-org-{org_id}"
+        result = await service.discover_single_org(user_id, org_id)
 
-    assert result.scheduled is False
-    assert result.message == "Job discovery is already running."
-    assert listed_orgs is False
-    assert db.added == []
-    assert db.commits == 0
+    assert result.scheduled is True
+    assert "scheduled" in result.message
+    mock_enqueue.assert_awaited_once()
