@@ -1,7 +1,10 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 
 import { Providers } from "@/app/providers";
 import "./globals.css";
+
+const GA_ID = "G-HD7GVZKMH3" as const;
 
 export const metadata: Metadata = {
   title: "ContactGraph",
@@ -30,6 +33,15 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className="h-full antialiased">
+      <head>
+        <Script
+          src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}
+          strategy="afterInteractive"
+        />
+        <Script id="gtag-init" strategy="afterInteractive">
+          {`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','${GA_ID}');`}
+        </Script>
+      </head>
       <body
         suppressHydrationWarning
         className="min-h-full flex flex-col bg-background text-foreground"
