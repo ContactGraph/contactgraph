@@ -18,6 +18,7 @@ type NavLink =
   | { kind: "external"; href: string; label: string };
 
 const marketingLinks: readonly NavLink[] = [
+  { kind: "internal", href: "/about", label: "About" },
   { kind: "external", href: `${API_BASE}/skill.md`, label: "Skill" },
   { kind: "external", href: `${API_BASE}/mcp`, label: "MCP" },
   { kind: "external", href: GITHUB_REPO_URL, label: "GitHub" },
