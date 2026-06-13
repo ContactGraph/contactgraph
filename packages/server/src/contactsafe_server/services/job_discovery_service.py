@@ -8,9 +8,6 @@ import uuid
 from datetime import UTC, datetime
 from typing import Literal
 
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
-
 from contactsafe_core.contact_schemas import (
     JobDiscoveryStatusResult,
     JobMonitorConfigResult,
@@ -21,6 +18,9 @@ from contactsafe_core.contact_schemas import (
     StartJobDiscoveryResult,
     StartSingleOrgDiscoveryResult,
 )
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import (
     JobDiscoveryRun,
@@ -183,7 +183,12 @@ class JobDiscoveryService:
     ) -> ListOrgJobsResult:
         org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
         if not org_ids:
-            return ListOrgJobsResult(companies=[], total_jobs=0, total_relevant=0, message="No monitored organizations.")
+            return ListOrgJobsResult(
+                companies=[],
+                total_jobs=0,
+                total_relevant=0,
+                message="No monitored organizations.",
+            )
 
         orgs_result = await self._db.execute(
             select(Org).where(Org.id.in_(org_ids)).order_by(Org.canonical_name.asc()),
@@ -280,7 +285,12 @@ class JobDiscoveryService:
             if total_jobs > 0
             else "No open jobs found yet. Run job discovery from Setup."
         )
-        return ListOrgJobsResult(companies=companies, total_jobs=total_jobs, total_relevant=total_relevant, message=message)
+        return ListOrgJobsResult(
+            companies=companies,
+            total_jobs=total_jobs,
+            total_relevant=total_relevant,
+            message=message,
+        )
 
     async def run_discovery(self, user_id: uuid.UUID, run_id: uuid.UUID) -> None:
         run: JobDiscoveryRun | None = await self._db.get(JobDiscoveryRun, run_id)
@@ -347,12 +357,41 @@ class JobDiscoveryService:
         user_id: uuid.UUID,
         org_id: uuid.UUID,
     ) -> StartSingleOrgDiscoveryResult:
-        """Run discovery for a single org synchronously (not backgrounded)."""
+        """Run discovery for a monitored org synchronously (not backgrounded)."""
+        if await self._has_running_run(user_id):
+            return StartSingleOrgDiscoveryResult(
+                scheduled=False,
+                message="Job discovery is already running.",
+            )
+
+        monitored_org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
+        if org_id not in monitored_org_ids:
+            logger.warning(
+                "Rejected single-org job discovery for unmonitored org %s by user %s",
+                org_id,
+                user_id,
+            )
+            return StartSingleOrgDiscoveryResult(
+                scheduled=False,
+                message="Organization is not in your monitored job list.",
+            )
+
         org: Org | None = await self._db.get(Org, org_id)
         if org is None:
             return StartSingleOrgDiscoveryResult(
                 scheduled=False, message="Organization not found.",
             )
+
+        run = JobDiscoveryRun(
+            user_id=user_id,
+            state="running",
+            started_at=datetime.now(tz=UTC),
+            orgs_total=1,
+            orgs_processed=0,
+            progress_message=f"Scanning {org.canonical_name}…",
+        )
+        self._db.add(run)
+        await self._db.commit()
 
         apply_ats_detection_to_org(org)
         found, new_count, source, error = await self._discover_jobs_for_org(org)
@@ -367,6 +406,13 @@ class JobDiscoveryService:
             error=error,
         )
         self._db.add(scrape_run)
+        run.state = "complete"
+        run.completed_at = datetime.now(tz=UTC)
+        run.orgs_processed = 1
+        run.jobs_found = found
+        run.new_jobs = new_count
+        run.progress_message = None
+        run.error = error
         await self._db.commit()
 
         if new_count > 0:
