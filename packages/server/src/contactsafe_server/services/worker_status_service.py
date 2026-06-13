@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import pickle
+import pickletools
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -37,6 +37,9 @@ _PIPELINE_FUNCTIONS: dict[str, set[str]] = {
     "job_discovery": {"scrape_org_jobs", "global_job_scan"},
     "job_scoring": {"score_jobs_for_user"},
 }
+_KNOWN_WORKER_FUNCTIONS: set[str] = set().union(*_PIPELINE_FUNCTIONS.values())
+_PICKLE_STRING_OPCODES: set[str] = {"BINUNICODE", "SHORT_BINUNICODE", "UNICODE"}
+_PICKLE_MEMO_OPCODES: set[str] = {"BINPUT", "LONG_BINPUT", "MEMOIZE", "PUT"}
 
 
 async def _count_arq_jobs() -> tuple[dict[str, int], dict[str, int], bool]:
@@ -89,14 +92,30 @@ async def _count_arq_jobs() -> tuple[dict[str, int], dict[str, int], bool]:
 
 
 def _function_name_from_job(raw: bytes) -> str | None:
+    """Extract an ARQ job function name without executing pickle opcodes.
+
+    ARQ's default job serializer stores a pickled dictionary with the function
+    name under the ``"f"`` key.  ``pickle.loads`` is intentionally avoided here
+    because these bytes come from Redis and unpickling attacker-controlled data
+    can execute arbitrary code.  ``pickletools.genops`` disassembles the pickle
+    stream without constructing objects, which is enough for the dashboard's
+    best-effort queue counts.
+    """
     try:
-        data: dict[str, Any] = pickle.loads(raw)
-        function: object = data.get("f")
-        if function is None:
-            return None
-        return str(getattr(function, "__name__", function))
+        next_string_is_function_name = False
+        for opcode, arg, _position in pickletools.genops(raw):
+            if next_string_is_function_name and opcode.name in _PICKLE_MEMO_OPCODES:
+                continue
+            if opcode.name in _PICKLE_STRING_OPCODES:
+                if next_string_is_function_name:
+                    function_name = str(arg)
+                    return function_name if function_name in _KNOWN_WORKER_FUNCTIONS else None
+                next_string_is_function_name = arg == "f"
+            elif next_string_is_function_name:
+                return None
     except Exception:
         return None
+    return None
 
 
 def _pipeline_for_function(function_name: str) -> str | None:
