@@ -42,8 +42,11 @@ import { Textarea } from "@/components/ui/textarea";
 import type {
   DeleteUserAccountResult,
   DeleteUserExperienceRequest,
+  JobDigestFrequency,
   ListSourcesResult,
+  NotificationPreferencesResult,
   SaveUserExperienceRequest,
+  SetNotificationPreferencesRequest,
   SourceType,
   UpdateUserProfileRequest,
   UploadSourceResult,
@@ -102,6 +105,28 @@ const EMPTY_FORM: ExperienceFormState = {
   ended_at: "",
 };
 
+const DIGEST_FREQUENCY_OPTIONS: ReadonlyArray<{
+  value: JobDigestFrequency;
+  label: string;
+  description: string;
+}> = [
+  {
+    value: "daily",
+    label: "Daily",
+    description: "A morning digest of new matching jobs at your target companies.",
+  },
+  {
+    value: "weekly",
+    label: "Weekly",
+    description: "A weekly summary of new matches.",
+  },
+  {
+    value: "off",
+    label: "Off",
+    description: "No job-match emails.",
+  },
+];
+
 export default function ProfilePage() {
   useGraphEvents();
   const router = useRouter();
@@ -133,6 +158,15 @@ export default function ProfilePage() {
     queryFn: () => proxyPost<ListSourcesResult>("list-sources"),
   });
 
+  const notificationPrefsQuery = useQuery({
+    queryKey: ["notification-preferences"],
+    queryFn: () =>
+      proxyPost<NotificationPreferencesResult>("get-notification-preferences"),
+  });
+
+  const [digestFrequency, setDigestFrequency] = useState<JobDigestFrequency>("daily");
+  const notificationPrefsInitialized = useRef<boolean>(false);
+
   useEffect(() => {
     if (!awaitingSync) {
       return;
@@ -163,6 +197,14 @@ export default function ProfilePage() {
     setProfileLinkedin(profile.linkedin_url ?? "");
     setProfileBio(profile.bio_summary ?? "");
     setSocialEntries(socialProfilesFromRecord(profile.social_profiles ?? {}));
+  }
+
+  const notificationPrefs: NotificationPreferencesResult | undefined =
+    notificationPrefsQuery.data;
+
+  if (notificationPrefs && !notificationPrefsInitialized.current) {
+    notificationPrefsInitialized.current = true;
+    setDigestFrequency(notificationPrefs.job_digest_frequency);
   }
 
   const profileMutation = useMutation({
@@ -253,6 +295,29 @@ export default function ProfilePage() {
       router.refresh();
     },
   });
+
+  const notificationPrefsMutation = useMutation({
+    mutationFn: (payload: SetNotificationPreferencesRequest) =>
+      proxyPost<NotificationPreferencesResult>(
+        "set-notification-preferences",
+        payload,
+      ),
+    onSuccess: async (result: NotificationPreferencesResult) => {
+      setDigestFrequency(result.job_digest_frequency);
+      notificationPrefsInitialized.current = true;
+      await queryClient.invalidateQueries({
+        queryKey: ["notification-preferences"],
+      });
+    },
+  });
+
+  const handleDigestFrequencyChange = useCallback(
+    (frequency: JobDigestFrequency): void => {
+      setDigestFrequency(frequency);
+      notificationPrefsMutation.mutate({ job_digest_frequency: frequency });
+    },
+    [notificationPrefsMutation],
+  );
 
   const handleSignOut = useCallback(async (): Promise<void> => {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -620,6 +685,58 @@ export default function ProfilePage() {
                 </li>
               ))}
             </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Email notifications */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Email notifications</CardTitle>
+          <CardDescription>
+            Get a digest of new matching jobs at your target companies.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {notificationPrefsQuery.isLoading ? (
+            <Skeleton className="h-24 w-full" />
+          ) : (
+            <>
+              {DIGEST_FREQUENCY_OPTIONS.map((option) => (
+                <label
+                  key={option.value}
+                  className="flex cursor-pointer items-start gap-3 rounded-md border p-3 has-[:checked]:border-primary has-[:checked]:bg-muted/40"
+                >
+                  <input
+                    type="radio"
+                    name="job-digest-frequency"
+                    value={option.value}
+                    checked={digestFrequency === option.value}
+                    disabled={notificationPrefsMutation.isPending}
+                    className="mt-1"
+                    onChange={() => handleDigestFrequencyChange(option.value)}
+                  />
+                  <span className="space-y-0.5">
+                    <span className="block text-sm font-medium">
+                      {option.label}
+                    </span>
+                    <span className="block text-sm text-muted-foreground">
+                      {option.description}
+                    </span>
+                  </span>
+                </label>
+              ))}
+              {notificationPrefsMutation.isPending ? (
+                <p className="text-sm text-muted-foreground">Saving…</p>
+              ) : null}
+              {notificationPrefsMutation.error ? (
+                <Alert variant="destructive">
+                  <AlertDescription>
+                    {notificationPrefsMutation.error.message}
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+            </>
           )}
         </CardContent>
       </Card>

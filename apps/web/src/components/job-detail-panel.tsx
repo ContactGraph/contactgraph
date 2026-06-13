@@ -153,6 +153,8 @@ export function JobDetailPanel({
 
   const job: OrgJobItem = data.job;
   const salary: string | null = formatSalary(job.salary_min, job.salary_max);
+  const ownContacts = data.contacts.filter((contact) => contact.shared_from === null);
+  const sharedContacts = data.contacts.filter((contact) => contact.shared_from !== null);
   const metaParts: string[] = [
     job.location,
     job.department,
@@ -261,14 +263,14 @@ export function JobDetailPanel({
         </div>
       ) : null}
 
-      {data.contacts.length > 0 ? (
+      {ownContacts.length > 0 ? (
         <div className="space-y-2">
           <div className="flex items-center gap-1.5 text-sm font-medium">
             <Users className="size-4" />
             Your contacts ({data.contact_count})
           </div>
           <div className="space-y-1">
-            {data.contacts.map((contact) => (
+            {ownContacts.map((contact) => (
               <button
                 key={contact.person_id}
                 type="button"
@@ -284,6 +286,39 @@ export function JobDetailPanel({
                   </span>
                 ) : null}
               </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {sharedContacts.length > 0 ? (
+        <div className="space-y-2">
+          <div className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground">
+            <Users className="size-4" />
+            Contacts via friends ({job.shared_contact_count})
+          </div>
+          <div className="space-y-1">
+            {sharedContacts.map((contact) => (
+              <div
+                key={`${contact.person_id}-${contact.shared_from ?? "shared"}`}
+                className="flex w-full items-center justify-between rounded px-2 py-1.5 text-sm"
+              >
+                <div className="min-w-0">
+                  <span className="truncate font-medium">
+                    {contact.display_name}
+                  </span>
+                  {contact.shared_from ? (
+                    <p className="truncate text-xs text-muted-foreground">
+                      via {contact.shared_from}
+                    </p>
+                  ) : null}
+                </div>
+                {contact.current_role ? (
+                  <span className="shrink-0 text-xs text-muted-foreground">
+                    {contact.current_role}
+                  </span>
+                ) : null}
+              </div>
             ))}
           </div>
         </div>
