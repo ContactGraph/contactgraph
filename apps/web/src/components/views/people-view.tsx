@@ -251,7 +251,7 @@ export function PeopleView({
             </div>
           );
         },
-        meta: { width: "w-[2rem]", stickyRight: true },
+        meta: { width: "w-[2rem]", stickyRight: true, hiddenClass: "hidden sm:table-cell" },
       },
     ],
     [],
@@ -510,7 +510,17 @@ export function PeopleView({
         onOpenChange={handleDetailSheetOpenChange}
       >
         <SheetContent className="flex w-full flex-col p-0 sm:max-w-xl">
-          <SheetHeader>
+          <SheetHeader
+            actions={
+              selectedPerson !== undefined && selectedPerson.shared_from === null ? (
+                <EntityActionsMenu
+                  entityLabel={selectedPerson.display_name}
+                  personId={selectedPerson.person_id}
+                  triggerClassName="size-9 shrink-0"
+                />
+              ) : undefined
+            }
+          >
             <SheetTitle>{selectedPerson?.display_name ?? "Contact"}</SheetTitle>
             <SheetDescription>
               {selectedPerson?.shared_from

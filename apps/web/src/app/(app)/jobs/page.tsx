@@ -308,7 +308,7 @@ function JobsTable() {
             />
           </button>
         ),
-        meta: { width: "w-[2rem]" },
+        meta: { width: "w-[2rem]", hiddenClass: "hidden sm:table-cell" },
       },
       {
         id: "actions",
@@ -326,7 +326,7 @@ function JobsTable() {
             <ExternalLink className="size-3.5" />
           </a>
         ),
-        meta: { width: "w-[2rem]", stickyRight: true },
+        meta: { width: "w-[2rem]", stickyRight: true, hiddenClass: "hidden sm:table-cell" },
       },
     ],
     [toggleBookmark, isBookmarked, scoringActive],
@@ -514,7 +514,7 @@ function JobsTable() {
               : "No jobs match the current filter."
           }
           onRowClick={(job: OrgJobItem) => setSelectedJobId(job.job_id)}
-          minWidth="44rem"
+          minWidth="40rem"
         />
       )}
 
@@ -525,7 +525,22 @@ function JobsTable() {
         }}
       >
         <SheetContent className="flex w-full flex-col p-0 sm:max-w-xl">
-          <SheetHeader className="px-6 pt-6">
+          <SheetHeader
+            actions={
+              selectedJob !== undefined ? (
+                <Button variant="ghost" size="icon" className="size-9 shrink-0" asChild>
+                  <a
+                    href={selectedJob.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="View posting"
+                  >
+                    <ExternalLink className="size-4" />
+                  </a>
+                </Button>
+              ) : undefined
+            }
+          >
             <SheetTitle>{selectedJob?.title ?? "Job"}</SheetTitle>
             <SheetDescription>
               {selectedJob?.org_name ?? "Job details"}

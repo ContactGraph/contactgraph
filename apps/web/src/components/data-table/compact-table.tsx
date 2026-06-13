@@ -11,7 +11,15 @@ declare module "@tanstack/react-table" {
   interface ColumnMeta<TData, TValue> {
     width?: string;
     stickyRight?: boolean;
+    hiddenClass?: string;
   }
+}
+
+function colHiddenClass(hiddenClass: string | undefined): string | undefined {
+  if (hiddenClass === undefined) {
+    return undefined;
+  }
+  return hiddenClass.replace(/\btable-cell\b/g, "table-column");
 }
 
 export const compactTableStyles = {
@@ -62,7 +70,10 @@ export function CompactTableShell<TData>({
           {table.getAllLeafColumns().map((column) => (
             <col
               key={column.id}
-              className={column.columnDef.meta?.width ?? "w-auto"}
+              className={cn(
+                column.columnDef.meta?.width ?? "w-auto",
+                colHiddenClass(column.columnDef.meta?.hiddenClass),
+              )}
             />
           ))}
         </colgroup>
@@ -72,12 +83,15 @@ export function CompactTableShell<TData>({
               {headerGroup.headers.map((header) => {
                 const isStickyRight: boolean =
                   header.column.columnDef.meta?.stickyRight === true;
+                const hiddenClass: string | undefined =
+                  header.column.columnDef.meta?.hiddenClass;
                 return (
                   <th
                     key={header.id}
                     className={cn(
                       compactTableStyles.th,
                       stickyClass(isStickyRight, "header"),
+                      hiddenClass,
                     )}
                   >
                     {header.isPlaceholder
@@ -121,12 +135,15 @@ export function CompactTableShell<TData>({
                 {row.getVisibleCells().map((cell) => {
                   const isStickyRight: boolean =
                     cell.column.columnDef.meta?.stickyRight === true;
+                  const hiddenClass: string | undefined =
+                    cell.column.columnDef.meta?.hiddenClass;
                   return (
                     <td
                       key={cell.id}
                       className={cn(
                         compactTableStyles.td,
                         stickyClass(isStickyRight, "body"),
+                        hiddenClass,
                       )}
                     >
                       {flexRender(

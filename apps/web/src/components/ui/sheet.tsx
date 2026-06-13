@@ -62,24 +62,33 @@ const SheetContent = React.forwardRef<
       {...props}
     >
       {children}
-      <DialogPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring">
-        <X className="size-4" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
     </DialogPrimitive.Content>
   </SheetPortal>
 ));
 SheetContent.displayName = DialogPrimitive.Content.displayName;
 
-const SheetHeader = ({
+function SheetHeader({
   className,
+  children,
+  actions,
   ...props
-}: React.HTMLAttributes<HTMLDivElement>) => (
-  <div
-    className={cn("flex flex-col space-y-1.5 border-b px-6 py-4", className)}
-    {...props}
-  />
-);
+}: React.HTMLAttributes<HTMLDivElement> & {
+  actions?: React.ReactNode;
+}) {
+  return (
+    <div
+      className={cn("flex items-start gap-2 border-b p-4", className)}
+      {...props}
+    >
+      <div className="min-w-0 flex-1 space-y-1">{children}</div>
+      {actions}
+      <DialogPrimitive.Close className="flex size-9 shrink-0 items-center justify-center rounded-md opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring">
+        <X className="size-5" />
+        <span className="sr-only">Close</span>
+      </DialogPrimitive.Close>
+    </div>
+  );
+}
 
 const SheetTitle = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Title>,

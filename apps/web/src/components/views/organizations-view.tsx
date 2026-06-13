@@ -422,7 +422,7 @@ export function OrganizationsView({
             </DropdownMenu>
           </div>
         ),
-        meta: { width: "w-[2rem]", stickyRight: true },
+        meta: { width: "w-[2rem]", stickyRight: true, hiddenClass: "hidden sm:table-cell" },
       },
     );
 
@@ -710,7 +710,37 @@ export function OrganizationsView({
         onOpenChange={handleDetailSheetOpenChange}
       >
         <SheetContent className="flex w-full flex-col p-0 sm:max-w-xl">
-          <SheetHeader>
+          <SheetHeader
+            actions={
+              selectedOrg !== undefined ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="size-9 shrink-0">
+                      <MoreHorizontal className="size-5" />
+                      <span className="sr-only">Open menu</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                    <DropdownMenuItem disabled>
+                      <Pencil className="mr-2 size-4" />
+                      Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onClick={() => {
+                        router.push(
+                          `/graph?tab=people&search=${encodeURIComponent(selectedOrg.name)}`,
+                        );
+                      }}
+                    >
+                      <Users className="mr-2 size-4" />
+                      View contacts
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : undefined
+            }
+          >
             <SheetTitle>{selectedOrg?.name ?? "Organization"}</SheetTitle>
             <SheetDescription>
               {selectedOrg?.description ??
