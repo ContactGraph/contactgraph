@@ -23,6 +23,7 @@ from contactsafe_core.contact_schemas import (
     SetJobMonitorConfigRequest,
     StartSingleOrgDiscoveryResult,
 )
+
 from contactsafe_server.config import Settings
 from contactsafe_server.db.models import (
     JobScrapeRun,
@@ -38,7 +39,10 @@ from contactsafe_server.db.models import (
 from contactsafe_server.services.ats_detection import apply_ats_detection_to_org
 from contactsafe_server.services.ats_job_clients import AtsJobClient
 from contactsafe_server.services.contacts_service import ContactsService
-from contactsafe_server.services.job_discovery_scheduler import is_global_scan_active
+from contactsafe_server.services.job_discovery_scheduler import (
+    is_global_scan_active,
+    is_global_scan_active_async,
+)
 from contactsafe_server.services.job_discovery_types import DiscoveredJob
 from contactsafe_server.services.theirstack_client import TheirStackClient
 
@@ -286,7 +290,12 @@ class JobDiscoveryService:
     ) -> ListOrgJobsResult:
         org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
         if not org_ids:
-            return ListOrgJobsResult(companies=[], total_jobs=0, total_relevant=0, message="No monitored organizations.")
+            return ListOrgJobsResult(
+                companies=[],
+                total_jobs=0,
+                total_relevant=0,
+                message="No monitored organizations.",
+            )
 
         orgs_result = await self._db.execute(
             select(Org).where(Org.id.in_(org_ids)).order_by(Org.canonical_name.asc()),
@@ -384,7 +393,12 @@ class JobDiscoveryService:
             if total_jobs > 0
             else "No open jobs found yet. Run job discovery from Setup."
         )
-        return ListOrgJobsResult(companies=companies, total_jobs=total_jobs, total_relevant=total_relevant, message=message)
+        return ListOrgJobsResult(
+            companies=companies,
+            total_jobs=total_jobs,
+            total_relevant=total_relevant,
+            message=message,
+        )
 
     async def list_flat_jobs_for_user(
         self,
@@ -637,9 +651,21 @@ class JobDiscoveryService:
         user_id: uuid.UUID,
         org_id: uuid.UUID,
     ) -> StartSingleOrgDiscoveryResult:
-        """Run discovery for a single org (backgrounded when arq is enabled)."""
+        """Run discovery for a monitored org (backgrounded when arq is enabled)."""
         from contactsafe_server.config import get_settings
         from contactsafe_server.queue import enqueue_background_job
+
+        monitored_org_ids: list[uuid.UUID] = await self._list_monitored_org_ids(user_id)
+        if org_id not in monitored_org_ids:
+            logger.warning(
+                "Rejected single-org job discovery for unmonitored org %s by user %s",
+                org_id,
+                user_id,
+            )
+            return StartSingleOrgDiscoveryResult(
+                scheduled=False,
+                message="Organization is not in your monitored job list.",
+            )
 
         org: Org | None = await self._db.get(Org, org_id)
         if org is None:
