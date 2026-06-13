@@ -207,6 +207,7 @@ class TestCreateConnectSession:
         assert result.status == SessionStatus.CONNECTED
         assert result.email == "alice@example.com"
         assert result.source_id is not None
+        assert result.poll_secret is None
 
     async def test_existing_user_with_invalid_cred_creates_new_session(self, db_session: AsyncSession) -> None:
         user: User = await _seed_user(db_session)
@@ -547,6 +548,12 @@ class TestCheckExistingByEmail:
         assert result.already_connected is True
         assert result.status == SessionStatus.CONNECTED
         assert result.email == "valid@example.com"
+        assert result.poll_secret is None
+        row: ConnectSession | None = await db_session.get(
+            ConnectSession, result.connect_session_id
+        )
+        assert row is not None
+        assert row.poll_secret_hash is None
 
     async def test_triggers_sync_for_pending_source(self, db_session: AsyncSession) -> None:
         user: User = await _seed_user(db_session, email="sync@example.com")
