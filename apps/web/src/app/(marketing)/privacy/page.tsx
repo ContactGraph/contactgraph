@@ -5,12 +5,12 @@ import { MarketingMain, MarketingProse } from "../components/marketing-prose";
 export const metadata: Metadata = {
   title: "Privacy Policy — ContactGraph",
   description:
-    "ContactGraph privacy policy — what data we collect, how we use it, and your rights.",
+    "How ContactGraph collects, stores, and protects your data. We access only metadata and contact fields — never email bodies — and never sell your information.",
   alternates: { canonical: "/privacy" },
   openGraph: {
     title: "Privacy Policy — ContactGraph",
     description:
-      "ContactGraph privacy policy — what data we collect, how we use it, and your rights.",
+      "How ContactGraph collects, stores, and protects your data. We access only metadata and contact fields — never email bodies — and never sell your information.",
     type: "website",
     siteName: "ContactGraph",
     locale: "en_US",
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     card: "summary",
     title: "Privacy Policy — ContactGraph",
     description:
-      "ContactGraph privacy policy — what data we collect, how we use it, and your rights.",
+      "How ContactGraph collects, stores, and protects your data. We access only metadata and contact fields — never email bodies — and never sell your information.",
   },
 };
 

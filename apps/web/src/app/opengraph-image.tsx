@@ -1,72 +1,105 @@
 import { ImageResponse } from "next/og";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
-export const alt = "ContactGraph — Your private, agent-native contact graph";
+export const alt =
+  "ContactGraph — You already know someone at your next job.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-export default function OgImage(): ImageResponse {
+export default async function OgImage(): Promise<ImageResponse> {
+  const bgPath: string = join(process.cwd(), "src/app/og-bg.png");
+  const bgBase64: string = readFileSync(bgPath).toString("base64");
+  const bgDataUri: string = `data:image/png;base64,${bgBase64}`;
+
+  const interBold: ArrayBuffer = await fetch(
+    "https://fonts.gstatic.com/s/inter/v18/UcCO3FwrK3iLTeHuS_nVMrMxCp50SjIw2boKoduKmMEVuFuYMZhrib2Bg-4.ttf",
+  ).then((res: Response) => res.arrayBuffer());
+
   return new ImageResponse(
     (
       <div
         style={{
           display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
           width: "100%",
           height: "100%",
-          background: "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)",
-          padding: "60px",
+          position: "relative",
         }}
       >
+        <img
+          src={bgDataUri}
+          width={1200}
+          height={630}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+          }}
+        />
         <div
           style={{
             display: "flex",
-            alignItems: "center",
-            gap: "16px",
-            marginBottom: "32px",
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            background:
+              "linear-gradient(135deg, rgba(0,0,0,0.6) 0%, rgba(0,0,0,0.3) 100%)",
+          }}
+        />
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "center",
+            position: "relative",
+            width: "100%",
+            height: "100%",
+            padding: "80px",
           }}
         >
-          <svg
-            width="64"
-            height="64"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#38bdf8"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <circle cx="12" cy="5" r="3" />
-            <circle cx="5" cy="19" r="3" />
-            <circle cx="19" cy="19" r="3" />
-            <line x1="12" y1="8" x2="5" y2="16" />
-            <line x1="12" y1="8" x2="19" y2="16" />
-            <line x1="5" y1="19" x2="19" y2="19" />
-          </svg>
           <span
             style={{
-              fontSize: "56px",
+              fontFamily: "Inter",
+              fontSize: "76px",
               fontWeight: 700,
-              color: "#f8fafc",
+              color: "#ffffff",
+              lineHeight: 1.1,
+              letterSpacing: "-3px",
+              maxWidth: "900px",
+            }}
+          >
+            You already know someone at your next job.
+          </span>
+          <span
+            style={{
+              fontFamily: "Inter",
+              fontSize: "44px",
+              fontWeight: 700,
+              color: "rgba(255,255,255,0.6)",
+              marginTop: "36px",
               letterSpacing: "-1px",
             }}
           >
             ContactGraph
           </span>
         </div>
-        <span
-          style={{
-            fontSize: "28px",
-            color: "#94a3b8",
-            textAlign: "center",
-            maxWidth: "800px",
-          }}
-        >
-          Your private, agent-native contact graph
-        </span>
       </div>
     ),
-    { ...size },
+    {
+      ...size,
+      fonts: [
+        {
+          name: "Inter",
+          data: interBold,
+          weight: 700,
+          style: "normal",
+        },
+      ],
+    },
   );
 }

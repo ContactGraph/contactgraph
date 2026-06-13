@@ -1,0 +1,16 @@
+# ContactGraph
+
+> A private, agent-native contact graph that merges your phone contacts and LinkedIn connections into one searchable network — then finds open roles at companies where you already know someone.
+
+## Pages
+
+- [Home](https://contactgraph.ai/)
+- [Manifesto](https://contactgraph.ai/manifesto)
+- [Privacy Policy](https://contactgraph.ai/privacy)
+- [Terms of Service](https://contactgraph.ai/terms)
+- [Join (Invite)](https://contactgraph.ai/join)
+
+## Developer
+
+- [GitHub](https://github.com/ContactGraph/contactgraph)
+- [MCP Server](https://contactgraph.ai/mcp)

@@ -5,12 +5,12 @@ import { MarketingMain, MarketingProse } from "../components/marketing-prose";
 export const metadata: Metadata = {
   title: "Terms of Service — ContactGraph",
   description:
-    "ContactGraph terms of service — usage terms, responsibilities, and disclaimers.",
+    "Usage terms for ContactGraph — your responsibilities, intellectual property, disclaimers, and how to contact us with questions.",
   alternates: { canonical: "/terms" },
   openGraph: {
     title: "Terms of Service — ContactGraph",
     description:
-      "ContactGraph terms of service — usage terms, responsibilities, and disclaimers.",
+      "Usage terms for ContactGraph — your responsibilities, intellectual property, disclaimers, and how to contact us with questions.",
     type: "website",
     siteName: "ContactGraph",
     locale: "en_US",
@@ -19,7 +19,7 @@ export const metadata: Metadata = {
     card: "summary",
     title: "Terms of Service — ContactGraph",
     description:
-      "ContactGraph terms of service — usage terms, responsibilities, and disclaimers.",
+      "Usage terms for ContactGraph — your responsibilities, intellectual property, disclaimers, and how to contact us with questions.",
   },
 };
 
