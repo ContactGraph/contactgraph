@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { SITE_URL } from "@/lib/site-url";
+
 export const metadata: Metadata = {
   title: "Join ContactGraph — You've been invited to share networks",
   description:
@@ -11,7 +13,7 @@ export const metadata: Metadata = {
       "A friend wants to share their professional network with you. See who each other knows — names and roles only, never emails or phone numbers.",
     siteName: "ContactGraph",
     type: "website",
-    url: "https://contactgraph.ai/join",
+    url: `${SITE_URL}/join`,
   },
   twitter: {
     card: "summary",
