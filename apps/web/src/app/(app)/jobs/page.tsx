@@ -171,7 +171,7 @@ function JobsTable() {
             pending={scoringActive && row.original.match_score === null}
           />
         ),
-        meta: { width: "w-[3.5rem]" },
+        meta: { width: "w-[3.5rem] sm:w-[5rem]" },
       },
       {
         id: "title",
@@ -182,7 +182,7 @@ function JobsTable() {
         cell: ({ row }) => (
           <CompactCell value={row.original.title} className="font-medium" />
         ),
-        meta: { width: "w-[14rem]" },
+        meta: { width: "w-[14rem] sm:w-[21rem]" },
       },
       {
         id: "company",
@@ -208,7 +208,7 @@ function JobsTable() {
             </Link>
           );
         },
-        meta: { width: "w-[8rem]" },
+        meta: { width: "w-[8rem] sm:w-[12rem]" },
       },
       {
         id: "contacts",
@@ -229,7 +229,7 @@ function JobsTable() {
             })}
           />
         ),
-        meta: { width: "w-[7rem]" },
+        meta: { width: "w-[7rem] sm:w-[10.5rem]" },
       },
       {
         id: "location",
@@ -254,7 +254,7 @@ function JobsTable() {
             </div>
           );
         },
-        meta: { width: "w-[8rem]" },
+        meta: { width: "w-[8rem] sm:w-[12rem]" },
       },
       {
         id: "salary",
@@ -270,7 +270,7 @@ function JobsTable() {
             }
           />
         ),
-        meta: { width: "w-[7rem]" },
+        meta: { width: "w-[7rem] sm:w-[10.5rem]" },
       },
       {
         id: "posted",
@@ -283,7 +283,7 @@ function JobsTable() {
             row.original.posted_at ?? row.original.first_seen_at;
           return <CompactCell value={dateStr ? formatRelativeTime(dateStr) : "—"} />;
         },
-        meta: { width: "w-[4rem]" },
+        meta: { width: "w-[4rem] sm:w-[6rem]" },
       },
       {
         id: "bookmark",

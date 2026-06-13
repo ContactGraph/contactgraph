@@ -152,7 +152,7 @@ export function PeopleView({
             </div>
           );
         },
-        meta: { width: "w-[8rem]" },
+        meta: { width: "w-[8rem] sm:w-[12rem]" },
       },
       {
         accessorKey: "current_role",
@@ -160,7 +160,7 @@ export function PeopleView({
         cell: ({ row }) => (
           <CompactCell value={row.original.current_role ?? "—"} />
         ),
-        meta: { width: "w-[6rem]" },
+        meta: { width: "w-[6rem] sm:w-[9rem]" },
       },
       {
         id: "company",
@@ -180,7 +180,7 @@ export function PeopleView({
             </Link>
           );
         },
-        meta: { width: "w-[6rem]" },
+        meta: { width: "w-[6rem] sm:w-[9rem]" },
       },
       {
         id: "jobs",
@@ -189,7 +189,7 @@ export function PeopleView({
         cell: ({ row }) => (
           <CompactCell value={row.original.job_count > 0 ? row.original.job_count.toString() : "—"} />
         ),
-        meta: { width: "w-[3.5rem]" },
+        meta: { width: "w-[3.5rem] sm:w-[5rem]" },
       },
       {
         accessorKey: "phone",
@@ -197,7 +197,7 @@ export function PeopleView({
         cell: ({ row }) => (
           <CompactCell value={row.original.shared_from ? "—" : (row.original.phone ?? "—")} />
         ),
-        meta: { width: "w-[5.5rem]" },
+        meta: { width: "w-[5.5rem] sm:w-[8rem]" },
       },
       {
         accessorKey: "primary_email",
@@ -211,7 +211,7 @@ export function PeopleView({
             }
           />
         ),
-        meta: { width: "w-[9rem]" },
+        meta: { width: "w-[9rem] sm:w-[14rem]" },
       },
       {
         id: "linkedin",
@@ -233,7 +233,7 @@ export function PeopleView({
             </a>
           );
         },
-        meta: { width: "w-[4rem]" },
+        meta: { width: "w-[4rem] sm:w-[6rem]" },
       },
       {
         id: "actions",
