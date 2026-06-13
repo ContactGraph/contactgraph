@@ -65,14 +65,17 @@ class JWTService:
 
     def decode_token(self, token: str) -> dict[str, Any]:
         expected_iss: str = self._settings.effective_jwt_issuer
+        expected_aud: str = self._settings.effective_jwt_audience
         try:
             claims = jwt.decode(
                 token,
                 self._settings.effective_jwt_signing_key,
                 claims_options={
                     "iss": {"essential": True, "value": expected_iss},
+                    "aud": {"essential": True, "value": expected_aud},
                     "exp": {"essential": True},
                     "sub": {"essential": True},
+                    "typ": {"values": [None]},
                 },
             )
             claims.validate()
