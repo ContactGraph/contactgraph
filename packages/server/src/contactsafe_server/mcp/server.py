@@ -5,7 +5,15 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from contactsafe_core.contact_schemas import DedupPersonsResult
+from contactsafe_core.contact_schemas import (
+    DedupPersonsResult,
+    FlatJobListResult,
+    JobDetailResult,
+    ListOrgsResult,
+    ListPeopleResult,
+    OrgDetailResult,
+    PersonDetailResult,
+)
 from contactsafe_core.enums import SourceType
 from contactsafe_core.schemas import (
     ConnectSourceResult,
@@ -66,6 +74,9 @@ def create_mcp_server(settings: Settings) -> FastMCP:
             "describe_graph for a high-level graph summary, "
             "query_network to search contacts (includes 2nd-degree results "
             "from trusted connections), "
+            "list_people / get_person to browse and inspect contacts, "
+            "list_orgs / get_org to browse and inspect organizations, "
+            "list_jobs / get_job to browse job openings at network companies, "
             "view_trusted_users / edit_trusted_users to manage your "
             "trust list."
         ),
@@ -261,6 +272,108 @@ def create_mcp_server(settings: Settings) -> FastMCP:
             accept=accept,
             decline=decline,
             set_privacy=set_privacy,
+        )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def list_people(
+        network_only: bool = True,
+        include_shared: bool = True,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> ListPeopleResult:
+        """List people in the user's contact graph.
+
+        network_only: when true (default), only return contacts the user has
+            actually interacted with (excludes low-signal CC-only addresses).
+        include_shared: when true (default), include contacts visible through
+            trusted connections (name, org, role only).
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.list_people(
+            lifespan.app_context,
+            user_id,
+            network_only=network_only,
+            include_shared=include_shared,
+        )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def get_person(
+        person_id: str,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> PersonDetailResult:
+        """Get full details for a specific person by their ID.
+
+        Returns name, emails, phones, current org/role, social profiles,
+        tie strength, interaction history, and more.
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.get_person(
+            lifespan.app_context, user_id, person_id=person_id
+        )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def list_orgs(
+        include_shared: bool = True,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> ListOrgsResult:
+        """List organizations in the user's contact graph.
+
+        include_shared: when true (default), include orgs visible through
+            trusted connections.
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.list_orgs(
+            lifespan.app_context,
+            user_id,
+            include_shared=include_shared,
+        )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def get_org(
+        org_id: str,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> OrgDetailResult:
+        """Get full details for a specific organization by its ID.
+
+        Returns name, domain, description, careers URL, categories, employee
+        count, and a list of known contacts at the org.
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.get_org(
+            lifespan.app_context, user_id, org_id=org_id
+        )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def list_jobs(
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> FlatJobListResult:
+        """List job openings discovered at companies in the user's network.
+
+        Returns a flat list of jobs sorted by relevance, including title,
+        company, location, and match score. Configure job preferences via
+        the web app to improve relevance scoring.
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.list_flat_jobs(lifespan.app_context, user_id)
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def get_job(
+        job_id: str,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> JobDetailResult:
+        """Get full details for a specific job posting by its ID.
+
+        Returns the job listing, the hiring organization's description,
+        and a list of the user's contacts at that company.
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.get_job_detail(
+            lifespan.app_context, user_id, job_id=UUID(job_id)
         )
 
     @mcp.tool()  # pyright: ignore[reportUnusedFunction]
