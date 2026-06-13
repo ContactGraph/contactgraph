@@ -9,6 +9,10 @@ export function MarketingFooter() {
           Skill
         </a>
         {" | "}
+        <a href="/about" className="no-underline hover:underline">
+          About
+        </a>
+        {" | "}
         <a href="/manifesto" className="no-underline hover:underline">
           Manifesto
         </a>
@@ -19,6 +23,10 @@ export function MarketingFooter() {
         {" | "}
         <a href="/terms" className="no-underline hover:underline">
           Terms
+        </a>
+        {" | "}
+        <a href="/alternatives/linkedin-jobs-alternatives" className="no-underline hover:underline">
+          Alternatives
         </a>
         {" | "}
         <a href={GITHUB_REPO_URL} className="no-underline hover:underline">
