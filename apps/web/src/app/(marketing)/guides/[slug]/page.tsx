@@ -4,18 +4,21 @@ import { notFound } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 
-import type { RelatedGuideLink } from "@/app/(marketing)/guides/data";
-import { guidePageHref, LINKEDIN_JOBS_RELATED_GUIDES } from "@/app/(marketing)/guides/data";
-
-import type { Alternative, AlternativesPageData } from "../data";
-import { getAllAlternativesSlugs, getAlternativesPage } from "../data";
+import type {
+  ExternalReference,
+  FaqItem,
+  GuideApproach,
+  GuidePageData,
+  GuideSolutionStep,
+} from "../data";
+import { getAllGuideSlugs, getGuidePage } from "../data";
 
 /* ------------------------------------------------------------------ */
 /*  Static params                                                      */
 /* ------------------------------------------------------------------ */
 
 export function generateStaticParams(): { slug: string }[] {
-  return getAllAlternativesSlugs().map((slug: string) => ({ slug }));
+  return getAllGuideSlugs().map((slug: string) => ({ slug }));
 }
 
 /* ------------------------------------------------------------------ */
@@ -28,13 +31,13 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const page: AlternativesPageData | undefined = getAlternativesPage(slug);
+  const page: GuidePageData | undefined = getGuidePage(slug);
   if (!page) return {};
 
   return {
     title: `${page.pageTitle} — ContactGraph`,
     description: page.pageDescription,
-    alternates: { canonical: `/alternatives/${page.slug}` },
+    alternates: { canonical: `/guides/${page.slug}` },
     openGraph: {
       title: page.pageTitle,
       description: page.pageDescription,
@@ -70,24 +73,18 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
   );
 }
 
-function FaqJsonLd({
-  faqs,
-}: {
-  faqs: readonly { readonly question: string; readonly answer: string }[];
-}) {
+function FaqJsonLd({ faqs }: { faqs: readonly FaqItem[] }) {
   const schema: Record<string, unknown> = {
     "@context": "https://schema.org",
     "@type": "FAQPage",
-    mainEntity: faqs.map(
-      (faq: { readonly question: string; readonly answer: string }) => ({
-        "@type": "Question",
-        name: faq.question,
-        acceptedAnswer: {
-          "@type": "Answer",
-          text: faq.answer,
-        },
-      }),
-    ),
+    mainEntity: faqs.map((faq: FaqItem) => ({
+      "@type": "Question",
+      name: faq.question,
+      acceptedAnswer: {
+        "@type": "Answer",
+        text: faq.answer,
+      },
+    })),
   };
 
   return (
@@ -102,17 +99,14 @@ function FaqJsonLd({
 /*  Page                                                               */
 /* ------------------------------------------------------------------ */
 
-export default async function AlternativesPage({
+export default async function GuidePage({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const page: AlternativesPageData | undefined = getAlternativesPage(slug);
+  const page: GuidePageData | undefined = getGuidePage(slug);
   if (!page) notFound();
-
-  const relatedGuides: readonly RelatedGuideLink[] =
-    slug === "linkedin-jobs-alternatives" ? LINKEDIN_JOBS_RELATED_GUIDES : [];
 
   return (
     <main className="flex-1">
@@ -132,57 +126,71 @@ export default async function AlternativesPage({
             <Link href="/login">Get your graph — free</Link>
           </Button>
           <a
-            href="#comparison"
+            href="#approaches"
             className="text-sm text-muted-foreground no-underline hover:underline"
           >
-            See the comparison &darr;
+            Compare approaches &darr;
           </a>
         </div>
+        <p className="mt-6 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+          Last updated {page.lastUpdated}
+        </p>
       </section>
 
-      {/* WHO THIS IS FOR */}
+      {/* THE PROBLEM */}
       <section className="border-t border-border">
         <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
-          <SectionLabel>Who this is for</SectionLabel>
-          <SectionHeading>
-            Searching for {page.competitor} alternatives?
-          </SectionHeading>
-          <ul className="max-w-xl space-y-4 text-base leading-relaxed text-muted-foreground">
-            {page.whoThisIsFor.map((item: string) => (
-              <li key={item} className="flex gap-3">
-                <span
-                  className="mt-1.5 block size-1.5 shrink-0 rounded-full bg-foreground"
-                  aria-hidden="true"
-                />
-                <span>{item}</span>
-              </li>
+          <SectionLabel>The problem</SectionLabel>
+          <SectionHeading>{page.problemHeading}</SectionHeading>
+          <div className="max-w-xl space-y-4 text-base leading-relaxed text-muted-foreground">
+            {page.problemParagraphs.map((paragraph: string) => (
+              <p key={paragraph}>{paragraph}</p>
             ))}
-          </ul>
+          </div>
+          {page.references.length > 0 && (
+            <div className="mt-8 max-w-xl">
+              <p className="mb-3 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+                Further reading
+              </p>
+              <ul className="space-y-2 text-sm">
+                {page.references.map((ref: ExternalReference) => (
+                  <li key={ref.url}>
+                    <a
+                      href={ref.url}
+                      className="font-medium no-underline hover:underline"
+                      rel="noopener noreferrer"
+                      target="_blank"
+                    >
+                      {ref.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       </section>
 
-      {/* TOP ALTERNATIVES */}
-      <section className="border-t border-border">
+      {/* AVAILABLE APPROACHES */}
+      <section id="approaches" className="border-t border-border">
         <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
-          <SectionLabel>Top alternatives</SectionLabel>
-          <SectionHeading>
-            The best {page.competitor} alternatives in 2025
-          </SectionHeading>
+          <SectionLabel>Available approaches</SectionLabel>
+          <SectionHeading>How people try to connect AI to LinkedIn</SectionHeading>
           <div className="space-y-6">
-            {page.alternatives.map(
-              (alt: Alternative, index: number) => (
+            {page.approaches.map(
+              (approach: GuideApproach, index: number) => (
                 <div
-                  key={alt.name}
+                  key={approach.name}
                   className="border border-border p-6"
                 >
                   <div className="flex items-baseline gap-3">
                     <span className="font-mono text-[11px] text-muted-foreground">
                       {String(index + 1).padStart(2, "0")}
                     </span>
-                    <h3 className="text-lg font-bold">{alt.name}</h3>
+                    <h3 className="text-lg font-bold">{approach.name}</h3>
                   </div>
                   <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
-                    {alt.tagline}
+                    {approach.summary}
                   </p>
                   <div className="mt-4 grid gap-px border border-border bg-border sm:grid-cols-2">
                     <div className="bg-background p-4">
@@ -190,11 +198,9 @@ export default async function AlternativesPage({
                         Pros
                       </p>
                       <ul className="space-y-1.5 text-sm text-muted-foreground">
-                        {alt.pros.map((pro: string) => (
+                        {approach.pros.map((pro: string) => (
                           <li key={pro} className="flex gap-2">
-                            <span className="shrink-0 text-foreground">
-                              +
-                            </span>
+                            <span className="shrink-0 text-foreground">+</span>
                             <span>{pro}</span>
                           </li>
                         ))}
@@ -205,7 +211,7 @@ export default async function AlternativesPage({
                         Cons
                       </p>
                       <ul className="space-y-1.5 text-sm text-muted-foreground">
-                        {alt.cons.map((con: string) => (
+                        {approach.cons.map((con: string) => (
                           <li key={con} className="flex gap-2">
                             <span className="shrink-0">&ndash;</span>
                             <span>{con}</span>
@@ -221,85 +227,33 @@ export default async function AlternativesPage({
         </div>
       </section>
 
-      {/* COMPARISON TABLE */}
-      <section id="comparison" className="border-t border-border">
+      {/* HOW CONTACTGRAPH SOLVES IT */}
+      <section className="border-t border-border">
         <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
-          <SectionLabel>Comparison</SectionLabel>
-          <SectionHeading>
-            {page.competitor} vs ContactGraph
-          </SectionHeading>
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse border border-border text-sm">
-              <thead>
-                <tr className="bg-secondary">
-                  <th className="border border-border px-4 py-3 text-left font-bold">
-                    Feature
-                  </th>
-                  <th className="border border-border px-4 py-3 text-left font-bold">
-                    {page.competitor}
-                  </th>
-                  <th className="border border-border px-4 py-3 text-left font-bold">
-                    ContactGraph
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {page.comparisonRows.map(
-                  (row: {
-                    readonly feature: string;
-                    readonly competitorValue: string;
-                    readonly contactGraphValue: string;
-                  }) => (
-                    <tr key={row.feature}>
-                      <td className="border border-border px-4 py-3 font-medium">
-                        {row.feature}
-                      </td>
-                      <td className="border border-border px-4 py-3 text-muted-foreground">
-                        {row.competitorValue}
-                      </td>
-                      <td className="border border-border px-4 py-3">
-                        {row.contactGraphValue}
-                      </td>
-                    </tr>
-                  ),
-                )}
-              </tbody>
-            </table>
-          </div>
+          <SectionLabel>The solution</SectionLabel>
+          <SectionHeading>{page.solutionHeading}</SectionHeading>
+          <p className="mb-8 max-w-xl text-base leading-relaxed text-muted-foreground">
+            {page.solutionIntro}
+          </p>
+          <ol className="max-w-xl space-y-6">
+            {page.solutionSteps.map(
+              (step: GuideSolutionStep, index: number) => (
+                <li key={step.title} className="flex gap-4">
+                  <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center border border-border font-mono text-[11px]">
+                    {index + 1}
+                  </span>
+                  <div>
+                    <h3 className="font-bold">{step.title}</h3>
+                    <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                      {step.description}
+                    </p>
+                  </div>
+                </li>
+              ),
+            )}
+          </ol>
         </div>
       </section>
-
-      {/* RELATED GUIDES */}
-      {relatedGuides.length > 0 && (
-        <section className="border-t border-border">
-          <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
-            <SectionLabel>Guides</SectionLabel>
-            <SectionHeading>Connect AI to your LinkedIn network</SectionHeading>
-            <p className="mb-8 max-w-xl text-base leading-relaxed text-muted-foreground">
-              Looking for a Claude connector for LinkedIn or a LinkedIn MCP
-              server? These guides explain why direct integration isn&apos;t
-              possible — and how ContactGraph solves it safely.
-            </p>
-            <ul className="divide-y divide-border border border-border">
-              {relatedGuides.map((guide: RelatedGuideLink) => (
-                <li key={guide.slug}>
-                  <Link
-                    href={guidePageHref(guide.slug)}
-                    className="block px-4 py-5 no-underline transition-colors hover:bg-secondary sm:px-6"
-                  >
-                    <h3 className="text-lg font-bold text-foreground">
-                      {guide.title}
-                    </h3>
-                    <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                      {guide.description}
-                    </p>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </section>
-      )}
 
       {/* FAQ */}
       <section className="border-t border-border">
@@ -307,16 +261,14 @@ export default async function AlternativesPage({
           <SectionLabel>FAQ</SectionLabel>
           <SectionHeading>Frequently asked questions</SectionHeading>
           <dl className="max-w-xl space-y-8">
-            {page.faqs.map(
-              (faq: { readonly question: string; readonly answer: string }) => (
-                <div key={faq.question}>
-                  <dt className="font-bold">{faq.question}</dt>
-                  <dd className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                    {faq.answer}
-                  </dd>
-                </div>
-              ),
-            )}
+            {page.faqs.map((faq: FaqItem) => (
+              <div key={faq.question}>
+                <dt className="font-bold">{faq.question}</dt>
+                <dd className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  {faq.answer}
+                </dd>
+              </div>
+            ))}
           </dl>
         </div>
       </section>
@@ -326,17 +278,24 @@ export default async function AlternativesPage({
         <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
           <SectionLabel>Get started</SectionLabel>
           <h2 className="max-w-xl text-2xl font-bold tracking-tight sm:text-3xl">
-            Your network is yours. Start using it.
+            Export once. Connect any AI. Own your network.
           </h2>
+          <p className="mt-4 max-w-xl text-base leading-relaxed text-muted-foreground">
+            Upload your LinkedIn connections and phone contacts. ContactGraph
+            builds your graph and exposes it to Claude, ChatGPT, and any MCP
+            client — free, open source, and never sells your data.
+          </p>
           <div className="mt-7 flex flex-wrap items-center gap-4">
             <Button asChild>
               <Link href="/login">Get your graph — free</Link>
             </Button>
             <a
-              href="mailto:hello@contactgraph.ai"
+              href="https://api.contactgraph.ai/skill.md"
               className="text-sm text-muted-foreground no-underline hover:underline"
+              rel="noopener noreferrer"
+              target="_blank"
             >
-              hello@contactgraph.ai
+              MCP setup guide
             </a>
           </div>
           <p className="mt-4 text-xs text-muted-foreground">
