@@ -29,6 +29,10 @@ export function MarketingFooter() {
           Resources
         </a>
         {" | "}
+        <a href="/blog" className="no-underline hover:underline">
+          Blog
+        </a>
+        {" | "}
         <a href="/alternatives/linkedin-jobs-alternatives" className="no-underline hover:underline">
           Alternatives
         </a>
