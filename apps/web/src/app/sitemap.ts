@@ -7,6 +7,7 @@ import {
 } from "@/app/(marketing)/company-lists/data";
 import { getAllFeatureSlugs } from "@/app/(marketing)/features/data";
 import { getAllGuideSlugs } from "@/app/(marketing)/guides/data";
+import { getAllPosts, blogPageHref } from "@/lib/blog";
 import { companyPageHref } from "@/lib/company-slug";
 import { SITE_URL } from "@/lib/site-url";
 
@@ -21,6 +22,7 @@ const STATIC_ROUTES: readonly {
   { path: "/about", changeFrequency: "monthly", priority: 0.7 },
   { path: "/manifesto", changeFrequency: "monthly", priority: 0.6 },
   { path: "/resources", changeFrequency: "weekly", priority: 0.9 },
+  { path: "/blog", changeFrequency: "weekly", priority: 0.7 },
   { path: "/privacy", changeFrequency: "yearly", priority: 0.3 },
   { path: "/terms", changeFrequency: "yearly", priority: 0.3 },
   { path: "/join", changeFrequency: "monthly", priority: 0.5 },
@@ -107,12 +109,22 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.6,
   }));
 
+  const blogPages: MetadataRoute.Sitemap = getAllPosts().map(
+    (post: { slug: string; date: string }) => ({
+      url: `${SITE_URL}${blogPageHref(post.slug)}`,
+      lastModified: new Date(post.date),
+      changeFrequency: "monthly" as const,
+      priority: 0.6,
+    }),
+  );
+
   return [
     ...staticPages,
     ...featurePages,
     ...guidePages,
     ...alternativesPages,
     ...categoryPages,
+    ...blogPages,
     ...companyPages,
   ];
 }

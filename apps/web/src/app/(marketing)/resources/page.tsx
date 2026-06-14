@@ -19,6 +19,12 @@ import {
   guidePageHref,
   type GuidePageData,
 } from "@/app/(marketing)/guides/data";
+import {
+  blogPageHref,
+  formatBlogDate,
+  getAllPosts,
+  type BlogPostSummary,
+} from "@/lib/blog";
 import { companyListPageHref } from "@/lib/company-slug";
 import { Button } from "@/components/ui/button";
 
@@ -66,6 +72,7 @@ export default function ResourcesPage() {
     getAllAlternativesPages();
   const featurePages: readonly FeaturePageData[] = getAllFeaturePages();
   const guidePages: readonly GuidePageData[] = getAllGuidePages();
+  const blogPosts: readonly BlogPostSummary[] = getAllPosts();
 
   return (
     <main className="flex-1">
@@ -171,6 +178,37 @@ export default function ResourcesPage() {
                   </h3>
                   <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
                     {page.pageDescription}
+                  </p>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </section>
+
+      <section className="border-t border-border">
+        <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-20">
+          <SectionLabel>Blog</SectionLabel>
+          <SectionHeading>Updates and stories</SectionHeading>
+          <p className="mb-10 max-w-xl text-base leading-relaxed text-muted-foreground">
+            Product news, warm-path job search ideas, and notes from the
+            ContactGraph team.
+          </p>
+          <ul className="divide-y divide-border border border-border">
+            {blogPosts.map((post: BlogPostSummary) => (
+              <li key={post.slug}>
+                <Link
+                  href={blogPageHref(post.slug)}
+                  className="block px-4 py-5 no-underline transition-colors hover:bg-secondary sm:px-6"
+                >
+                  <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+                    {formatBlogDate(post.date)} · {post.author}
+                  </p>
+                  <h3 className="mt-1 text-lg font-bold text-foreground">
+                    {post.title}
+                  </h3>
+                  <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                    {post.description}
                   </p>
                 </Link>
               </li>
