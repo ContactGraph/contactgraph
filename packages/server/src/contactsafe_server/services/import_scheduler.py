@@ -3,9 +3,9 @@ import logging
 import threading
 import uuid
 
+from contactsafe_core.enums import SourceType, SyncState
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from contactsafe_core.enums import SourceType, SyncState
 from contactsafe_server.db.connection import get_session_factory
 from contactsafe_server.db.models import Source
 from contactsafe_server.oauth.google import GoogleOAuthClient
@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 _active_sync_source_ids: set[uuid.UUID] = set()
 _active_sync_user_ids: set[uuid.UUID] = set()
+_active_sync_tasks_by_source_id: dict[uuid.UUID, asyncio.Task[None]] = {}
+_active_sync_task_users_by_source_id: dict[uuid.UUID, uuid.UUID] = {}
 _scheduling_lock: threading.Lock = threading.Lock()
 
 
@@ -35,20 +37,40 @@ def schedule_source_sync(source_id: uuid.UUID, user_id: uuid.UUID) -> bool:
                 source_id, user_id, _active_sync_source_ids, _active_sync_user_ids,
             )
             return False
+        task: asyncio.Task[None] = asyncio.create_task(
+            _run_sync_task(source_id, user_id),
+            name=f"source-sync-{source_id}",
+        )
         _active_sync_source_ids.add(source_id)
         _active_sync_user_ids.add(user_id)
+        _active_sync_tasks_by_source_id[source_id] = task
+        _active_sync_task_users_by_source_id[source_id] = user_id
     logger.info("Scheduled sync task for source %s, user %s", source_id, user_id)
-    asyncio.create_task(
-        _run_sync_task(source_id, user_id),
-        name=f"source-sync-{source_id}",
-    )
     return True
+
+
+def cancel_source_sync(source_id: uuid.UUID, user_id: uuid.UUID) -> bool:
+    """Request cancellation for the active background task without releasing its locks."""
+    with _scheduling_lock:
+        task = _active_sync_tasks_by_source_id.get(source_id)
+        task_user_id = _active_sync_task_users_by_source_id.get(source_id)
+        if task is None or task_user_id != user_id or task.done():
+            logger.info(
+                "No active sync task to cancel for source %s, user %s",
+                source_id, user_id,
+            )
+            return False
+        logger.info("Cancelling sync task for source %s, user %s", source_id, user_id)
+        task.cancel()
+        return True
 
 
 def release_sync_lock(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
     with _scheduling_lock:
         _active_sync_source_ids.discard(source_id)
         _active_sync_user_ids.discard(user_id)
+        _active_sync_tasks_by_source_id.pop(source_id, None)
+        _active_sync_task_users_by_source_id.pop(source_id, None)
 
 
 def is_source_sync_running(source_id: uuid.UUID) -> bool:
@@ -129,9 +151,16 @@ async def _run_sync_task(source_id: uuid.UUID, user_id: uuid.UUID) -> None:
                     return
                 await db.commit()
                 logger.info("Source sync completed for source %s", source_id)
+            except asyncio.CancelledError:
+                logger.info("Source sync cancelled for source %s", source_id)
+                await db.rollback()
+                raise
             except Exception:
                 await db.commit()
                 logger.exception("Source sync failed for source %s", source_id)
+    except asyncio.CancelledError:
+        logger.info("Background sync task cancelled for source %s", source_id)
+        raise
     except Exception as exc:
         logger.exception("Background sync task failed for source %s", source_id)
         try:

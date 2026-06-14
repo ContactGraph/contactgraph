@@ -38,6 +38,7 @@ _OAUTH_SOURCE_TYPES: frozenset[SourceType] = frozenset({
 from contactsafe_server.services.crypto import TokenEncryptor
 from contactsafe_server.services.upload_payload_crypto import build_upload_payload
 from contactsafe_server.services.import_scheduler import (
+    cancel_source_sync,
     is_source_sync_running,
     is_user_sync_running,
     release_sync_lock,
@@ -517,7 +518,8 @@ class SourceService:
         claimed: bool = await self._try_claim_sync(source)
         if not claimed:
             logger.info("request_sync blocked: _try_claim_sync failed for source %s (sync_state=%s)", source.id, source.sync_state)
-            release_sync_lock(source.id, user_id)
+            if not cancel_source_sync(source.id, user_id):
+                release_sync_lock(source.id, user_id)
             await self._db.refresh(source)
             return SyncSourceResult(
                 source_id=source.id,

@@ -30,6 +30,7 @@ from datetime import date
 
 from contactsafe_core.enums import SessionStatus, SourceType, EnrichmentRunState, SyncState
 from contactsafe_core.schemas import (
+    CancelSyncResult,
     ConnectSourceResult,
     DescribeGraphResult,
     EditTrustedUsersResult,
@@ -176,10 +177,8 @@ async def cancel_sync(
     user_id: UUID | None,
     *,
     source_id: str,
-) -> "CancelSyncResult":
-    from contactsafe_core.schemas import CancelSyncResult
-    from contactsafe_core.enums import SyncState
-    from contactsafe_server.services.import_scheduler import release_sync_lock
+) -> CancelSyncResult:
+    from contactsafe_server.services.import_scheduler import cancel_source_sync
 
     if user_id is None:
         return CancelSyncResult(cancelled=False, message="Not authenticated.")
@@ -198,8 +197,15 @@ async def cancel_sync(
         source.sync_state = SyncState.FAILED.value
         source.sync_error = "Import cancelled by user."
         await db.commit()
-        release_sync_lock(source.id, source.user_id)
-        return CancelSyncResult(cancelled=True, message="Import cancelled.")
+        task_cancelled = cancel_source_sync(source.id, source.user_id)
+        return CancelSyncResult(
+            cancelled=True,
+            message=(
+                "Import cancellation requested."
+                if task_cancelled
+                else "Import marked cancelled."
+            ),
+        )
 
 
 async def list_sources(
