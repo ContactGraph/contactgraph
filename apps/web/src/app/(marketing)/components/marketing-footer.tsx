@@ -45,29 +45,6 @@ export function MarketingFooter() {
           GitHub
         </a>
       </div>
-      <div className="mt-2 text-foreground">
-        <span className="text-muted-foreground">Guides: </span>
-        <a
-          href="/guides/connect-claude-to-linkedin"
-          className="no-underline hover:underline"
-        >
-          Connect Claude
-        </a>
-        {" | "}
-        <a
-          href="/guides/linkedin-mcp-server-job-search"
-          className="no-underline hover:underline"
-        >
-          LinkedIn MCP
-        </a>
-        {" | "}
-        <a
-          href="/guides/ai-linkedin-contacts"
-          className="no-underline hover:underline"
-        >
-          AI Contacts
-        </a>
-      </div>
     </footer>
   );
 }

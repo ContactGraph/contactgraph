@@ -33,29 +33,17 @@ LinkedIn itself now covers more of this than it used to. Job search, people sear
 ## Quick Comparison Of The Best LinkedIn Job Search Tools For Job Seekers
 
 | Tool | Best for | Starting price | Warm intro angle |
-
 |---|---|---:|---|
-
 | ContactGraph | Verified contact discovery and relationship mapping | Free tier, then €49/month | Identity resolution and provenance for real contacts |
-
 | CareerShift | Structured job search and outreach tracking | Varies by access | Search plus contact and outreach workflow |
-
 | Nudge | Relationship-first networking | Varies | Surfaces useful connections and follow-ups |
-
 | Partly | People and company discovery | Varies | Relationship-aware search flow |
-
 | Notwork | Professional relationship exploration | Varies | Mapping who knows whom |
-
 | InsideTrack | Guided networking and career mobility | Varies | Outreach and connection management |
-
 | Village | Community-based introductions | Varies | Turning weak ties into intros |
-
 | Jetwork | Faster paths to people at target companies | Varies | Search for contacts near a role or company |
-
 | Gilji | Search support with relationship discovery | Varies | Search and network discovery together |
-
 | LinkedIn Jobs | Native job search and referral paths | Free, Premium optional | Mutual connections, alumni, and InMail |
-
 | VouchedIn | Trust-based introductions | Varies | Network-aware introductions |
 
 ## ContactGraph
@@ -84,7 +72,7 @@ The mechanics line up with what job seekers need. The site describes identity re
 
 - Some public claims are infrastructure-focused, not job-search specific
 
-![ContactGraph dark-themed landing page featuring bold text and code snippet for API-first contact intelligence.]([https://reddit-farm.r2.zhizhuo.uk/pages/contactgraph-cloud-ca964cfd.png](https://reddit-farm.r2.zhizhuo.uk/pages/contactgraph-cloud-ca964cfd.png))
+![ContactGraph dark-themed landing page featuring bold text and code snippet for API-first contact intelligence.](https://reddit-farm.r2.zhizhuo.uk/pages/contactgraph-cloud-ca964cfd.png)
 
 ## CareerShift
 

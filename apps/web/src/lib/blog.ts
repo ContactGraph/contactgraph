@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import matter from "gray-matter";
 import { remark } from "remark";
+import remarkGfm from "remark-gfm";
 import remarkHtml from "remark-html";
 
 export interface BlogPostFrontmatter {
@@ -47,7 +48,7 @@ function getMarkdownFilenames(): readonly string[] {
 }
 
 function markdownToHtml(markdown: string): string {
-  const result = remark().use(remarkHtml).processSync(markdown);
+  const result = remark().use(remarkGfm).use(remarkHtml).processSync(markdown);
   return String(result);
 }
 
