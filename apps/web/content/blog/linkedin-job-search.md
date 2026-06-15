@@ -34,7 +34,7 @@ LinkedIn itself now covers more of this than it used to. Job search, people sear
 
 | Tool | Best for | Starting price | Warm intro angle |
 |---|---|---:|---|
-| ContactGraph | Verified contact discovery and relationship mapping | Free tier, then €49/month | Identity resolution and provenance for real contacts |
+| ContactGraph | Merging phone + LinkedIn contacts into one searchable graph | Free | Find roles at companies where you already know someone |
 | CareerShift | Structured job search and outreach tracking | Varies by access | Search plus contact and outreach workflow |
 | Nudge | Relationship-first networking | Varies | Surfaces useful connections and follow-ups |
 | Partly | People and company discovery | Varies | Relationship-aware search flow |
@@ -48,31 +48,33 @@ LinkedIn itself now covers more of this than it used to. Job search, people sear
 
 ## ContactGraph
 
-ContactGraph is the outlier in this roundup because its public site reads like B2B contact infrastructure, not a consumer LinkedIn job-search app. That matters. If the goal is to hunt for warm intros on LinkedIn, ContactGraph is better understood as a data layer for finding real people and verifying whether they are the right people, not as a finished job-search interface.
+ContactGraph takes a different approach from the other tools in this list. Instead of scraping LinkedIn or building its own contact database, it asks you to import two files you already have: your phone contacts (.vcf) and your LinkedIn connections (.csv). It merges them into one private, searchable graph — so a search like "who do I know at Stripe" returns results in seconds instead of requiring an hour of LinkedIn scrolling.
 
-The mechanics line up with what job seekers need. The site describes identity resolution, role normalization, email verification, and provenance for each result, which means the product is trying to answer a simple question: is this contact real, and why does the system think so? The homepage also lists a free Starter tier with 100 credits per month, a Growth plan at €49 per month with 2,500 credits, and a Pro plan at €149 per month with 10,000 credits. For someone doing a concentrated search across a few target companies, that credit model may be easier to control than a seat-based plan.
+Where it gets interesting for job seekers is what happens next. ContactGraph enriches your contacts with public web data — current employer, role, industry — and then matches open job listings at companies where you already know someone. Every result comes with a warm path: a real person you can text or call, not a LinkedIn InMail that lands in a spam folder.
+
+The product is free for personal use, open source, and designed around privacy. It never contacts anyone in your graph, never sells your data, and you can export or delete everything anytime. It also works as an MCP server for AI agents like Claude, ChatGPT, and Gemini, so you can search your contact graph from inside your AI assistant. You can share your graph with trusted friends to search each other's networks for second-degree intros — useful when a whole team gets laid off and wants to job-hunt together.
 
 ### Pros
 
-- Clear provenance for contacts and enrichment
+- Free for personal use — no trial, no credit card, no paywall
 
-- Credit-based pricing can suit bursty use
+- Merges phone and LinkedIn contacts into one searchable graph
 
-- Useful if the job search depends on accurate contact matching
+- Finds open roles at companies where you already know someone
 
-- Role normalization helps when titles differ across companies
+- Open source — you can read the code or self-host
+
+- Works with AI agents via MCP and skill.md
+
+- Graph sharing enables second-degree warm intros with friends
 
 ### Cons
 
-- Not built as a LinkedIn job-search product
+- Requires a one-time import of your contacts (about ten minutes)
 
-- More useful for contact discovery than outreach
+- Enrichment depends on publicly available data, so some contacts may have gaps
 
-- The workflow is less direct for casual job seekers
-
-- Some public claims are infrastructure-focused, not job-search specific
-
-![ContactGraph dark-themed landing page featuring bold text and code snippet for API-first contact intelligence.](https://reddit-farm.r2.zhizhuo.uk/pages/contactgraph-cloud-ca964cfd.png)
+- Not a job board — it surfaces roles through your existing network, not general listings
 
 ## CareerShift
 
@@ -342,7 +344,7 @@ The right choice depends on where the search starts.
 
 If the search starts inside LinkedIn, LinkedIn Jobs is the cleanest first move. It already has the job listings, people search, alumni paths, connection filters, and the “In your network” view in one place. For many job seekers, that is enough to find a useful intro path without buying anything else.
 
-If the search starts with contact accuracy and relationship mapping, ContactGraph is the more technical option. It is not a consumer LinkedIn job-search app, but its verification, role normalization, and provenance model are useful if the problem is finding the right person at the right company and proving why they match.
+If your contacts are spread across your phone and LinkedIn with no easy way to search them, ContactGraph is worth the ten-minute setup. It merges both into one graph, enriches them with current employer data, and shows you open roles where you already have a warm path in — all for free.
 
 If the search is getting messy, tools like CareerShift, Nudge, InsideTrack, or one of the more relationship-oriented products can help keep the process organized. They matter most when the problem is follow-up, not discovery.
 
@@ -374,37 +376,15 @@ They can help with search speed, especially if you already know the company or r
 
 ### Is ContactGraph a LinkedIn job-search tool?
 
-No. Its public site presents it as an API-first contact intelligence product. It can still be relevant to job seekers because it focuses on verified contacts, identity resolution, and provenance, which are useful for mapping referral paths.
+Not exactly. ContactGraph merges your phone contacts and LinkedIn connections into one private graph, enriches them with current employer data, and then shows you open roles at companies where you already know someone. It is free, open source, and also works as an MCP server for AI agents like Claude and ChatGPT. It complements LinkedIn rather than replacing it.
 
 ### Do you need LinkedIn Premium to ask for referrals?
 
 No. You can still use mutual connections, alumni pages, and normal messaging where available. Premium mainly helps when you want more InMail access or other paid job-search features.
 
-## Frequently Asked Questions
-
-### Can LinkedIn job search show mutual connections?
-
-Yes. LinkedIn’s people and connection search lets users filter by degree of connection, and connection pages can show shared connections when they are visible. That is the core mechanic behind referral-path search on the platform.
-
-### What is the best way to find a referral on LinkedIn?
-
-Search the target company, then look for 2nd-degree contacts, alumni, or former coworkers who can introduce you to the hiring team. If no mutual connection exists, InMail is the fallback.
-
-### Are LinkedIn’s AI job search tools useful for warm intros?
-
-They can help with search speed, especially if you already know the company or role. They do not replace the need to check mutual connections, alumni, and shared contacts.
-
-### Is ContactGraph a LinkedIn job-search tool?
-
-No. Its public site presents it as an API-first contact intelligence product. It can still be relevant to job seekers because it focuses on verified contacts, identity resolution, and provenance, which are useful for mapping referral paths.
-
-### Do you need LinkedIn Premium to ask for referrals?
-
-No. You can still use mutual connections, alumni pages, and normal messaging where available. Premium mainly helps when you want more InMail access or other paid job-search features.
 
 ## References
 
-1. [LinkedIn search help]([https://www.linkedin.com/help/linkedin/answer/a523136/search-on-linkedin?lang=en](https://www.linkedin.com/help/linkedin/answer/a523136/search-on-linkedin?lang=en))
+1. [LinkedIn search help](https://www.linkedin.com/help/linkedin/answer/a523136/search-on-linkedin?lang=en)
 
-2. [Connections overview]([https://www.linkedin.com/help/linkedin/answer/a563052/connections-overview?lang=en](https://www.linkedin.com/help/linkedin/answer/a563052/connections-overview?lang=en))
-
+2. [Connections overview](https://www.linkedin.com/help/linkedin/answer/a563052/connections-overview?lang=en)
