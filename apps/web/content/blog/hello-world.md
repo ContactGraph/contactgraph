@@ -4,6 +4,7 @@ slug: "hello-world"
 date: "2026-06-13"
 description: "Our first blog post on ContactGraph."
 author: "ContactGraph Team"
+image: "/hero-hello-world.jpg"
 ---
 
 Welcome to the ContactGraph blog.

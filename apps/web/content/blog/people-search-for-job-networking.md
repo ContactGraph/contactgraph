@@ -4,6 +4,7 @@ slug: "people-search-for-job-networking"
 date: "2026-06-13"
 description: "Helps readers understand how an MCP server connects AI assistants to a searchable career network, appealing to users who want AI-assisted workflows."
 author: "ContactGraph Team"
+image: "/hero-people-search-for-job-networking.jpg"
 ---
 
 If you have ever asked an AI assistant to find jobs and ended up with vague advice instead of real openings, you already know the problem: plain chat is not the same as structured job search. The useful version is an MCP server for job search tools, where the assistant can search listings, resolve locations and companies, pull job details, and surface employer context in one flow.

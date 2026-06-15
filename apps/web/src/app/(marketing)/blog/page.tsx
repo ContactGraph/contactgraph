@@ -66,17 +66,26 @@ export default function BlogIndexPage() {
                 <li key={post.slug}>
                   <Link
                     href={blogPageHref(post.slug)}
-                    className="block px-4 py-5 no-underline transition-colors hover:bg-secondary sm:px-6"
+                    className="flex gap-5 px-4 py-5 no-underline transition-colors hover:bg-secondary sm:px-6"
                   >
-                    <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
-                      {formatBlogDate(post.date)} · {post.author}
-                    </p>
-                    <h2 className="mt-1 text-lg font-bold text-foreground">
-                      {post.title}
-                    </h2>
-                    <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-                      {post.description}
-                    </p>
+                    {post.image ? (
+                      <img
+                        src={post.image}
+                        alt=""
+                        className="hidden size-24 shrink-0 rounded-md object-cover sm:block"
+                      />
+                    ) : null}
+                    <div className="min-w-0">
+                      <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+                        {formatBlogDate(post.date)} · {post.author}
+                      </p>
+                      <h2 className="mt-1 text-lg font-bold text-foreground">
+                        {post.title}
+                      </h2>
+                      <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+                        {post.description}
+                      </p>
+                    </div>
                   </Link>
                 </li>
               ))}

@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 import matter from "gray-matter";
 import { remark } from "remark";
+import remarkGfm from "remark-gfm";
 import remarkHtml from "remark-html";
 
 export interface BlogPostFrontmatter {
@@ -11,6 +12,7 @@ export interface BlogPostFrontmatter {
   readonly date: string;
   readonly description: string;
   readonly author: string;
+  readonly image?: string;
 }
 
 export interface BlogPostSummary extends BlogPostFrontmatter {}
@@ -32,7 +34,8 @@ function isBlogPostFrontmatter(data: unknown): data is BlogPostFrontmatter {
     typeof record.slug === "string" &&
     typeof record.date === "string" &&
     typeof record.description === "string" &&
-    typeof record.author === "string"
+    typeof record.author === "string" &&
+    (record.image === undefined || typeof record.image === "string")
   );
 }
 
@@ -47,7 +50,7 @@ function getMarkdownFilenames(): readonly string[] {
 }
 
 function markdownToHtml(markdown: string): string {
-  const result = remark().use(remarkHtml).processSync(markdown);
+  const result = remark().use(remarkGfm).use(remarkHtml).processSync(markdown);
   return String(result);
 }
 
@@ -71,6 +74,7 @@ function toSummary(post: BlogPost): BlogPostSummary {
     date: post.date,
     description: post.description,
     author: post.author,
+    image: post.image,
   };
 }
 

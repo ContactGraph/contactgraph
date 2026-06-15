@@ -33,7 +33,21 @@ export default async function LoginPage() {
 
   return (
     <div className="flex min-h-full flex-1 items-center justify-center px-4 py-16">
-      <LoginForm />
+      <div className="flex w-full max-w-md flex-col items-center gap-8">
+        <div className="flex flex-col items-center gap-3">
+          <img
+            src="/logomark.svg"
+            alt=""
+            className="size-14 dark:invert"
+            aria-hidden="true"
+          />
+          <h1 className="text-2xl font-bold tracking-tight">ContactGraph</h1>
+          <p className="text-center text-sm text-muted-foreground">
+            Your private, agent-native contact graph
+          </p>
+        </div>
+        <LoginForm />
+      </div>
     </div>
   );
 }
