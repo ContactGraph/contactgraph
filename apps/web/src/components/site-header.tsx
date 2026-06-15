@@ -120,8 +120,14 @@ export function SiteHeader({
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-4 sm:gap-6">
           <Link
             href="/"
-            className="text-lg font-bold tracking-tight text-foreground no-underline hover:no-underline hover:opacity-80"
+            className="flex items-center gap-2 text-lg font-bold tracking-tight text-foreground no-underline hover:no-underline hover:opacity-80"
           >
+            <img
+              src="/logomark.svg"
+              alt=""
+              className="size-7 dark:invert"
+              aria-hidden="true"
+            />
             ContactGraph
           </Link>
           <nav
