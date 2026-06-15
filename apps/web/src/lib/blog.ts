@@ -12,6 +12,7 @@ export interface BlogPostFrontmatter {
   readonly date: string;
   readonly description: string;
   readonly author: string;
+  readonly image?: string;
 }
 
 export interface BlogPostSummary extends BlogPostFrontmatter {}
@@ -33,7 +34,8 @@ function isBlogPostFrontmatter(data: unknown): data is BlogPostFrontmatter {
     typeof record.slug === "string" &&
     typeof record.date === "string" &&
     typeof record.description === "string" &&
-    typeof record.author === "string"
+    typeof record.author === "string" &&
+    (record.image === undefined || typeof record.image === "string")
   );
 }
 
@@ -72,6 +74,7 @@ function toSummary(post: BlogPost): BlogPostSummary {
     date: post.date,
     description: post.description,
     author: post.author,
+    image: post.image,
   };
 }
 

@@ -4,6 +4,7 @@ slug: "linkedin-job-search"
 date: "2026-06-13"
 description: "Targets people searching for jobs on LinkedIn who want better ways to uncover mutual connections and referral paths."
 author: "ContactGraph Team"
+image: "/hero-linkedin-job-search.jpg"
 ---
 
 When you’re job hunting on LinkedIn, the hardest part usually isn’t finding openings, it’s finding a human path into them. A listed role with no connection is still a cold application, and cold applications are crowded, slow, and easy to ignore. The smarter move is to uncover who you already know, who knows them, and which contact can credibly open the door.

@@ -69,6 +69,14 @@ export default async function BlogPostPage({
           {formatBlogDate(post.date)} · {post.author}
         </p>
         <h1>{post.title}</h1>
+        {post.image ? (
+          <img
+            src={post.image}
+            alt=""
+            className="mb-6 w-full rounded-md object-cover"
+            style={{ aspectRatio: "2/1" }}
+          />
+        ) : null}
         <div dangerouslySetInnerHTML={{ __html: post.html }} />
       </MarketingProse>
     </MarketingMain>
