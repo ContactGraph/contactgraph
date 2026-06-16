@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { ChevronDown, Copy, Loader2, MessageSquare } from "lucide-react";
+import { ChevronRight, Copy, Loader2, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -146,10 +146,10 @@ function TaskCard({
             className="flex min-w-0 flex-1 items-start gap-2 text-left"
             onClick={onToggle}
           >
-            <ChevronDown
+            <ChevronRight
               className={cn(
                 "mt-1 size-4 shrink-0 text-muted-foreground transition-transform",
-                expanded ? "rotate-180" : "",
+                expanded ? "rotate-90" : "",
               )}
             />
             <div className="min-w-0 space-y-1">
