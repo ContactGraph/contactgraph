@@ -1,4 +1,5 @@
 import { env } from "@/lib/env";
+import { decodeJwtPayload } from "@/lib/jwt";
 import type { OAuthTokenResponse } from "@/lib/api-types";
 import { applyAuthTokensToSession } from "@/lib/session-auth";
 import { getSession } from "@/lib/session";
@@ -14,9 +15,19 @@ export class ApiError extends Error {
   }
 }
 
-let refreshPromise: Promise<boolean> | null = null;
+const TOKEN_EXPIRY_BUFFER_S: number = 60;
 
-async function refreshAccessToken(): Promise<boolean> {
+function isTokenExpired(token: string): boolean {
+  const payload = decodeJwtPayload(token);
+  if (payload === null || payload.exp === undefined) {
+    return false;
+  }
+  return payload.exp - TOKEN_EXPIRY_BUFFER_S < Date.now() / 1000;
+}
+
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
   if (refreshPromise !== null) {
     return refreshPromise;
   }
@@ -29,12 +40,14 @@ async function refreshAccessToken(): Promise<boolean> {
   }
 }
 
-async function doRefresh(): Promise<boolean> {
+async function doRefresh(): Promise<string | null> {
   const session = await getSession();
   const refreshToken: string | undefined = session.refreshToken;
 
   if (!refreshToken) {
-    return false;
+    session.isLoggedIn = false;
+    await session.save();
+    return null;
   }
 
   const body: URLSearchParams = new URLSearchParams({
@@ -50,11 +63,15 @@ async function doRefresh(): Promise<boolean> {
       body,
     });
   } catch {
-    return false;
+    return null;
   }
 
   if (!response.ok) {
-    return false;
+    if (response.status >= 400 && response.status < 500) {
+      session.isLoggedIn = false;
+      await session.save();
+    }
+    return null;
   }
 
   const data: OAuthTokenResponse = (await response.json()) as OAuthTokenResponse;
@@ -63,7 +80,7 @@ async function doRefresh(): Promise<boolean> {
     refreshToken: data.refresh_token,
   });
   await session.save();
-  return true;
+  return data.access_token;
 }
 
 async function parseErrorResponse(response: Response): Promise<string> {
@@ -98,6 +115,13 @@ export async function apiFetch<T>(
     throw new ApiError(401, "Not authenticated");
   }
 
+  if (!options.accessToken && isTokenExpired(token)) {
+    const newToken: string | null = await refreshAccessToken();
+    if (newToken !== null) {
+      token = newToken;
+    }
+  }
+
   const execute = async (bearerToken: string): Promise<Response> => {
     const headers: HeadersInit = {
       Authorization: `Bearer ${bearerToken}`,
@@ -124,13 +148,9 @@ export async function apiFetch<T>(
   let response: Response = await execute(token);
 
   if (response.status === 401 && !options.accessToken) {
-    const refreshed: boolean = await refreshAccessToken();
-    if (refreshed) {
-      const updatedSession = await getSession();
-      token = updatedSession.accessToken;
-      if (token) {
-        response = await execute(token);
-      }
+    const newToken: string | null = await refreshAccessToken();
+    if (newToken !== null) {
+      response = await execute(newToken);
     }
   }
 

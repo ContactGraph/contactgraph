@@ -847,6 +847,10 @@ export interface NextStepPayload {
   org_name: string | null;
   job_url: string | null;
   proposed_message: string | null;
+  outreach_type: "direct" | "bridge" | null;
+  bridge_name: string | null;
+  bridge_phone: string | null;
+  target_contact_name: string | null;
   contacts: NextStepContactCandidate[];
   action_links: NextStepActionLink[];
 }

@@ -255,11 +255,9 @@ class OAuthServerService:
             raise ValueError("Refresh token expired")
 
         try:
-            claims: dict[str, object] = self._jwt.decode_token(refresh_token)
+            claims: dict[str, object] = self._jwt.decode_refresh_token(refresh_token)
         except ValueError as exc:
             raise ValueError("Invalid refresh token") from exc
-        if claims.get("typ") != "refresh":
-            raise ValueError("Token is not a refresh token")
 
         user_id_str: str = str(claims.get("sub", ""))
         try:
