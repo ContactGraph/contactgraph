@@ -14,7 +14,22 @@ export class ApiError extends Error {
   }
 }
 
+let refreshPromise: Promise<boolean> | null = null;
+
 async function refreshAccessToken(): Promise<boolean> {
+  if (refreshPromise !== null) {
+    return refreshPromise;
+  }
+
+  refreshPromise = doRefresh();
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
+}
+
+async function doRefresh(): Promise<boolean> {
   const session = await getSession();
   const refreshToken: string | undefined = session.refreshToken;
 
@@ -41,11 +56,10 @@ async function refreshAccessToken(): Promise<boolean> {
   }
 
   if (!response.ok) {
-    if (response.status >= 500) {
-      return false;
+    if (response.status >= 400 && response.status < 500) {
+      session.destroy();
+      await session.save();
     }
-    session.destroy();
-    await session.save();
     return false;
   }
 

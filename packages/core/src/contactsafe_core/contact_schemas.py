@@ -413,6 +413,7 @@ class OrgJobItem(BaseModel):
     shared_contact_count: int = 0
     shared_primary_contact_name: str | None = None
     shared_primary_bridge_name: str | None = None
+    user_interest: Literal["interested", "dismissed"] | None = None
 
 
 class OrgJobsByCompany(BaseModel):
@@ -570,3 +571,66 @@ class PublicCompanyDetailResult(BaseModel):
     active_job_count: int
     jobs: list[PublicCategoryJobItem] = Field(default_factory=list)
     generated_at: datetime
+
+
+class NextStepActionLink(BaseModel):
+    label: str
+    href: str
+
+
+class NextStepContactCandidate(BaseModel):
+    person_id: UUID
+    display_name: str
+    current_role: str | None = None
+    phone: str | None = None
+
+
+class NextStepPayload(BaseModel):
+    unreviewed_job_count: int | None = None
+    job_id: UUID | None = None
+    job_title: str | None = None
+    org_name: str | None = None
+    job_url: str | None = None
+    proposed_message: str | None = None
+    contacts: list[NextStepContactCandidate] = Field(default_factory=list)
+    action_links: list[NextStepActionLink] = Field(default_factory=list)
+
+
+class NextStepItem(BaseModel):
+    dedup_key: str
+    kind: str
+    status: Literal["open", "done", "skipped"]
+    title: str
+    detail: str | None = None
+    sort_rank: int
+    job_id: UUID | None = None
+    person_id: UUID | None = None
+    org_id: UUID | None = None
+    payload: NextStepPayload = Field(default_factory=NextStepPayload)
+
+
+class NextStepsResult(BaseModel):
+    tasks: list[NextStepItem] = Field(default_factory=list)
+    message: str = "OK"
+
+
+class UpdateTaskStatusRequest(BaseModel):
+    dedup_key: str
+    status: Literal["done", "skipped"]
+
+
+class UpdateTaskStatusResult(BaseModel):
+    dedup_key: str
+    status: Literal["open", "done", "skipped"]
+    message: str = "OK"
+
+
+class SetJobInterestRequest(BaseModel):
+    job_id: UUID
+    interest: Literal["interested", "dismissed"]
+
+
+class SetJobInterestResult(BaseModel):
+    job_id: UUID
+    interest: Literal["interested", "dismissed"]
+    message: str = "OK"

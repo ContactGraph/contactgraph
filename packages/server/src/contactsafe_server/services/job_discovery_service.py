@@ -33,6 +33,7 @@ from contactsafe_server.db.models import (
     OrgListMembership,
     Person,
     User,
+    UserJobFeedback,
     UserJobRelevance,
     UserPersonObservation,
 )
@@ -434,6 +435,13 @@ class JobDiscoveryService:
             r.job_id: r for r in relevance_result.scalars().all()
         }
 
+        feedback_result = await self._db.execute(
+            select(UserJobFeedback).where(UserJobFeedback.user_id == user_id),
+        )
+        feedback_map: dict[uuid.UUID, UserJobFeedback] = {
+            fb.job_id: fb for fb in feedback_result.scalars().all()
+        }
+
         unique_org_ids: list[uuid.UUID] = list({job.org_id for job in jobs})
         contact_summaries: dict[uuid.UUID, tuple[str, int]] = (
             await self._load_user_contact_summaries_by_org(user_id, unique_org_ids)
@@ -468,6 +476,8 @@ class JobDiscoveryService:
                 shared_summary[1] if shared_summary else None
             )
             shared_contact_count: int = shared_summary[2] if shared_summary else 0
+            feedback: UserJobFeedback | None = feedback_map.get(job.id)
+            user_interest: str | None = feedback.interest if feedback else None
 
             job_items.append(
                 OrgJobItem(
@@ -503,6 +513,7 @@ class JobDiscoveryService:
                     shared_contact_count=shared_contact_count,
                     shared_primary_contact_name=shared_primary_contact_name,
                     shared_primary_bridge_name=shared_primary_bridge_name,
+                    user_interest=user_interest,  # type: ignore[arg-type]
                 )
             )
 
@@ -541,6 +552,15 @@ class JobDiscoveryService:
             ),
         )
         rel: UserJobRelevance | None = rel_result.scalar_one_or_none()
+
+        feedback_result = await self._db.execute(
+            select(UserJobFeedback).where(
+                UserJobFeedback.user_id == user_id,
+                UserJobFeedback.job_id == job_id,
+            ),
+        )
+        feedback: UserJobFeedback | None = feedback_result.scalar_one_or_none()
+        user_interest: str | None = feedback.interest if feedback else None
 
         contact_summaries: dict[uuid.UUID, tuple[str, int]] = (
             await self._load_user_contact_summaries_by_org(user_id, [job.org_id])
@@ -635,6 +655,7 @@ class JobDiscoveryService:
             shared_contact_count=shared_contact_count,
             shared_primary_contact_name=shared_primary_contact_name,
             shared_primary_bridge_name=shared_primary_bridge_name,
+            user_interest=user_interest,  # type: ignore[arg-type]
         )
 
         return JobDetailResult(

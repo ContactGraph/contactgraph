@@ -79,3 +79,23 @@ class JobDigestFrequency(StrEnum):
     DAILY = "daily"
     WEEKLY = "weekly"
     OFF = "off"
+
+
+class JobInterest(StrEnum):
+    INTERESTED = "interested"
+    DISMISSED = "dismissed"
+
+
+class UserTaskKind(StrEnum):
+    UPLOAD_PHONE = "upload_phone"
+    UPLOAD_LINKEDIN = "upload_linkedin"
+    UPLOAD_PROFILE = "upload_profile"
+    SET_JOB_CRITERIA = "set_job_criteria"
+    REVIEW_JOBS = "review_jobs"
+    JOB_OUTREACH = "job_outreach"
+
+
+class UserTaskStatus(StrEnum):
+    OPEN = "open"
+    DONE = "done"
+    SKIPPED = "skipped"

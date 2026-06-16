@@ -47,7 +47,10 @@ from contactsafe_core.contact_schemas import (
     JobPreferencesResult,
     JobTargetScope,
     ListOrgJobsResult,
+    NextStepsResult,
     NotificationPreferencesResult,
+    SetJobInterestRequest,
+    SetJobInterestResult,
     SetNotificationPreferencesRequest,
     ModifyOrgListMembershipRequest,
     ModifyOrgListMembershipResult,
@@ -67,6 +70,8 @@ from contactsafe_core.contact_schemas import (
     StrongTieCountResult,
     UpdateOrgRequest,
     UpdatePersonRequest,
+    UpdateTaskStatusRequest,
+    UpdateTaskStatusResult,
 )
 from contactsafe_core.schemas import (
     CancelSyncRequest,
@@ -943,6 +948,39 @@ async def api_get_job_detail(
     body: _GetJobDetailBody,
 ) -> JobDetailResult:
     return await actions.get_job_detail(ctx, user_id, job_id=body.job_id)
+
+
+@router.post("/get-next-steps", response_model=NextStepsResult)
+async def api_get_next_steps(ctx: Ctx, user_id: EffectiveUser) -> NextStepsResult:
+    return await actions.get_next_steps(ctx, user_id)
+
+
+@router.post("/update-task-status", response_model=UpdateTaskStatusResult)
+async def api_update_task_status(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: UpdateTaskStatusRequest,
+) -> UpdateTaskStatusResult:
+    return await actions.update_task_status(
+        ctx,
+        user_id,
+        dedup_key=body.dedup_key,
+        status=body.status,
+    )
+
+
+@router.post("/set-job-interest", response_model=SetJobInterestResult)
+async def api_set_job_interest(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: SetJobInterestRequest,
+) -> SetJobInterestResult:
+    return await actions.set_job_interest(
+        ctx,
+        user_id,
+        job_id=body.job_id,
+        interest=body.interest,
+    )
 
 
 @router.post("/get-job-preferences", response_model=JobPreferencesResult)

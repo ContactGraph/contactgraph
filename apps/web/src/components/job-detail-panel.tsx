@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
+import { JobInterestButtons } from "@/components/job-interest-buttons";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -130,6 +131,10 @@ export function JobDetailPanel({
     enabled: jobId !== "",
   });
 
+  const invalidateDetail = (): void => {
+    void detailQuery.refetch();
+  };
+
   if (detailQuery.isLoading) {
     return (
       <div className="space-y-4 px-6 py-4">
@@ -202,18 +207,25 @@ export function JobDetailPanel({
             </p>
           ) : null}
         </div>
-        <button
-          type="button"
-          className="shrink-0 rounded p-1.5 text-muted-foreground transition-colors hover:text-foreground"
-          onClick={() => toggleBookmark(job.job_id)}
-          aria-label={
-            isBookmarked(job.job_id) ? "Remove bookmark" : "Bookmark"
-          }
-        >
-          <Bookmark
-            className={`size-5 ${isBookmarked(job.job_id) ? "fill-current text-foreground" : ""}`}
+        <div className="flex shrink-0 flex-col items-end gap-2">
+          <JobInterestButtons
+            jobId={job.job_id}
+            userInterest={job.user_interest}
+            onChanged={invalidateDetail}
           />
-        </button>
+          <button
+            type="button"
+            className="rounded p-1.5 text-muted-foreground transition-colors hover:text-foreground"
+            onClick={() => toggleBookmark(job.job_id)}
+            aria-label={
+              isBookmarked(job.job_id) ? "Remove bookmark" : "Bookmark"
+            }
+          >
+            <Bookmark
+              className={`size-5 ${isBookmarked(job.job_id) ? "fill-current text-foreground" : ""}`}
+            />
+          </button>
+        </div>
       </div>
 
       {metaParts.length > 0 ? (

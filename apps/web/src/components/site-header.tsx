@@ -111,12 +111,14 @@ export function SiteHeader({
 
   const appLinks: readonly NavLink[] = onboarding.showJobsTab
     ? [
+        { kind: "internal", href: "/home", label: "Home" },
         { kind: "internal", href: "/graph", label: "Graph" },
         { kind: "internal", href: "/jobs", label: "Jobs" },
         { kind: "internal", href: "/sharing", label: "Sharing" },
         ...(isAdmin ? [{ kind: "internal" as const, href: "/admin", label: "Admin" }] : []),
       ]
     : [
+        { kind: "internal", href: "/home", label: "Home" },
         { kind: "internal", href: "/graph", label: "Graph" },
         { kind: "internal", href: "/sharing", label: "Sharing" },
         ...(isAdmin ? [{ kind: "internal" as const, href: "/admin", label: "Admin" }] : []),

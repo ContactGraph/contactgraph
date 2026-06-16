@@ -1,10 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   getCoreRowModel,
-  getFilteredRowModel,
   getSortedRowModel,
   useReactTable,
   type ColumnDef,
@@ -24,6 +23,7 @@ import {
   CompactTableShell,
 } from "@/components/data-table/compact-table";
 import { JobDetailPanel } from "@/components/job-detail-panel";
+import { JobInterestButtons } from "@/components/job-interest-buttons";
 import { JobPipelineStatus } from "@/components/job-pipeline-status";
 import { OrgLogo } from "@/components/org-logo";
 import { JobSetupCards } from "@/components/setup/job-setup-cards";
@@ -110,11 +110,26 @@ function MatchBadge({
   );
 }
 
-type JobFilter = "bookmarked" | "relevant" | "all";
+type JobFilter = "new" | "liked" | "dismissed" | "bookmarked" | "all";
+
+function jobMatchesSearch(job: OrgJobItem, query: string): boolean {
+  if (!query) return true;
+  const haystack: string = [
+    job.title,
+    job.org_name,
+    job.location,
+    job.department,
+    job.remote_status,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return haystack.includes(query);
+}
 
 function JobsTable() {
   const [search, setSearch] = useState<string>("");
-  const [filter, setFilter] = useState<JobFilter>("relevant");
+  const [filter, setFilter] = useState<JobFilter>("new");
   const [sorting, setSorting] = useState<SortingState>([
     { id: "match", desc: true },
   ]);
@@ -125,6 +140,12 @@ function JobsTable() {
     useState<boolean>(false);
   const { bookmarks, toggle: toggleBookmark, isBookmarked } = useJobBookmarks();
   const jobEvents = useJobEvents();
+
+  const [hiddenJobs, setHiddenJobs] = useState<ReadonlySet<string>>(new Set());
+
+  const hideJob = useCallback((jobId: string): void => {
+    setHiddenJobs((prev) => new Set([...prev, jobId]));
+  }, []);
 
   const jobsQuery = useQuery({
     queryKey: ["flat-jobs"],
@@ -141,21 +162,51 @@ function JobsTable() {
 
   const data: FlatJobListResult | undefined = jobsQuery.data;
   const loading: boolean = jobsQuery.isLoading;
-  const hasScores: boolean = useMemo(
-    () => (data?.jobs ?? []).some((j) => j.match_score !== null),
-    [data?.jobs],
+
+  const allJobs: OrgJobItem[] = data?.jobs ?? [];
+  const searchQuery: string = search.trim().toLowerCase();
+  const isSearching: boolean = searchQuery.length > 0;
+
+  const newCount: number = useMemo(
+    () =>
+      allJobs.filter(
+        (j) => j.is_relevant === true && j.user_interest === null,
+      ).length,
+    [allJobs],
+  );
+  const likedCount: number = useMemo(
+    () => allJobs.filter((j) => j.user_interest === "interested").length,
+    [allJobs],
+  );
+  const dismissedCount: number = useMemo(
+    () => allJobs.filter((j) => j.user_interest === "dismissed").length,
+    [allJobs],
   );
 
-  const filteredJobs: OrgJobItem[] = useMemo(() => {
-    const all: OrgJobItem[] = data?.jobs ?? [];
+  const tabFilteredJobs: OrgJobItem[] = useMemo(() => {
+    const base: OrgJobItem[] = allJobs.filter((j) => !hiddenJobs.has(j.job_id));
     if (filter === "bookmarked") {
-      return all.filter((j) => bookmarks.has(j.job_id));
+      return base.filter((j) => bookmarks.has(j.job_id));
     }
-    if (filter === "relevant" && hasScores) {
-      return all.filter((j) => j.is_relevant === true);
+    if (filter === "new") {
+      return base.filter(
+        (j) => j.is_relevant === true && j.user_interest === null,
+      );
     }
-    return all;
-  }, [data?.jobs, filter, hasScores, bookmarks]);
+    if (filter === "liked") {
+      return base.filter((j) => j.user_interest === "interested");
+    }
+    if (filter === "dismissed") {
+      return base.filter((j) => j.user_interest === "dismissed");
+    }
+    return base;
+  }, [allJobs, filter, bookmarks, hiddenJobs]);
+
+  const filteredJobs: OrgJobItem[] = useMemo(() => {
+    const base: OrgJobItem[] = isSearching ? allJobs : tabFilteredJobs;
+    if (!isSearching) return base;
+    return base.filter((job) => jobMatchesSearch(job, searchQuery));
+  }, [allJobs, tabFilteredJobs, isSearching, searchQuery]);
 
   const columns: ColumnDef<OrgJobItem>[] = useMemo(
     () => [
@@ -286,6 +337,22 @@ function JobsTable() {
         meta: { width: "w-[4rem] sm:w-[6rem]" },
       },
       {
+        id: "interest",
+        header: () => (
+          <span className="truncate text-xs font-medium">Interest</span>
+        ),
+        enableSorting: false,
+        cell: ({ row }) => (
+          <JobInterestButtons
+            jobId={row.original.job_id}
+            userInterest={row.original.user_interest}
+            compact
+            onChanged={() => hideJob(row.original.job_id)}
+          />
+        ),
+        meta: { width: "w-[4.5rem] sm:w-[5.5rem]" },
+      },
+      {
         id: "bookmark",
         header: "",
         enableSorting: false,
@@ -329,34 +396,17 @@ function JobsTable() {
         meta: { width: "w-[2rem]", stickyRight: true, hiddenClass: "hidden sm:table-cell" },
       },
     ],
-    [toggleBookmark, isBookmarked, scoringActive],
+    [toggleBookmark, isBookmarked, scoringActive, hideJob],
   );
 
   const table = useReactTable({
     data: filteredJobs,
     columns,
-    state: { sorting, globalFilter: search },
+    state: { sorting },
     onSortingChange: setSorting,
-    onGlobalFilterChange: setSearch,
-    globalFilterFn: (row, _columnId, filterValue: string) => {
-      const query: string = filterValue.trim().toLowerCase();
-      if (!query) return true;
-      const job: OrgJobItem = row.original;
-      const haystack: string = [
-        job.title,
-        job.org_name,
-        job.location,
-        job.department,
-        job.remote_status,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-      return haystack.includes(query);
-    },
+    getRowId: (row: OrgJobItem) => row.job_id,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
   });
 
   const selectedJob: OrgJobItem | undefined = (data?.jobs ?? []).find(
@@ -388,11 +438,17 @@ function JobsTable() {
 
   const jobsCountLabel: string = loading
     ? "Loading…"
-    : `${visibleCount} of ${totalCount} jobs${
-        scoringActive && filter === "relevant"
-          ? " · more jobs are still being ranked"
-          : ""
-      }`;
+    : isSearching
+      ? `${visibleCount} matching job${visibleCount === 1 ? "" : "s"} across all categories`
+      : filter === "new"
+        ? `${visibleCount} new job${visibleCount === 1 ? "" : "s"}`
+        : filter === "liked"
+          ? `${visibleCount} liked job${visibleCount === 1 ? "" : "s"}`
+          : filter === "dismissed"
+            ? `${visibleCount} dismissed job${visibleCount === 1 ? "" : "s"}`
+            : `${visibleCount} of ${totalCount} jobs${
+                scoringActive ? " · more jobs are still being ranked" : ""
+              }`;
 
   return (
     <div className="space-y-2 sm:space-y-3">
@@ -443,10 +499,43 @@ function JobsTable() {
         />
 
         <div className="inline-flex h-8 items-center overflow-hidden rounded-md border text-xs">
+          <button
+            type="button"
+            className={`h-full px-3 transition-colors ${
+              filter === "new"
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-muted"
+            }`}
+            onClick={() => setFilter("new")}
+          >
+            New ({newCount})
+          </button>
+          <button
+            type="button"
+            className={`h-full border-l px-3 transition-colors ${
+              filter === "liked"
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-muted"
+            }`}
+            onClick={() => setFilter("liked")}
+          >
+            Liked ({likedCount})
+          </button>
+          <button
+            type="button"
+            className={`h-full border-l px-3 transition-colors ${
+              filter === "dismissed"
+                ? "bg-primary text-primary-foreground"
+                : "hover:bg-muted"
+            }`}
+            onClick={() => setFilter("dismissed")}
+          >
+            Dismissed ({dismissedCount})
+          </button>
           {bookmarks.size > 0 ? (
             <button
               type="button"
-              className={`h-full px-3 transition-colors ${
+              className={`h-full border-l px-3 transition-colors ${
                 filter === "bookmarked"
                   ? "bg-primary text-primary-foreground"
                   : "hover:bg-muted"
@@ -454,19 +543,6 @@ function JobsTable() {
               onClick={() => setFilter("bookmarked")}
             >
               Bookmarked ({bookmarks.size})
-            </button>
-          ) : null}
-          {hasScores ? (
-            <button
-              type="button"
-              className={`h-full px-3 transition-colors ${bookmarks.size > 0 ? "border-l" : ""} ${
-                filter === "relevant"
-                  ? "bg-primary text-primary-foreground"
-                  : "hover:bg-muted"
-              }`}
-              onClick={() => setFilter("relevant")}
-            >
-              Relevant ({data?.total_relevant ?? 0})
             </button>
           ) : null}
           <button

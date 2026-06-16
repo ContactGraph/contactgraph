@@ -704,6 +704,7 @@ export interface OrgJobItem {
   shared_contact_count: number;
   shared_primary_contact_name: string | null;
   shared_primary_bridge_name: string | null;
+  user_interest: "interested" | "dismissed" | null;
 }
 
 export interface OrgJobsByCompany {
@@ -824,5 +825,68 @@ export interface AdminUserItem {
 
 export interface AdminUsersResult {
   users: AdminUserItem[];
+  message: string;
+}
+
+export interface NextStepActionLink {
+  label: string;
+  href: string;
+}
+
+export interface NextStepContactCandidate {
+  person_id: string;
+  display_name: string;
+  current_role: string | null;
+  phone: string | null;
+}
+
+export interface NextStepPayload {
+  unreviewed_job_count: number | null;
+  job_id: string | null;
+  job_title: string | null;
+  org_name: string | null;
+  job_url: string | null;
+  proposed_message: string | null;
+  contacts: NextStepContactCandidate[];
+  action_links: NextStepActionLink[];
+}
+
+export interface NextStepItem {
+  dedup_key: string;
+  kind: string;
+  status: "open" | "done" | "skipped";
+  title: string;
+  detail: string | null;
+  sort_rank: number;
+  job_id: string | null;
+  person_id: string | null;
+  org_id: string | null;
+  payload: NextStepPayload;
+}
+
+export interface NextStepsResult {
+  tasks: NextStepItem[];
+  message: string;
+}
+
+export interface UpdateTaskStatusRequest {
+  dedup_key: string;
+  status: "done" | "skipped";
+}
+
+export interface UpdateTaskStatusResult {
+  dedup_key: string;
+  status: "open" | "done" | "skipped";
+  message: string;
+}
+
+export interface SetJobInterestRequest {
+  job_id: string;
+  interest: "interested" | "dismissed";
+}
+
+export interface SetJobInterestResult {
+  job_id: string;
+  interest: "interested" | "dismissed";
   message: string;
 }

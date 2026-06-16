@@ -11,8 +11,11 @@ from contactsafe_core.contact_schemas import (
     JobDetailResult,
     ListOrgsResult,
     ListPeopleResult,
+    NextStepsResult,
     OrgDetailResult,
     PersonDetailResult,
+    SetJobInterestResult,
+    UpdateTaskStatusResult,
 )
 from contactsafe_core.enums import SourceType
 from contactsafe_core.schemas import (
@@ -388,6 +391,59 @@ def create_mcp_server(settings: Settings) -> FastMCP:
         lifespan: McpLifespanState = _require_lifespan(ctx)
         user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
         return await actions.dedup_persons(lifespan.app_context, user_id)
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def get_next_steps(
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> NextStepsResult:
+        """List recommended next steps for job seeking based on current progress."""
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.get_next_steps(lifespan.app_context, user_id)
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def update_task_status(
+        dedup_key: str,
+        status: str,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> UpdateTaskStatusResult:
+        """Mark a next-step task as done or skipped."""
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        if status not in {"done", "skipped"}:
+            return UpdateTaskStatusResult(
+                dedup_key=dedup_key,
+                status="open",
+                message="status must be 'done' or 'skipped'",
+            )
+        return await actions.update_task_status(
+            lifespan.app_context,
+            user_id,
+            dedup_key=dedup_key,
+            status=status,  # type: ignore[arg-type]
+        )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def set_job_interest(
+        job_id: str,
+        interest: str,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> SetJobInterestResult:
+        """Mark a job as interested or dismissed after reviewing it."""
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        if interest not in {"interested", "dismissed"}:
+            return SetJobInterestResult(
+                job_id=UUID(job_id),
+                interest="dismissed",
+                message="interest must be 'interested' or 'dismissed'",
+            )
+        return await actions.set_job_interest(
+            lifespan.app_context,
+            user_id,
+            job_id=UUID(job_id),
+            interest=interest,  # type: ignore[arg-type]
+        )
 
     return mcp
 

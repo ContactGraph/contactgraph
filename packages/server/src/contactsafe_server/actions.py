@@ -45,9 +45,12 @@ from contactsafe_core.contact_schemas import (
     JobPreferencesResult,
     JobTargetScope,
     ListOrgJobsResult,
+    NextStepsResult,
     NotificationPreferencesResult,
+    SetJobInterestResult,
     SetJobMonitorConfigRequest,
     SetJobTargetScopeRequest,
+    UpdateTaskStatusResult,
     UpdateOrgRequest,
     UpdatePersonRequest,
 )
@@ -1934,3 +1937,75 @@ async def set_notification_preferences(
         await db.commit()
 
     return await get_notification_preferences(ctx, user_id)
+
+
+async def get_next_steps(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> NextStepsResult:
+    if user_id is None:
+        return NextStepsResult(tasks=[], message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.next_steps_service import NextStepsService
+
+        service = NextStepsService(db)
+        return await service.get_next_steps(user_id)
+
+
+async def update_task_status(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    dedup_key: str,
+    status: Literal["done", "skipped"],
+) -> UpdateTaskStatusResult:
+    if user_id is None:
+        return UpdateTaskStatusResult(
+            dedup_key=dedup_key,
+            status="open",
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.next_steps_service import NextStepsService
+
+        service = NextStepsService(db)
+        try:
+            return await service.update_task_status(
+                user_id,
+                dedup_key=dedup_key,
+                status=status,
+            )
+        except ValueError as exc:
+            return UpdateTaskStatusResult(
+                dedup_key=dedup_key,
+                status="open",
+                message=str(exc),
+            )
+
+
+async def set_job_interest(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    job_id: UUID,
+    interest: Literal["interested", "dismissed"],
+) -> SetJobInterestResult:
+    if user_id is None:
+        return SetJobInterestResult(
+            job_id=job_id,
+            interest=interest,
+            message="Authentication required.",
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.next_steps_service import NextStepsService
+
+        service = NextStepsService(db)
+        try:
+            await service.set_job_interest(user_id, job_id=job_id, interest=interest)
+        except ValueError as exc:
+            return SetJobInterestResult(
+                job_id=job_id,
+                interest=interest,
+                message=str(exc),
+            )
+    return SetJobInterestResult(job_id=job_id, interest=interest, message="OK")
