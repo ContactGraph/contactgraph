@@ -51,12 +51,14 @@ export function CompactTableShell<TData>({
   emptyMessage,
   onRowClick,
   minWidth,
+  rowClassName,
 }: {
   table: Table<TData>;
   columnCount: number;
   emptyMessage: string;
   onRowClick?: (row: TData) => void;
   minWidth?: string;
+  rowClassName?: (row: TData) => string | undefined;
 }) {
   const rows: Row<TData>[] = table.getRowModel().rows;
 
@@ -123,6 +125,7 @@ export function CompactTableShell<TData>({
                 className={cn(
                   compactTableStyles.row,
                   onRowClick && "cursor-pointer",
+                  rowClassName?.(row.original),
                 )}
                 onClick={
                   onRowClick

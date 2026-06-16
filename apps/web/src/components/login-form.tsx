@@ -62,7 +62,7 @@ export function LoginForm() {
       if (result.status === "connected") {
         clearPollTimer();
         popupRef.current?.close();
-        router.push("/graph");
+        router.push("/home");
         router.refresh();
         return;
       }
@@ -106,7 +106,7 @@ export function LoginForm() {
         result.access_token &&
         result.refresh_token
       ) {
-        router.push("/graph");
+        router.push("/home");
         router.refresh();
         return;
       }

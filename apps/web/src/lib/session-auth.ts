@@ -27,7 +27,7 @@ export function applyAuthTokensToSession(
   tokens: AuthTokens,
 ): void {
   session.accessToken = tokens.accessToken;
-  if (tokens.refreshToken !== undefined) {
+  if (typeof tokens.refreshToken === "string" && tokens.refreshToken.length > 0) {
     session.refreshToken = tokens.refreshToken;
   }
   if (tokens.email !== undefined) {
