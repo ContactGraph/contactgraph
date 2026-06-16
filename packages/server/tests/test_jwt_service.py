@@ -64,6 +64,21 @@ def test_decode_rejects_refresh_token(jwt_service: JWTService) -> None:
         jwt_service.decode_token(token)
 
 
+def test_decode_refresh_token_round_trip(jwt_service: JWTService) -> None:
+    user_id: uuid.UUID = uuid.uuid4()
+    token: str = jwt_service.create_refresh_token(user_id, ["contactsafe:read"])
+    claims: dict[str, object] = jwt_service.decode_refresh_token(token)
+    assert claims["sub"] == str(user_id)
+    assert claims.get("typ") == "refresh"
+
+
+def test_decode_refresh_rejects_access_token(jwt_service: JWTService) -> None:
+    user_id: uuid.UUID = uuid.uuid4()
+    token: str = jwt_service.create_access_token(user_id, ["contactsafe:read"])
+    with pytest.raises(ValueError, match="Invalid or expired token"):
+        jwt_service.decode_refresh_token(token)
+
+
 def test_decode_rejects_unsubscribe_token(jwt_service: JWTService) -> None:
     user_id: uuid.UUID = uuid.uuid4()
     token: str = jwt_service.create_unsubscribe_token(user_id)
