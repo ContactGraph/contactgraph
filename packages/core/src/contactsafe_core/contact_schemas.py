@@ -592,6 +592,10 @@ class NextStepPayload(BaseModel):
     org_name: str | None = None
     job_url: str | None = None
     proposed_message: str | None = None
+    outreach_type: Literal["direct", "bridge"] | None = None
+    bridge_name: str | None = None
+    bridge_phone: str | None = None
+    target_contact_name: str | None = None
     contacts: list[NextStepContactCandidate] = Field(default_factory=list)
     action_links: list[NextStepActionLink] = Field(default_factory=list)
 

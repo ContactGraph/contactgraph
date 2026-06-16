@@ -37,8 +37,12 @@ function OutreachTaskDetails({
   message: string;
   onMessageChange: (value: string) => void;
 }) {
+  const isBridge: boolean = task.payload.outreach_type === "bridge";
   const contacts: NextStepContactCandidate[] = task.payload.contacts;
-  const selectedContact: NextStepContactCandidate | undefined = contacts[0];
+  const bridgeName: string | null = task.payload.bridge_name;
+  const bridgePhone: string | null = task.payload.bridge_phone;
+  const targetName: string | null = task.payload.target_contact_name;
+  const composePhone: string | null = isBridge ? bridgePhone : contacts[0]?.phone ?? null;
 
   const handleCopy = async (): Promise<void> => {
     try {
@@ -50,20 +54,31 @@ function OutreachTaskDetails({
   };
 
   const handleCompose = (): void => {
-    if (selectedContact?.phone === null || selectedContact?.phone === undefined) {
+    if (composePhone === null || composePhone === undefined) {
       void handleCopy();
       toast.message("No phone number on file — message copied instead");
       return;
     }
-    window.location.href = buildSmsHref(selectedContact.phone, message);
+    window.location.href = buildSmsHref(composePhone, message);
   };
 
   return (
     <div className="space-y-4 border-t border-border pt-4">
+      {isBridge && bridgeName !== null && targetName !== null ? (
+        <p className="text-sm text-muted-foreground">
+          Ask{" "}
+          <span className="font-medium text-foreground">{bridgeName}</span> to
+          introduce you to{" "}
+          <span className="font-medium text-foreground">{targetName}</span>
+          {task.payload.org_name ? ` at ${task.payload.org_name}` : null}.
+          {bridgePhone ? ` · ${bridgePhone}` : " · no phone"}
+        </p>
+      ) : null}
+
       {contacts.length > 0 ? (
         <div className="space-y-2">
           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            Suggested contacts
+            {isBridge ? "People at this company" : "Suggested contacts"}
           </p>
           <ul className="space-y-1">
             {contacts.map((contact) => (
@@ -75,7 +90,8 @@ function OutreachTaskDetails({
                   {contact.display_name}
                 </span>
                 {contact.current_role ? ` · ${contact.current_role}` : null}
-                {contact.phone ? ` · ${contact.phone}` : " · no phone"}
+                {!isBridge && contact.phone ? ` · ${contact.phone}` : null}
+                {!isBridge && !contact.phone ? " · no phone" : null}
               </li>
             ))}
           </ul>

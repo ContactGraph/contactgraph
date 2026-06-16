@@ -6,7 +6,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Literal, cast
 
-from sqlalchemy import select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import (
@@ -30,6 +30,7 @@ from contactsafe_server.db.models import (
     OrgList,
     OrgListMembership,
     Person,
+    PersonAlias,
     Source,
     User,
     UserJobFeedback,
@@ -37,6 +38,8 @@ from contactsafe_server.db.models import (
     UserPersonObservation,
     UserTask,
 )
+from contactsafe_server.services.contacts_service import ContactsService, PHONE_RELATIONSHIP
+from contactsafe_server.services.strong_tie_matcher import LINKEDIN_CONNECTIONS_RELATIONSHIP
 
 JOB_PROSPECTS_LIST_NAME: str = "Job Prospects"
 
@@ -75,6 +78,16 @@ class SetupState:
     @property
     def job_setup_complete(self) -> bool:
         return self.profile_complete and self.job_criteria_complete
+
+
+@dataclass(frozen=True, slots=True)
+class BridgeOutreachCandidate:
+    bridge_user_id: uuid.UUID
+    bridge_name: str
+    bridge_phone: str
+    target_person_id: uuid.UUID
+    target_display_name: str
+    target_role: str | None
 
 
 class NextStepsService:
@@ -222,20 +235,69 @@ class NextStepsService:
                 job.org_id,
                 viewer_person_id,
             )
+            outreach_type: Literal["direct", "bridge"] = "direct"
+            bridge_name: str | None = None
+            bridge_phone: str | None = None
+            target_contact_name: str | None = None
             primary_contact: NextStepContactCandidate | None = (
                 contacts[0] if contacts else None
             )
-            proposed_message: str = self._build_outreach_message(
-                job_title=job.title,
-                org_name=org.canonical_name,
-                contact=primary_contact,
-            )
+            proposed_message: str
+
+            if primary_contact is not None:
+                proposed_message = self._build_outreach_message(
+                    job_title=job.title,
+                    org_name=org.canonical_name,
+                    contact=primary_contact,
+                )
+                detail = "Send a text to someone in your network who works at this company."
+            else:
+                bridge_candidates: list[BridgeOutreachCandidate] = (
+                    await self._load_bridge_contacts(user_id, job.org_id, viewer_person_id)
+                )
+                if bridge_candidates:
+                    outreach_type = "bridge"
+                    primary_bridge: BridgeOutreachCandidate = bridge_candidates[0]
+                    bridge_name = primary_bridge.bridge_name
+                    bridge_phone = primary_bridge.bridge_phone
+                    target_contact_name = primary_bridge.target_display_name
+                    contacts = [
+                        NextStepContactCandidate(
+                            person_id=candidate.target_person_id,
+                            display_name=candidate.target_display_name,
+                            current_role=candidate.target_role,
+                            phone=None,
+                        )
+                        for candidate in bridge_candidates
+                    ]
+                    proposed_message = self._build_bridge_message(
+                        job_title=job.title,
+                        org_name=org.canonical_name,
+                        bridge_name=bridge_name,
+                        target_name=target_contact_name,
+                    )
+                    detail = (
+                        f"Ask {bridge_name} to introduce you to {target_contact_name} "
+                        f"at {org.canonical_name}."
+                    )
+                else:
+                    proposed_message = self._build_outreach_message(
+                        job_title=job.title,
+                        org_name=org.canonical_name,
+                        contact=None,
+                    )
+                    detail = "Send a text to someone in your network who works at this company."
+
             payload: dict[str, object] = {
                 "job_id": str(job.id),
                 "job_title": job.title,
                 "org_name": org.canonical_name,
                 "job_url": job.url,
                 "proposed_message": proposed_message,
+                "outreach_type": outreach_type,
+                "bridge_name": bridge_name,
+                "bridge_phone": bridge_phone,
+                "target_contact_name": target_contact_name,
                 "contacts": [contact.model_dump(mode="json") for contact in contacts],
                 "action_links": [
                     {"label": "View job", "href": job.url},
@@ -253,9 +315,6 @@ class NextStepsService:
             sort_rank: int = 100 + (100 - (match_score or 0))
 
             title: str = f"Reach out about {job.title} at {org.canonical_name}"
-            detail: str = (
-                "Send a text to someone in your network who works at this company."
-            )
             if existing is not None:
                 existing.title = title
                 existing.detail = detail
@@ -469,6 +528,13 @@ class NextStepsService:
                         org_name=self._payload_str(payload_data, "org_name"),
                         job_url=self._payload_str(payload_data, "job_url"),
                         proposed_message=self._payload_str(payload_data, "proposed_message"),
+                        outreach_type=self._payload_outreach_type(payload_data),
+                        bridge_name=self._payload_str(payload_data, "bridge_name"),
+                        bridge_phone=self._payload_str(payload_data, "bridge_phone"),
+                        target_contact_name=self._payload_str(
+                            payload_data,
+                            "target_contact_name",
+                        ),
                         contacts=contacts,
                         action_links=action_links,
                     ),
@@ -490,6 +556,7 @@ class NextStepsService:
                 & (UserPersonObservation.user_id == user_id),
             )
             .where(Person.current_org_id == org_id)
+            .where(func.array_length(Person.phone_numbers, 1) > 0)
             .order_by(Person.canonical_name.asc())
             .limit(10),
         )
@@ -510,6 +577,123 @@ class NextStepsService:
             )
         return candidates
 
+    async def _load_bridge_contacts(
+        self,
+        user_id: uuid.UUID,
+        org_id: uuid.UUID,
+        viewer_person_id: uuid.UUID | None,
+    ) -> list[BridgeOutreachCandidate]:
+        contacts_service: ContactsService = ContactsService(self._db)
+        member_ids: list[uuid.UUID] = await contacts_service._get_trust_member_ids(user_id)
+        if not member_ids:
+            return []
+
+        member_names: dict[uuid.UUID, str] = {}
+        for member_id in member_ids:
+            user_row: User | None = await self._db.get(User, member_id)
+            if user_row is not None:
+                member_names[member_id] = (
+                    user_row.display_name or user_row.google_profile_name or user_row.email
+                )
+
+        candidates: list[BridgeOutreachCandidate] = []
+        seen_targets: set[uuid.UUID] = set()
+
+        for member_id in member_ids:
+            bridge_phone: str | None = await self._get_bridge_phone(user_id, member_id)
+            if bridge_phone is None:
+                continue
+
+            private_ids: set[uuid.UUID] = await contacts_service._get_private_person_ids(
+                member_id,
+            )
+            sharer_name: str = member_names.get(member_id, "Someone")
+
+            person_filters: list[object] = []
+            if private_ids:
+                person_filters.append(~Person.id.in_(private_ids))
+            if viewer_person_id is not None:
+                person_filters.append(Person.id != viewer_person_id)
+
+            people_result = await self._db.execute(
+                select(Person)
+                .join(
+                    UserPersonObservation,
+                    (UserPersonObservation.person_id == Person.id)
+                    & (UserPersonObservation.user_id == member_id),
+                )
+                .where(
+                    Person.current_org_id == org_id,
+                    *person_filters,
+                    exists(
+                        select(UserPersonObservation.person_id).where(
+                            UserPersonObservation.user_id == member_id,
+                            UserPersonObservation.person_id == Person.id,
+                            UserPersonObservation.relationship_types.any(PHONE_RELATIONSHIP),
+                        ).correlate(Person),
+                    ),
+                    exists(
+                        select(UserPersonObservation.person_id).where(
+                            UserPersonObservation.user_id == member_id,
+                            UserPersonObservation.person_id == Person.id,
+                            UserPersonObservation.relationship_types.any(
+                                LINKEDIN_CONNECTIONS_RELATIONSHIP,
+                            ),
+                        ).correlate(Person),
+                    ),
+                    exists(
+                        select(PersonAlias.person_id).where(
+                            PersonAlias.person_id == Person.id,
+                            PersonAlias.kind == "linkedin_url",
+                        ).correlate(Person),
+                    ),
+                )
+                .order_by(Person.canonical_name.asc())
+                .limit(10),
+            )
+            for person in people_result.scalars().all():
+                if person.id in seen_targets:
+                    continue
+                seen_targets.add(person.id)
+                _, _, masked_display = ContactsService._mask_last_name(person.canonical_name)
+                candidates.append(
+                    BridgeOutreachCandidate(
+                        bridge_user_id=member_id,
+                        bridge_name=sharer_name,
+                        bridge_phone=bridge_phone,
+                        target_person_id=person.id,
+                        target_display_name=masked_display,
+                        target_role=person.current_role,
+                    ),
+                )
+                if len(candidates) >= 10:
+                    return candidates
+
+        return candidates
+
+    async def _get_bridge_phone(
+        self,
+        viewer_user_id: uuid.UUID,
+        bridge_user_id: uuid.UUID,
+    ) -> str | None:
+        bridge_user: User | None = await self._db.get(User, bridge_user_id)
+        if bridge_user is None or bridge_user.person_id is None:
+            return None
+
+        obs_result = await self._db.execute(
+            select(UserPersonObservation).where(
+                UserPersonObservation.user_id == viewer_user_id,
+                UserPersonObservation.person_id == bridge_user.person_id,
+            ),
+        )
+        if obs_result.scalar_one_or_none() is None:
+            return None
+
+        bridge_person: Person | None = await self._db.get(Person, bridge_user.person_id)
+        if bridge_person is None or not bridge_person.phone_numbers:
+            return None
+        return bridge_person.phone_numbers[0]
+
     @staticmethod
     def _build_outreach_message(
         *,
@@ -524,6 +708,22 @@ class NextStepsService:
         return (
             f"{greeting} I saw {org_name} is hiring for a {job_title} role and thought of you. "
             "Would you be open to a quick chat about what it's like working there?"
+        )
+
+    @staticmethod
+    def _build_bridge_message(
+        *,
+        job_title: str,
+        org_name: str,
+        bridge_name: str,
+        target_name: str,
+    ) -> str:
+        first_name: str = bridge_name.split()[0] if bridge_name.strip() else ""
+        greeting: str = f"Hi {first_name}," if first_name else "Hi,"
+        return (
+            f"{greeting} I saw {org_name} is hiring for a {job_title} role and noticed "
+            f"you know {target_name} there. Would you be willing to introduce us? "
+            "I'd love to learn more about the team."
         )
 
     @staticmethod
@@ -617,3 +817,12 @@ class NextStepsService:
     def _payload_str(payload: dict[str, object], key: str) -> str | None:
         value: object | None = payload.get(key)
         return value if isinstance(value, str) else None
+
+    @staticmethod
+    def _payload_outreach_type(
+        payload: dict[str, object],
+    ) -> Literal["direct", "bridge"] | None:
+        value: object | None = payload.get("outreach_type")
+        if value == "direct" or value == "bridge":
+            return value
+        return None
