@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   getCoreRowModel,
@@ -112,6 +112,23 @@ function MatchBadge({
 
 type JobFilter = "new" | "liked" | "dismissed" | "bookmarked" | "all";
 
+function useCountBump(value: number): boolean {
+  const prevRef = useRef<number>(value);
+  const [bump, setBump] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (value > prevRef.current) {
+      prevRef.current = value;
+      setBump(true);
+      const id: ReturnType<typeof setTimeout> = setTimeout(() => setBump(false), 800);
+      return () => clearTimeout(id);
+    }
+    prevRef.current = value;
+  }, [value]);
+
+  return bump;
+}
+
 function jobMatchesSearch(job: OrgJobItem, query: string): boolean {
   if (!query) return true;
   const haystack: string = [
@@ -141,10 +158,12 @@ function JobsTable() {
   const { bookmarks, toggle: toggleBookmark, isBookmarked } = useJobBookmarks();
   const jobEvents = useJobEvents();
 
-  const [hiddenJobs, setHiddenJobs] = useState<ReadonlySet<string>>(new Set());
+  const [hiddenJobs, setHiddenJobs] = useState<ReadonlyMap<string, "interested" | "dismissed">>(new Map());
 
-  const hideJob = useCallback((jobId: string): void => {
-    setHiddenJobs((prev) => new Set([...prev, jobId]));
+  const handleJobActed = useCallback((jobId: string, interest: "interested" | "dismissed"): void => {
+    setTimeout(() => {
+      setHiddenJobs((prev) => new Map([...prev, [jobId, interest]]));
+    }, 400);
   }, []);
 
   const jobsQuery = useQuery({
@@ -174,14 +193,27 @@ function JobsTable() {
       ).length,
     [allJobs],
   );
-  const likedCount: number = useMemo(
-    () => allJobs.filter((j) => j.user_interest === "interested").length,
-    [allJobs],
-  );
-  const dismissedCount: number = useMemo(
-    () => allJobs.filter((j) => j.user_interest === "dismissed").length,
-    [allJobs],
-  );
+  const likedCount: number = useMemo(() => {
+    let count: number = allJobs.filter((j) => j.user_interest === "interested").length;
+    for (const [jobId, interest] of hiddenJobs) {
+      if (interest !== "interested") continue;
+      const job: OrgJobItem | undefined = allJobs.find((j) => j.job_id === jobId);
+      if (job && job.user_interest !== "interested") count++;
+    }
+    return count;
+  }, [allJobs, hiddenJobs]);
+  const dismissedCount: number = useMemo(() => {
+    let count: number = allJobs.filter((j) => j.user_interest === "dismissed").length;
+    for (const [jobId, interest] of hiddenJobs) {
+      if (interest !== "dismissed") continue;
+      const job: OrgJobItem | undefined = allJobs.find((j) => j.job_id === jobId);
+      if (job && job.user_interest !== "dismissed") count++;
+    }
+    return count;
+  }, [allJobs, hiddenJobs]);
+
+  const likedBump: boolean = useCountBump(likedCount);
+  const dismissedBump: boolean = useCountBump(dismissedCount);
 
   const tabFilteredJobs: OrgJobItem[] = useMemo(() => {
     const base: OrgJobItem[] = allJobs.filter((j) => !hiddenJobs.has(j.job_id));
@@ -347,7 +379,7 @@ function JobsTable() {
             jobId={row.original.job_id}
             userInterest={row.original.user_interest}
             compact
-            onChanged={() => hideJob(row.original.job_id)}
+            onChanged={(interest) => handleJobActed(row.original.job_id, interest)}
           />
         ),
         meta: { width: "w-[4.5rem] sm:w-[5.5rem]" },
@@ -396,7 +428,7 @@ function JobsTable() {
         meta: { width: "w-[2rem]", stickyRight: true, hiddenClass: "hidden sm:table-cell" },
       },
     ],
-    [toggleBookmark, isBookmarked, scoringActive, hideJob],
+    [toggleBookmark, isBookmarked, scoringActive, handleJobActed],
   );
 
   const table = useReactTable({
@@ -512,22 +544,22 @@ function JobsTable() {
           </button>
           <button
             type="button"
-            className={`h-full border-l px-3 transition-colors ${
+            className={`h-full border-l px-3 transition-all duration-300 ${
               filter === "liked"
                 ? "bg-primary text-primary-foreground"
                 : "hover:bg-muted"
-            }`}
+            } ${likedBump && filter !== "liked" ? "bg-muted text-base font-semibold" : "text-xs"}`}
             onClick={() => setFilter("liked")}
           >
             Liked ({likedCount})
           </button>
           <button
             type="button"
-            className={`h-full border-l px-3 transition-colors ${
+            className={`h-full border-l px-3 transition-all duration-300 ${
               filter === "dismissed"
                 ? "bg-primary text-primary-foreground"
                 : "hover:bg-muted"
-            }`}
+            } ${dismissedBump && filter !== "dismissed" ? "bg-muted text-base font-semibold" : "text-xs"}`}
             onClick={() => setFilter("dismissed")}
           >
             Dismissed ({dismissedCount})

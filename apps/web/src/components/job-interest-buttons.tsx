@@ -16,7 +16,7 @@ export function JobInterestButtons({
   jobId: string;
   userInterest: "interested" | "dismissed" | null;
   compact?: boolean;
-  onChanged?: () => void;
+  onChanged?: (interest: "interested" | "dismissed") => void;
 }) {
   const { setJobInterest } = useNextSteps();
   const [optimistic, setOptimistic] = useState<"interested" | "dismissed" | null>(null);
@@ -33,7 +33,7 @@ export function JobInterestButtons({
     interest: "interested" | "dismissed",
   ): Promise<void> => {
     setOptimistic(interest);
-    onChanged?.();
+    onChanged?.(interest);
     try {
       await setJobInterest({ job_id: jobId, interest });
     } catch {

@@ -34,8 +34,6 @@ async function doRefresh(): Promise<boolean> {
   const refreshToken: string | undefined = session.refreshToken;
 
   if (!refreshToken) {
-    session.destroy();
-    await session.save();
     return false;
   }
 
@@ -56,10 +54,6 @@ async function doRefresh(): Promise<boolean> {
   }
 
   if (!response.ok) {
-    if (response.status >= 400 && response.status < 500) {
-      session.destroy();
-      await session.save();
-    }
     return false;
   }
 
