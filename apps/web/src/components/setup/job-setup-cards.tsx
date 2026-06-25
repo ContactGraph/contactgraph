@@ -113,6 +113,17 @@ export function JobSetupCards({
     },
   });
 
+  const dismissSuggestionMutation = useMutation({
+    mutationFn: () =>
+      proxyPost<JobPreferencesResult>("dismiss-job-preferences-suggestion"),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["job-preferences"] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
   const setJobMonitorConfigMutation = useMutation({
     mutationFn: (body: SetJobMonitorConfigRequest) =>
       proxyPost<JobMonitorConfigResult>("set-job-monitor-config", body),
@@ -180,6 +191,7 @@ export function JobSetupCards({
       setLinkedinProfileProcessing(false);
       if (linkedinProfileSource.sync_state === "complete") {
         setLinkedinProfileDialogOpen(false);
+        void queryClient.invalidateQueries({ queryKey: ["job-preferences"] });
       } else {
         setLinkedinProfileUploadError(
           "Could not read that PDF. Try re-exporting from LinkedIn.",
@@ -225,6 +237,36 @@ export function JobSetupCards({
     commuteMaxMinutes,
     commuteNote,
   ]);
+
+  const serverPreferencesText: string = jobPreferencesQuery.data?.text ?? "";
+  const hasExistingPreferencesText: boolean =
+    serverPreferencesText.trim().length > 0;
+  const suggestion: string | null = jobPreferencesQuery.data?.suggestion ?? null;
+  const suggestionPending: boolean =
+    jobPreferencesQuery.data?.suggestion_pending ?? false;
+  const prefilledSuggestionRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!suggestionPending || suggestion === null) return;
+    if (hasExistingPreferencesText) return;
+    if (prefilledSuggestionRef.current === suggestion) return;
+    if (preferencesText.trim() !== "") return;
+    prefilledSuggestionRef.current = suggestion;
+    setPreferencesText(suggestion);
+  }, [
+    suggestionPending,
+    suggestion,
+    hasExistingPreferencesText,
+    preferencesText,
+  ]);
+
+  const showSuggestionPrefillHint: boolean =
+    suggestionPending &&
+    suggestion !== null &&
+    !hasExistingPreferencesText &&
+    preferencesText === suggestion;
+  const showSuggestionReplaceBanner: boolean =
+    suggestionPending && suggestion !== null && hasExistingPreferencesText;
 
   const preferencesDirty: boolean = useMemo(() => {
     const serverText: string = jobPreferencesQuery.data?.text ?? "";
@@ -407,12 +449,43 @@ export function JobSetupCards({
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
+          {showSuggestionReplaceBanner && suggestion !== null ? (
+            <div className="space-y-2 rounded-md border border-primary/30 bg-primary/5 p-3">
+              <p className="text-xs font-medium text-foreground">
+                Suggested from your LinkedIn profile
+              </p>
+              <p className="text-sm text-muted-foreground">{suggestion}</p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={() => setPreferencesText(suggestion)}
+                >
+                  Use suggestion
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={dismissSuggestionMutation.isPending}
+                  onClick={() => dismissSuggestionMutation.mutate()}
+                >
+                  Keep current
+                </Button>
+              </div>
+            </div>
+          ) : null}
           <textarea
             className="min-h-[80px] w-full rounded-md border bg-background px-3 py-2 text-sm"
             placeholder="e.g. Senior backend engineer, distributed systems, Python or Go, remote or SF Bay Area."
             value={preferencesText}
             onChange={(e) => setPreferencesText(e.target.value)}
           />
+          {showSuggestionPrefillHint ? (
+            <p className="text-xs text-muted-foreground">
+              Suggested from your LinkedIn profile — edit it as you like, then
+              save.
+            </p>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2">
             <select
               className="rounded-md border bg-background px-2 py-1.5 text-sm"

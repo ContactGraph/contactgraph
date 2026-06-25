@@ -410,6 +410,126 @@ async def _llm_parse(text: str, settings: Settings) -> ParsedLinkedInProfile | N
         return None
 
 
+_SUGGESTION_SYSTEM_PROMPT: str = """\
+You help job seekers describe the kind of roles they want.
+Given a short summary of someone's most recent jobs and education, write a concise,
+first-person description of the roles they are likely looking for next.
+
+Rules:
+- 1 to 3 sentences, no more than ~60 words.
+- Mention the type of role and seniority, the domain/industry, and 1-3 key skills.
+- Build on their trajectory (assume they want a similar or slightly more senior role).
+- Plain prose only. No bullet points, no preamble, no quotes, no markdown.
+- Write as the candidate (e.g. "Senior backend roles in fintech, working with ...").
+"""
+
+
+def _experience_sort_key(exp: ParsedExperience) -> tuple[int, date]:
+    """Most-recent-first ordering: current roles first, then latest start date."""
+    current_rank: int = 0 if exp.is_current else 1
+    start: date = exp.start_date or date.min
+    return (current_rank, start)
+
+
+def select_recent_experiences(
+    experiences: list[ParsedExperience],
+    limit: int = 3,
+) -> list[ParsedExperience]:
+    ordered: list[ParsedExperience] = sorted(
+        experiences,
+        key=lambda exp: (_experience_sort_key(exp)[0], -_experience_sort_key(exp)[1].toordinal()),
+    )
+    return ordered[:limit]
+
+
+def _format_profile_for_suggestion(profile: ParsedLinkedInProfile) -> str:
+    lines: list[str] = []
+    if profile.headline:
+        lines.append(f"Headline: {profile.headline}")
+
+    recent: list[ParsedExperience] = select_recent_experiences(profile.experiences)
+    if recent:
+        lines.append("Recent roles:")
+        for exp in recent:
+            role: str = exp.title or "Role"
+            tenure: str = "current" if exp.is_current else (
+                str(exp.start_date.year) if exp.start_date else "past"
+            )
+            lines.append(f"- {role} at {exp.company} ({tenure})")
+
+    if profile.education:
+        latest_edu: ParsedEducation = max(
+            profile.education,
+            key=lambda edu: edu.end_year or edu.start_year or 0,
+        )
+        parts: list[str] = [latest_edu.school]
+        if latest_edu.degree:
+            parts.append(latest_edu.degree)
+        if latest_edu.field_of_study:
+            parts.append(latest_edu.field_of_study)
+        lines.append(f"Education: {', '.join(parts)}")
+
+    return "\n".join(lines)
+
+
+def _heuristic_suggestion(profile: ParsedLinkedInProfile) -> str | None:
+    recent: list[ParsedExperience] = select_recent_experiences(profile.experiences, limit=1)
+    if not recent or not recent[0].title:
+        return None
+    title: str = recent[0].title or ""
+    field: str | None = (
+        profile.education[0].field_of_study if profile.education else None
+    )
+    if field:
+        return f"Roles similar to {title}, ideally building on a background in {field}."
+    return f"Roles similar to {title}, continuing along my current career path."
+
+
+async def suggest_ideal_roles_text(
+    profile: ParsedLinkedInProfile,
+    settings: Settings,
+) -> str | None:
+    """Generate a suggested "ideal roles" blurb from a parsed profile.
+
+    Returns None when there is not enough profile data to make a suggestion.
+    Falls back to a simple heuristic when no LLM is configured or the call fails.
+    """
+    if not profile.experiences and not profile.headline:
+        return None
+
+    if not settings.openai_api_key:
+        return _heuristic_suggestion(profile)
+
+    context: str = _format_profile_for_suggestion(profile)
+    if not context.strip():
+        return _heuristic_suggestion(profile)
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as http:
+            response = await http.post(
+                f"{settings.openai_base_url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.openai_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": settings.openai_enrichment_model,
+                    "temperature": 0.3,
+                    "messages": [
+                        {"role": "system", "content": _SUGGESTION_SYSTEM_PROMPT},
+                        {"role": "user", "content": context},
+                    ],
+                },
+            )
+            response.raise_for_status()
+            content: str = content_from_chat_completion(json.loads(response.text))
+            suggestion: str = content.strip().strip('"')
+            return suggestion or _heuristic_suggestion(profile)
+    except Exception:
+        logger.exception("LLM ideal-roles suggestion failed, falling back to heuristic")
+        return _heuristic_suggestion(profile)
+
+
 async def parse_linkedin_profile_pdf(
     content_base64: str,
     settings: Settings,

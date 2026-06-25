@@ -1790,7 +1790,36 @@ async def get_job_preferences(
             commute_max_minutes=user.job_commute_max_minutes,
             commute_note=user.job_commute_note,
             target_scope=target_scope,
+            suggestion=user.job_preferences_suggestion,
+            suggestion_pending=user.job_preferences_suggestion_pending,
             classified_job_count=count,
+            message="OK",
+        )
+
+
+async def dismiss_job_preferences_suggestion(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> JobPreferencesResult:
+    if user_id is None:
+        return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.db.models import User
+
+        user: User | None = await db.get(User, user_id)
+        if user is None:
+            return JobPreferencesResult(text=None, classified_job_count=0, message="User not found.")
+        user.job_preferences_suggestion_pending = False
+        await db.commit()
+        return JobPreferencesResult(
+            text=user.job_preferences_text,
+            location_pref=user.job_location_pref,
+            location_city=user.job_location_city,
+            commute_max_minutes=user.job_commute_max_minutes,
+            commute_note=user.job_commute_note,
+            suggestion=user.job_preferences_suggestion,
+            suggestion_pending=False,
+            classified_job_count=0,
             message="OK",
         )
 
@@ -1817,6 +1846,7 @@ async def set_job_preferences(
         user.job_location_city = location_city.strip() if location_city else None
         user.job_commute_max_minutes = commute_max_minutes
         user.job_commute_note = commute_note.strip() if commute_note else None
+        user.job_preferences_suggestion_pending = False
         await db.commit()
 
     import asyncio
