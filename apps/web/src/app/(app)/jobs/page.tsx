@@ -16,6 +16,7 @@ import {
   Settings,
 } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 
 import {
   CompactCell,
@@ -145,12 +146,15 @@ function jobMatchesSearch(job: OrgJobItem, query: string): boolean {
 }
 
 function JobsTable() {
+  const searchParams = useSearchParams();
   const [search, setSearch] = useState<string>("");
   const [filter, setFilter] = useState<JobFilter>("new");
   const [sorting, setSorting] = useState<SortingState>([
     { id: "match", desc: true },
   ]);
-  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(
+    searchParams.get("job"),
+  );
   const [settingsOpen, setSettingsOpen] = useState<boolean>(false);
   const [settingsDirty, setSettingsDirty] = useState<boolean>(false);
   const [settingsDiscardOpen, setSettingsDiscardOpen] =

@@ -38,13 +38,6 @@ class DigestJobEntry:
 
 
 @dataclass(frozen=True, slots=True)
-class DigestCompanyGroup:
-    company_name: str
-    jobs: tuple[DigestJobEntry, ...]
-    contact_blurb: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
 class DigestBuildResult:
     jobs: tuple[DigestJobEntry, ...]
     total_new_matches: int
@@ -251,24 +244,8 @@ class JobDigestService:
                 blurbs[org_id] = blurb
         return blurbs
 
-    def _group_jobs_by_company(self, jobs: tuple[DigestJobEntry, ...]) -> list[DigestCompanyGroup]:
-        grouped: dict[str, list[DigestJobEntry]] = {}
-        blurbs: dict[str, str | None] = {}
-        order: list[str] = []
-        for job in jobs:
-            if job.company_name not in grouped:
-                grouped[job.company_name] = []
-                blurbs[job.company_name] = job.contact_blurb
-                order.append(job.company_name)
-            grouped[job.company_name].append(job)
-        return [
-            DigestCompanyGroup(
-                company_name=name,
-                jobs=tuple(grouped[name]),
-                contact_blurb=blurbs.get(name),
-            )
-            for name in order
-        ]
+    def _job_ui_url(self, job_id: uuid.UUID) -> str:
+        return f"{self._settings.effective_web_base_url}/jobs?job={job_id}"
 
     def _unsubscribe_url(self, user_id: uuid.UUID) -> str:
         if self._jwt is None:
@@ -282,7 +259,6 @@ class JobDigestService:
         user_id: uuid.UUID,
         digest: DigestBuildResult,
     ) -> str:
-        company_groups: list[DigestCompanyGroup] = self._group_jobs_by_company(digest.jobs)
         overflow_count: int = max(0, digest.total_new_matches - len(digest.jobs))
         job_count: int = digest.total_new_matches
         subject: str = (
@@ -290,14 +266,18 @@ class JobDigestService:
             if job_count == 1
             else f"{job_count} new job matches"
         )
+        web_base_url: str = self._settings.effective_web_base_url
+        jobs_with_urls: tuple[tuple[DigestJobEntry, str], ...] = tuple(
+            (job, self._job_ui_url(job.job_id)) for job in digest.jobs
+        )
         template = _templates.env.get_template("job_digest.html")
         return template.render(
             subject=subject,
             job_count=job_count,
-            company_groups=company_groups,
+            jobs=jobs_with_urls,
             overflow_count=overflow_count,
-            jobs_url=f"{self._settings.effective_web_base_url}/jobs",
-            profile_url=f"{self._settings.effective_web_base_url}/profile",
+            jobs_url=f"{web_base_url}/jobs",
+            profile_url=f"{web_base_url}/profile",
             unsubscribe_url=self._unsubscribe_url(user_id),
         )
 

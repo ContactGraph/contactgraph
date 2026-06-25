@@ -14,6 +14,8 @@ from contactsafe_server.config import Settings
 from contactsafe_server.db.models import Org, OrgJob, User, UserJobRelevance
 from contactsafe_server.services.email_service import EmailService
 from contactsafe_server.services.job_digest_service import (
+    DigestBuildResult,
+    DigestJobEntry,
     JobDigestService,
     digest_watermark,
     is_user_due_for_digest,
@@ -287,6 +289,90 @@ async def test_unsubscribe_user_sets_frequency_off(
     assert updated
     await db_session.refresh(db_monitored_user)
     assert db_monitored_user.job_digest_frequency == JobDigestFrequency.OFF
+
+
+def test_render_digest_html_uses_flat_table_with_job_deep_links(
+    digest_settings: Settings,
+    jwt_service: JWTService,
+) -> None:
+    user_id: uuid.UUID = uuid.uuid4()
+    job_a_id: uuid.UUID = uuid.uuid4()
+    job_b_id: uuid.UUID = uuid.uuid4()
+    classified_at: datetime = datetime(2026, 6, 2, tzinfo=UTC)
+    digest: DigestBuildResult = DigestBuildResult(
+        jobs=(
+            DigestJobEntry(
+                job_id=job_a_id,
+                org_id=uuid.uuid4(),
+                title="Backend Engineer",
+                company_name="Stripe",
+                location="Remote",
+                match_score=90,
+                url="https://jobs.example.com/a",
+                classified_at=classified_at,
+            ),
+            DigestJobEntry(
+                job_id=job_b_id,
+                org_id=uuid.uuid4(),
+                title="Platform Engineer",
+                company_name="Acme Corp",
+                location="San Francisco",
+                match_score=75,
+                url="https://jobs.example.com/b",
+                classified_at=classified_at,
+                contact_blurb="Phil T.",
+            ),
+        ),
+        total_new_matches=2,
+    )
+
+    service = JobDigestService(
+        None,  # type: ignore[arg-type]
+        digest_settings,
+        jwt_service=jwt_service,
+    )
+    html: str = service.render_digest_html(user_id=user_id, digest=digest)
+
+    assert "Backend Engineer" in html
+    assert "Platform Engineer" in html
+    assert f"http://testweb/jobs?job={job_a_id}" in html
+    assert f"http://testweb/jobs?job={job_b_id}" in html
+    assert "View all jobs" in html
+    assert "<table" in html
+    assert 'class="company"' not in html
+    assert 'class="job"' not in html
+    assert "You know Phil T." in html
+    assert html.count(f"http://testweb/jobs?job={job_a_id}") >= 4
+
+
+async def test_render_digest_html_integration_with_db(
+    postgres_digest_schema_ready: None,
+    db_session: AsyncSession,
+    db_monitored_user: User,
+    digest_settings: Settings,
+    jwt_service: JWTService,
+) -> None:
+    db_monitored_user.job_digest_last_sent_at = datetime(2026, 6, 1, tzinfo=UTC)
+    await db_session.flush()
+    job_a = await _seed_relevant_job(
+        db_session,
+        user=db_monitored_user,
+        title="Backend Engineer",
+        match_score=90,
+        classified_at=datetime(2026, 6, 2, tzinfo=UTC),
+        company_name="Stripe",
+    )
+
+    service = JobDigestService(
+        db_session,
+        digest_settings,
+        jwt_service=jwt_service,
+    )
+    digest = await service.build_digest(db_monitored_user.id)
+    assert digest is not None
+    html: str = service.render_digest_html(user_id=db_monitored_user.id, digest=digest)
+
+    assert f"http://testweb/jobs?job={job_a.id}" in html
 
 
 def test_email_service_noop_without_api_key(digest_settings: Settings) -> None:
