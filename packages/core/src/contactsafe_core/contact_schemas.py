@@ -484,6 +484,8 @@ class JobPreferencesResult(BaseModel):
     commute_max_minutes: int | None = None
     commute_note: str | None = None
     target_scope: JobTargetScope | None = None
+    suggestion: str | None = None
+    suggestion_pending: bool = False
     classified_job_count: int = 0
     message: str
 

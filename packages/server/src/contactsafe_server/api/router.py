@@ -1003,6 +1003,14 @@ async def api_set_job_preferences(
     )
 
 
+@router.post("/dismiss-job-preferences-suggestion", response_model=JobPreferencesResult)
+async def api_dismiss_job_preferences_suggestion(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> JobPreferencesResult:
+    return await actions.dismiss_job_preferences_suggestion(ctx, user_id)
+
+
 @router.post("/set-job-target-scope", response_model=JobPreferencesResult)
 async def api_set_job_target_scope(
     ctx: Ctx,

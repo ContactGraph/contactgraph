@@ -23,6 +23,7 @@ from contactsafe_server.services.linkedin_connections_parser import (
 from contactsafe_server.services.linkedin_profile_parser import (
     ParsedLinkedInProfile,
     parse_linkedin_profile_pdf,
+    suggest_ideal_roles_text,
 )
 from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
 from contactsafe_server.services.phone_contacts_parser import (
@@ -519,6 +520,11 @@ class FileUploadImportService:
                 contributor_source_id=source_id,
                 confidence=0.9,
             )
+
+        suggestion: str | None = await suggest_ideal_roles_text(profile, self._settings)
+        if suggestion:
+            user.job_preferences_suggestion = suggestion
+            user.job_preferences_suggestion_pending = True
 
         recompute = PersonProfileRecompute(self._db)
         await recompute.recompute_persons([person.id])

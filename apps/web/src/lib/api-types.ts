@@ -777,6 +777,8 @@ export interface JobPreferencesResult {
   commute_max_minutes: number | null;
   commute_note: string | null;
   target_scope: JobTargetScopePayload | null;
+  suggestion: string | null;
+  suggestion_pending: boolean;
   classified_job_count: number;
   message: string;
 }

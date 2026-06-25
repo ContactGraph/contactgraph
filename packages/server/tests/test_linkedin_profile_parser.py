@@ -9,11 +9,20 @@ from datetime import date
 import pytest
 from pypdf import PdfWriter
 
+from contactsafe_server.config import Settings, get_settings
 from contactsafe_server.services.linkedin_profile_parser import (
+    ParsedEducation,
+    ParsedExperience,
     ParsedLinkedInProfile,
     _heuristic_parse,
     _parse_month_year,
+    select_recent_experiences,
+    suggest_ideal_roles_text,
 )
+
+
+def _settings_without_llm() -> Settings:
+    return get_settings().model_copy(update={"openai_api_key": None})
 
 
 def _make_pdf(text: str) -> str:
@@ -102,6 +111,40 @@ def test_heuristic_parse_linkedin_company_first_format() -> None:
     assert result.experiences[0].company == "BigCo"
     assert result.experiences[0].title == "Senior Engineer"
     assert result.experiences[1].title == "Engineer"
+
+
+def test_select_recent_experiences_orders_current_first() -> None:
+    experiences: list[ParsedExperience] = [
+        ParsedExperience(company="Old", title="Junior", start_date=date(2015, 1, 1)),
+        ParsedExperience(company="Now", title="Lead", is_current=True),
+        ParsedExperience(company="Mid", title="Senior", start_date=date(2019, 1, 1)),
+    ]
+    ordered: list[ParsedExperience] = select_recent_experiences(experiences, limit=2)
+    assert [exp.company for exp in ordered] == ["Now", "Mid"]
+
+
+@pytest.mark.asyncio
+async def test_suggest_ideal_roles_heuristic_without_llm() -> None:
+    profile = ParsedLinkedInProfile(
+        experiences=[
+            ParsedExperience(company="Acme", title="Staff Engineer", is_current=True),
+        ],
+        education=[ParsedEducation(school="MIT", field_of_study="Computer Science")],
+    )
+    suggestion: str | None = await suggest_ideal_roles_text(
+        profile, _settings_without_llm()
+    )
+    assert suggestion is not None
+    assert "Staff Engineer" in suggestion
+    assert "Computer Science" in suggestion
+
+
+@pytest.mark.asyncio
+async def test_suggest_ideal_roles_returns_none_for_empty_profile() -> None:
+    suggestion: str | None = await suggest_ideal_roles_text(
+        ParsedLinkedInProfile(), _settings_without_llm()
+    )
+    assert suggestion is None
 
 
 def test_heuristic_parse_experience_dates() -> None:

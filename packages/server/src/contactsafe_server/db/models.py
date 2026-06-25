@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -49,6 +50,10 @@ class User(Base):
     )
     job_monitor_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     job_preferences_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_preferences_suggestion: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_preferences_suggestion_pending: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     job_location_pref: Mapped[str | None] = mapped_column(Text, nullable=True)
     job_location_city: Mapped[str | None] = mapped_column(Text, nullable=True)
     job_commute_max_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
