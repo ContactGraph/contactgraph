@@ -91,7 +91,7 @@ export function SiteHeader({
 }) {
   const pathname: string = usePathname();
   const headerRef = useRef<HTMLElement>(null);
-  const onboarding = useOnboardingPhase();
+  const onboarding = useOnboardingPhase({ enabled: email !== null });
 
   const profileQuery = useQuery({
     queryKey: ["user-profile"],

@@ -45,33 +45,51 @@ export interface OnboardingPhaseState {
   orgEnrichmentProgress: OrgEnrichmentProgress | null;
 }
 
-export function useOnboardingPhase(): OnboardingPhaseState {
-  useGraphEvents();
+export interface UseOnboardingPhaseOptions {
+  /**
+   * When false, no authenticated queries or event streams run. Use this for
+   * shared components (e.g. the site header) that also render for logged-out
+   * visitors — otherwise the proxy calls 401 and force a redirect to /login.
+   */
+  readonly enabled?: boolean;
+}
+
+export function useOnboardingPhase(
+  options?: UseOnboardingPhaseOptions,
+): OnboardingPhaseState {
+  const enabled: boolean = options?.enabled ?? true;
+
+  useGraphEvents(enabled);
 
   const sourcesQuery = useQuery({
     queryKey: ["sources"],
     queryFn: () => proxyPost<ListSourcesResult>("list-sources"),
+    enabled,
   });
 
   const orgListsQuery = useQuery({
     queryKey: ["org-lists"],
     queryFn: () => proxyPost<ListOrgListsResult>("list-org-lists"),
+    enabled,
   });
 
   const jobPreferencesQuery = useQuery({
     queryKey: ["job-preferences"],
     queryFn: () => proxyPost<JobPreferencesResult>("get-job-preferences"),
+    enabled,
   });
 
   const jobMonitorConfigQuery = useQuery({
     queryKey: ["job-monitor-config"],
     queryFn: () => proxyPost<JobMonitorConfigResult>("get-job-monitor-config"),
+    enabled,
   });
 
   const orgEnrichmentQuery = useQuery({
     queryKey: ["org-enrichment-status"],
     queryFn: () =>
       proxyPost<OrgEnrichmentStatusResult>("get-org-enrichment-status"),
+    enabled,
   });
 
   const sources = sourcesQuery.data?.sources ?? [];

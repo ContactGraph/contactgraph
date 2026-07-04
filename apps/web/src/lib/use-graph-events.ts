@@ -95,10 +95,14 @@ function handleGraphEvent(
   }
 }
 
-export function useGraphEvents(): void {
+export function useGraphEvents(enabled: boolean = true): void {
   const queryClient = useQueryClient();
 
   useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     queryClientRef.current = queryClient;
     subscriberCount += 1;
 
@@ -136,5 +140,5 @@ export function useGraphEvents(): void {
         queryClientRef.current = null;
       }
     };
-  }, [queryClient]);
+  }, [queryClient, enabled]);
 }
