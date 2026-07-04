@@ -76,8 +76,8 @@ type NavLink =
   | { kind: "external"; href: string; label: string };
 
 const marketingLinks: readonly NavLink[] = [
+  { kind: "internal", href: "/mcp", label: "MCP" },
   { kind: "external", href: `${API_BASE}/skill.md`, label: "Skill" },
-  { kind: "external", href: `${API_BASE}/mcp`, label: "MCP" },
   { kind: "internal", href: "/blog", label: "Blog" },
   { kind: "internal", href: "/manifesto", label: "Manifesto" },
 ];

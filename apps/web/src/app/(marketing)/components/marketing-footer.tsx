@@ -5,6 +5,10 @@ export function MarketingFooter() {
     <footer className="border-t border-border px-5 py-4 text-sm text-muted-foreground">
       <div>© ContactGraph</div>
       <div className="mt-3 text-foreground">
+        <a href="/mcp" className="no-underline hover:underline">
+          MCP Server
+        </a>
+        {" | "}
         <a href="https://api.contactgraph.ai/skill.md" className="no-underline hover:underline">
           Skill
         </a>

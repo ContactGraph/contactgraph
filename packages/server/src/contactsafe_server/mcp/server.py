@@ -161,9 +161,10 @@ def create_mcp_server(settings: Settings) -> FastMCP:
         content: str,
         ctx: Context[Any, Any, Any] | None = None,
     ) -> UploadSourceResult:
-        """Upload phone contacts (vCard/CSV) or LinkedIn Connections.csv.
+        """Upload phone contacts (vCard/CSV), LinkedIn Connections.csv, or a LinkedIn profile.
 
-        source_type: phone_contacts_upload or linkedin_connections_upload.
+        source_type: phone_contacts_upload, linkedin_connections_upload, or
+        linkedin_profile_upload.
         content: raw file text. Schedules background import automatically.
         """
         lifespan: McpLifespanState = _require_lifespan(ctx)
