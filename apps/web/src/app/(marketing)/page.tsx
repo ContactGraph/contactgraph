@@ -136,8 +136,6 @@ function SampleSearchPanel() {
 }
 
 export default function HomePage() {
-  const mcpPath = `${API_BASE}/mcp`;
-
   return (
     <main className="flex-1">
       {/* ABOVE THE FOLD — hero + proof artifact */}
@@ -289,8 +287,8 @@ export default function HomePage() {
           </div>
           <p className="mt-10 text-xs text-muted-foreground">
             ContactGraph also works as an MCP server for Claude, ChatGPT, and
-            Gemini (via <a href={mcpPath}>MCP</a>) and with terminal agents
-            (via <a href={`${API_BASE}/skill.md`}>skill.md</a>).
+            Gemini (see <Link href="/mcp">MCP setup</Link>) and with terminal
+            agents (via <a href={`${API_BASE}/skill.md`}>skill.md</a>).
           </p>
         </div>
       </section>

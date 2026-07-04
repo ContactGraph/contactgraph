@@ -10,9 +10,10 @@ Your phone contacts are your real professional network — but they're trapped o
 
 The current product focus is **job search**: discover relevant open roles at companies where you have warm connections. Other use cases (fundraising, recruiting, networking) are planned.
 
-**Production:** [https://www.contactgraph.ai](https://www.contactgraph.ai)
-**MCP endpoint:** `https://www.contactgraph.ai/mcp`
-**Agent skill file:** `https://www.contactgraph.ai/skill.md`
+**Product (web app):** [https://www.contactgraph.ai](https://www.contactgraph.ai)
+**API host:** `https://api.contactgraph.ai` (MCP, OAuth, and skill file are served here — `www` does not proxy these paths)
+**MCP endpoint:** `https://api.contactgraph.ai/mcp`
+**Agent skill file:** `https://api.contactgraph.ai/skill.md`
 
 ## Quick start for humans
 
@@ -20,7 +21,7 @@ The current product focus is **job search**: discover relevant open roles at com
 
 1. Claude.ai → **Customize** (top of left sidebar) → **Connectors** → **+** → **Add custom connector**
 2. **Name:** `ContactGraph`
-3. **Remote MCP server URL:** `https://www.contactgraph.ai/mcp`
+3. **Remote MCP server URL:** `https://api.contactgraph.ai/mcp`
 4. Leave Client ID / Secret empty (Dynamic Client Registration).
 5. Click **Connect** → sign in with Google → return to Claude.
 6. Start a **new chat**, enable the ContactGraph connector.
@@ -32,7 +33,7 @@ Claude uses redirect URI `https://claude.ai/api/mcp/auth_callback` — handled a
 
 ### OpenClaw
 
-[OpenClaw](https://docs.openclaw.ai) is a self-hosted AI agent gateway (WhatsApp, Telegram, Control UI, etc.). ContactGraph is a **remote Streamable HTTP MCP server** at `https://www.contactgraph.ai/mcp` with **OAuth 2.1** (same flow as Claude — dynamic client registration, Google sign-in).
+[OpenClaw](https://docs.openclaw.ai) is a self-hosted AI agent gateway (WhatsApp, Telegram, Control UI, etc.). ContactGraph is a **remote Streamable HTTP MCP server** at `https://api.contactgraph.ai/mcp` with **OAuth 2.1** (same flow as Claude — dynamic client registration, Google sign-in).
 
 You need two things: **MCP tools** (ContactGraph server + auth) and **agent instructions** (the skill file).
 
@@ -42,10 +43,10 @@ OpenClaw loads skills from `~/.openclaw/skills`. Copy the published skill so you
 
 ```bash
 mkdir -p ~/.openclaw/skills/contactgraph
-curl -s https://www.contactgraph.ai/skill.md -o ~/.openclaw/skills/contactgraph/SKILL.md
+curl -s https://api.contactgraph.ai/skill.md -o ~/.openclaw/skills/contactgraph/SKILL.md
 ```
 
-Alternatively, add `https://www.contactgraph.ai/skill.md` to the agent system prompt.
+Alternatively, add `https://api.contactgraph.ai/skill.md` to the agent system prompt.
 
 #### 2. Connect ContactGraph (pick one auth method)
 
@@ -68,7 +69,7 @@ Add to `~/.openclaw/openclaw.json`:
         "config": {
           "servers": {
             "contactgraph": {
-              "url": "https://www.contactgraph.ai/mcp",
+              "url": "https://api.contactgraph.ai/mcp",
               "auth": {
                 "scopes": ["contactsafe:read", "contactsafe:write"]
               }
@@ -90,7 +91,7 @@ Tools appear namespaced, e.g. `contactgraph__sync_source`, `contactgraph__query_
 If you already have a ContactGraph access token (from any MCP client that completed OAuth), register the server via CLI. OpenClaw substitutes `${CONTACTGRAPH_MCP_TOKEN}` from your environment at runtime:
 
 ```bash
-openclaw mcp set contactgraph '{"url":"https://www.contactgraph.ai/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${CONTACTGRAPH_MCP_TOKEN}"}}'
+openclaw mcp set contactgraph '{"url":"https://api.contactgraph.ai/mcp","transport":"streamable-http","headers":{"Authorization":"Bearer ${CONTACTGRAPH_MCP_TOKEN}"}}'
 export CONTACTGRAPH_MCP_TOKEN="your-access-token"
 openclaw mcp list
 ```
@@ -116,7 +117,7 @@ The [Gemini CLI](https://github.com/google-gemini/gemini-cli) is Google's open-s
 **Via CLI** (writes to `~/.gemini/settings.json`):
 
 ```bash
-gemini mcp add -s user --transport http contactgraph https://www.contactgraph.ai/mcp
+gemini mcp add -s user --transport http contactgraph https://api.contactgraph.ai/mcp
 ```
 
 **Or edit `~/.gemini/settings.json` directly:**
@@ -125,7 +126,7 @@ gemini mcp add -s user --transport http contactgraph https://www.contactgraph.ai
 {
   "mcpServers": {
     "contactgraph": {
-      "httpUrl": "https://www.contactgraph.ai/mcp"
+      "httpUrl": "https://api.contactgraph.ai/mcp"
     }
   }
 }
@@ -149,9 +150,9 @@ Verify with `/mcp` — you should see ContactGraph tools listed (namespaced as `
 
 #### 3. Teach the agent
 
-Paste `https://www.contactgraph.ai/skill.md` into your first message, or save it locally and `@`-reference it:
+Paste `https://api.contactgraph.ai/skill.md` into your first message, or save it locally and `@`-reference it:
 
-> Read https://www.contactgraph.ai/skill.md, then connect my Gmail via ContactGraph, sync, and tell me what investors I know.
+> Read https://api.contactgraph.ai/skill.md, then connect my Gmail via ContactGraph, sync, and tell me what investors I know.
 
 #### Gemini Enterprise (org admins)
 
@@ -159,12 +160,12 @@ If you use [Gemini Enterprise](https://cloud.google.com/gemini-enterprise) Agent
 
 | Field | Value |
 |-------|-------|
-| MCP Server URL | `https://www.contactgraph.ai/mcp` |
-| Authorization URL | `https://www.contactgraph.ai/oauth/authorize` |
-| Token URL | `https://www.contactgraph.ai/oauth/token` |
+| MCP Server URL | `https://api.contactgraph.ai/mcp` |
+| Authorization URL | `https://api.contactgraph.ai/oauth/authorize` |
+| Token URL | `https://api.contactgraph.ai/oauth/token` |
 | Scopes | `contactsafe:read contactsafe:write` |
 
-Gemini Enterprise requires a **pre-registered OAuth client** (not DCR). Register one via `POST https://www.contactgraph.ai/oauth/register` with redirect URI `https://vertexaisearch.cloud.google.com/oauth-redirect`, then enter the returned `client_id` (and `client_secret` if applicable) in the data store config. Enable actions on the data store, connect it to your agent, and authorize Gemini Enterprise when prompted.
+Gemini Enterprise requires a **pre-registered OAuth client** (not DCR). Register one via `POST https://api.contactgraph.ai/oauth/register` with redirect URI `https://vertexaisearch.cloud.google.com/oauth-redirect`, then enter the returned `client_id` (and `client_secret` if applicable) in the data store config. Enable actions on the data store, connect it to your agent, and authorize Gemini Enterprise when prompted.
 
 **Docs:** [Gemini CLI MCP servers](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md)
 
@@ -184,7 +185,7 @@ Business/Enterprise admins may need to enable **Create custom MCP connectors** u
 1. In Apps settings, click **Create app** (visible only in Developer Mode)
 2. Fill in:
    - **Name:** `ContactGraph`
-   - **MCP server URL:** `https://www.contactgraph.ai/mcp`
+   - **MCP server URL:** `https://api.contactgraph.ai/mcp`
    - **Authentication:** **OAuth**
    - Leave Client ID / Client Secret empty — ChatGPT registers via DCR automatically
 3. Check **I trust this application**
@@ -200,7 +201,7 @@ ChatGPT redirect URIs (`https://chatgpt.com/connector_platform_oauth_redirect` o
 2. From the **+** menu, choose **Developer mode** and select your ContactGraph app
 3. Prompt explicitly so ChatGPT picks the right tools:
 
-> Using ContactGraph only: read https://www.contactgraph.ai/skill.md, connect my Gmail if needed, run sync_source, wait for sync to complete, then tell me what VCs I know.
+> Using ContactGraph only: read https://api.contactgraph.ai/skill.md, connect my Gmail if needed, run sync_source, wait for sync to complete, then tell me what VCs I know.
 
 Write actions (`sync_source`, `connect_source`) require confirmation by default — review each tool call before approving.
 
@@ -212,8 +213,8 @@ Write actions (`sync_source`, `connect_source`) require confirmation by default 
 
 ## Quick start for agents
 
-1. Read the skill file: **`https://www.contactgraph.ai/skill.md`**
-2. MCP server: **`https://www.contactgraph.ai/mcp`** (Streamable HTTP; trailing slash OK)
+1. Read the skill file: **`https://api.contactgraph.ai/skill.md`**
+2. MCP server: **`https://api.contactgraph.ai/mcp`** (Streamable HTTP; trailing slash OK)
 3. Authenticate via OAuth 2.1 Bearer token (see **MCP workflow** below).
 4. Typical flow:
    - `connect_source` (`source_type`: `google_mail`) → user opens `oauth_url` → Google consent
@@ -331,13 +332,13 @@ curl -i -X POST http://localhost:8000/mcp/ \
 
 ## Testing production
 
-Production runs on **Railway** at **https://www.contactgraph.ai** (`www` CNAME → Railway). Always use this URL for OAuth, MCP, and JWT audience — not the raw Railway hostname.
+Production runs on **Railway** as two services: the web app at **https://www.contactgraph.ai** and the API/MCP backend at **https://api.contactgraph.ai** (both CNAME → Railway). Always use **`api.contactgraph.ai`** for OAuth, MCP, and JWT audience — not `www` (which only serves the web app) and not the raw Railway hostname.
 
 ```bash
-curl -s https://www.contactgraph.ai/health
-curl -s https://www.contactgraph.ai/.well-known/oauth-protected-resource | jq
-curl -s https://www.contactgraph.ai/.well-known/oauth-authorization-server | jq
-curl -i -X POST https://www.contactgraph.ai/mcp/ \
+curl -s https://api.contactgraph.ai/health
+curl -s https://api.contactgraph.ai/.well-known/oauth-protected-resource | jq
+curl -s https://api.contactgraph.ai/.well-known/oauth-authorization-server | jq
+curl -i -X POST https://api.contactgraph.ai/mcp/ \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"initialize","params":{},"id":1}'
 # Expect 401 + WWW-Authenticate
@@ -347,7 +348,7 @@ After connecting Gmail, run **`sync_source`** then **`start_enrichment`** once (
 
 Railway fallback hostname: `https://contactgraph-production.up.railway.app` — avoid for OAuth/MCP clients.
 
-MCP Inspector production URL: `https://www.contactgraph.ai/mcp`
+MCP Inspector production URL: `https://api.contactgraph.ai/mcp`
 
 ---
 
@@ -457,7 +458,7 @@ Users can delete their account from the **Profile** page or via `POST /api/delet
 1. [Google Cloud Console](https://console.cloud.google.com/) → enable **Gmail API**, **People API**, and **Calendar API**
 2. OAuth client (Web) → redirect URIs:
    - Local: `http://localhost:8000/oauth/callback`
-   - Production: `https://www.contactgraph.ai/oauth/callback`
+   - Production: `https://api.contactgraph.ai/oauth/callback`
 3. Set `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI` in `.env` / Railway
 
 Requested scopes: `openid`, `email`, `profile`, `gmail.readonly` (Gmail source), `contacts.readonly` (Google Contacts, ingested during Gmail sync), `calendar.readonly` (Calendar source).
@@ -485,9 +486,9 @@ will force the API Dockerfile on the web app.
    - `DATABASE_URL` (Postgres connection string)
    - `TOKEN_ENCRYPTION_KEY` (Fernet key for OAuth token encryption)
    - `SESSION_SECRET`
-   - `BASE_URL=https://www.contactgraph.ai`
+   - `BASE_URL=https://api.contactgraph.ai`
    - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`
-   - `GOOGLE_REDIRECT_URI=https://www.contactgraph.ai/oauth/callback`
+   - `GOOGLE_REDIRECT_URI=https://api.contactgraph.ai/oauth/callback`
    - `JWT_SIGNING_KEY` (separate from `SESSION_SECRET`)
 4. **Optional env vars** (see `.env.example`):
    - `OPENAI_API_KEY`, `EXA_API_KEY`, `TAVILY_API_KEY`, `SERPER_API_KEY`
@@ -496,7 +497,7 @@ will force the API Dockerfile on the web app.
    - `ADMIN_EMAILS` (comma-separated, enables admin impersonation)
    - `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` (default 15)
 5. Google Cloud redirect URI must match production callback.
-6. CNAME **www.contactgraph.ai** → Railway.
+6. CNAME **api.contactgraph.ai** → this Railway API service (the web app uses **www.contactgraph.ai**).
 7. **Before deploying** schema changes, run migrations manually against production:
 
 ```bash
@@ -509,7 +510,7 @@ DATABASE_URL='postgresql+asyncpg://...' DATABASE_SSL=true make migrate
 
 1. Railway builds from `apps/web` using Railpack.
 2. **Required env vars:**
-   - `CONTACTGRAPH_API_URL` (e.g. `https://www.contactgraph.ai` — the API origin)
+   - `CONTACTGRAPH_API_URL` (e.g. `https://api.contactgraph.ai` — the API origin)
    - `SESSION_SECRET`
 
 ---
