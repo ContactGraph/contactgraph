@@ -19,7 +19,11 @@ async function proxyPost<T>(path: string, body?: unknown): Promise<T> {
         ? payload.error
         : `Request failed (${response.status})`;
 
-    if (response.status === 401 && !redirecting) {
+    if (
+      response.status === 401 &&
+      !redirecting &&
+      !window.location.pathname.startsWith("/login")
+    ) {
       redirecting = true;
       window.location.href = "/login";
     }
