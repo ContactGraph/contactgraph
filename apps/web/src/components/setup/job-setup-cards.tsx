@@ -445,7 +445,7 @@ export function JobSetupCards({
                 onChange={(e) => setCommuteMaxMinutes(e.target.value)}
               />
               <span className="text-sm text-muted-foreground">
-                max commute (min)
+                max commute (minutes)
               </span>
             </div>
           ) : null}
