@@ -14,5 +14,9 @@ export default async function AppLayout({
     redirect("/login");
   }
 
-  return <AppShell email={session.email}>{children}</AppShell>;
+  return (
+    <AppShell email={session.email} masqueradeAs={session.masqueradeAs} isAdmin={session.isAdmin === true}>
+      {children}
+    </AppShell>
+  );
 }

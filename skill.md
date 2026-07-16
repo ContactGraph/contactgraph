@@ -4,13 +4,23 @@ description: "Search a user's personal contact graph built from Gmail and Google
 compatibility: "Requires curl, jq, and internet access. Works with any agent that can make HTTP requests."
 ---
 
-# ContactGraph REST API
+# ContactGraph API
 
-Build and query a private contact graph from Gmail and Google Contacts via REST.
+Build and query a private contact graph from Gmail and Google Contacts.
 
-- Production: `https://www.contactgraph.ai`
+**Base URL** (set `BASE_URL` to one of these):
+
+- Production: `https://api.contactgraph.ai`
 - Local dev: `http://localhost:8000`
-- All endpoints: `POST` to `/api/*` with `Content-Type: application/json`
+
+The public web app is at `https://www.contactgraph.ai`, but the API, MCP server, OAuth, and this file are served by the API host (`api.contactgraph.ai`) — `www` does not proxy those paths.
+
+**Two interfaces, identical tool surface** — pick whichever your agent supports:
+
+- **MCP** (preferred for MCP-capable agents): Streamable HTTP server at `$BASE_URL/mcp` with OAuth 2.1 (dynamic client registration, Google sign-in). Call tools directly by name: `connect_source`, `sync_source`, `start_enrichment`, `get_enrichment_status`, `query_network`, etc. See the project README for per-client setup (Claude, ChatGPT, Gemini, OpenClaw).
+- **REST** (documented below): `POST $BASE_URL/api/<endpoint>` with `Content-Type: application/json`. Endpoint names are the kebab-case form of the MCP tool names (e.g. `connect_source` → `/api/connect-source`).
+
+The rest of this document describes the **REST** interface.
 
 ## Authentication
 
@@ -88,7 +98,16 @@ curl -s -X POST "$BASE_URL/api/sync-source" \
   -H "Content-Type: application/json" \
   -d "{\"source_id\":\"$CONTACTS_ID\"}"
 
-# 5. Query the graph
+# 5. (Recommended) enrich the graph — resolves employers, roles, and social profiles.
+#    Enrichment does NOT run automatically after sync; kick it off explicitly.
+curl -s -X POST "$BASE_URL/api/start-enrichment" \
+  -H "Authorization: Bearer $TOKEN"
+
+# Poll until state is "complete" (safe to query before then, results just improve as it runs)
+curl -s -X POST "$BASE_URL/api/get-enrichment-status" \
+  -H "Authorization: Bearer $TOKEN"
+
+# 6. Query the graph
 curl -s -X POST "$BASE_URL/api/query-network" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
@@ -121,7 +140,7 @@ Returns `scheduled`, `sync_state`, `source_id`, `message`. Poll `get-source-stat
 
 Upload file content as JSON (alternative to multipart). **Requires Bearer token.**
 
-- `source_type` — `"phone_contacts_upload"` or `"linkedin_connections_upload"`
+- `source_type` — `"phone_contacts_upload"`, `"linkedin_connections_upload"`, or `"linkedin_profile_upload"`
 - `filename` — original filename
 - `content` — file text content
 
@@ -152,6 +171,18 @@ Start or restart ingestion. Without `source_id`, syncs all Gmail sources for the
 - `source_id` (string, optional) — specific source to sync
 
 Returns `scheduled` (bool), `sync_state`, `source_id`, `message`.
+
+### POST /api/start-enrichment
+
+Kick off background enrichment (web search, employer resolution, role extraction) across the merged graph. **Does not run automatically after sync** — call it explicitly once ingestion has produced contacts. No body.
+
+Returns `run_id`, `scheduled` (bool), `state`, `message`.
+
+### POST /api/get-enrichment-status
+
+Poll enrichment progress. No body.
+
+Returns `state`, `contacts_total`, `contacts_enriched`, `started_at`, `completed_at`, `progress_message`, `error`, `message`.
 
 ### POST /api/query-network
 
@@ -209,7 +240,7 @@ After Google sync completes (or when a user asks about contacts not found in ema
 Call `connect_source` with `source_type="phone_contacts_upload"` (requires Bearer token). The response includes `upload_url` and `upload_instructions` to relay to the user.
 
 Upload options:
-- **Web UI:** send the user to `upload_url` (e.g. `https://www.contactgraph.ai/sources/upload/{source_id}`)
+- **Web UI:** send the user to `upload_url` (e.g. `https://www.contactgraph.ai/setup/upload/{source_id}`)
 - **API:** `POST /api/upload-contacts` with multipart form (`file`, `source_id`) or `POST /api/upload-source` with JSON (`source_type`, `filename`, `content`)
 
 ## Privacy

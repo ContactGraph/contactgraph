@@ -2,13 +2,13 @@ import logging
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.enums import SourceConnectionStatus, SourceType, SyncState
 from contactsafe_server.config import Settings
-from contactsafe_server.db.models import Person, Source, User, UserPersonObservation
+from contactsafe_server.db.models import EmploymentClaim, Person, Source, User, UserPersonObservation
 from contactsafe_server.services.claim_writer import (
     record_employment,
     record_person_attribute,
@@ -30,14 +30,44 @@ from contactsafe_server.services.phone_contacts_parser import (
     parse_phone_contacts_upload,
 )
 from contactsafe_server.services.crypto import TokenEncryptor
+from contactsafe_server.services.import_write_lock import user_import_write_lock
 from contactsafe_server.services.upload_payload_crypto import read_upload_payload
+from contactsafe_server.graph_event_publishers import publish_source_sync_update
+from contactsafe_server.services.user_org_observation_service import rebuild_user_org_observations
 from contactsafe_server.services.user_person_service import ensure_user_person
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 _LINKEDIN_UPLOAD_RELATIONSHIP_TYPES: list[str] = ["linkedin_connections_upload"]
 _PHONE_UPLOAD_RELATIONSHIP_TYPES: list[str] = ["phone_contacts_upload"]
-_LINKEDIN_IMPORT_COMMIT_BATCH: int = 100
+_IMPORT_PROGRESS_COMMIT_BATCH: int = 25
+_LINKEDIN_IMPORT_COMMIT_BATCH: int = 10
+_EMAIL_AT_RE = __import__("re").compile(r"@")
+
+
+def _should_prefer_phone_name(
+    *,
+    phone_name: str,
+    existing_name: str | None,
+    primary_email: str | None,
+) -> bool:
+    """Decide whether a phone contact's display name should replace the current one.
+
+    Phone contacts are the user's authoritative address book, so their name
+    should win when the existing name is missing, is just an email, or is a
+    longer business-style expansion (e.g. "Shalom Ormsby Images Inc.").
+    """
+    if not existing_name:
+        return True
+    if existing_name == (primary_email or ""):
+        return True
+    if _EMAIL_AT_RE.search(existing_name):
+        return True
+    existing_words: list[str] = existing_name.strip().lower().split()
+    phone_words: list[str] = phone_name.strip().lower().split()
+    if len(phone_words) >= 2 and existing_words[:len(phone_words)] == phone_words:
+        return True
+    return False
 
 
 def _merged_relationship_types_on_conflict() -> text:
@@ -67,6 +97,7 @@ class FileUploadImportService:
     async def _commit_progress(self, source: Source) -> None:
         await self._db.commit()
         await self._db.refresh(source)
+        publish_source_sync_update(source)
 
     async def run_sync(self, source_id: uuid.UUID) -> None:
         source: Source | None = await self._db.get(Source, source_id)
@@ -87,6 +118,7 @@ class FileUploadImportService:
         source.contacts_resolved = 0
         source.contacts_pending = 0
         await self._db.flush()
+        publish_source_sync_update(source)
 
         try:
             filename, content = read_upload_payload(
@@ -96,24 +128,33 @@ class FileUploadImportService:
             if not content.strip():
                 raise ValueError("Upload payload is empty")
 
-            if source.source_type == SourceType.PHONE_CONTACTS_UPLOAD.value:
-                await self._ingest_phone_contacts(source, content, filename)
-            elif source.source_type == SourceType.LINKEDIN_PROFILE_UPLOAD.value:
-                await self._ingest_linkedin_profile(source, content)
-            else:
-                await self._ingest_linkedin_connections(source, content)
+            user_id: uuid.UUID = source.user_id
+            async with user_import_write_lock(self._db, user_id):
+                if source.source_type == SourceType.PHONE_CONTACTS_UPLOAD.value:
+                    await self._ingest_phone_contacts(source, content, filename)
+                elif source.source_type == SourceType.LINKEDIN_PROFILE_UPLOAD.value:
+                    await self._ingest_linkedin_profile(source, content)
+                else:
+                    await self._ingest_linkedin_connections(source, content)
 
-            source.upload_payload = None
-            source.sync_state = SyncState.COMPLETE.value
-            source.sync_completed_at = datetime.now(tz=UTC)
-            source.connection_status = SourceConnectionStatus.CONNECTED.value
-            source.contacts_pending = 0
-            await self._db.flush()
+                await rebuild_user_org_observations(self._db, user_id)
+
+                source.upload_payload = None
+                source.sync_state = SyncState.COMPLETE.value
+                source.sync_completed_at = datetime.now(tz=UTC)
+                source.connection_status = SourceConnectionStatus.CONNECTED.value
+                source.contacts_pending = 0
+                await self._db.flush()
+                publish_source_sync_update(source)
         except Exception as exc:
             logger.exception("Upload import failed for source %s", source_id)
-            source.sync_state = SyncState.FAILED.value
-            source.sync_error = str(exc)[:500]
-            await self._db.flush()
+            await self._db.rollback()
+            failed_source: Source | None = await self._db.get(Source, source_id)
+            if failed_source is not None:
+                failed_source.sync_state = SyncState.FAILED.value
+                failed_source.sync_error = str(exc)[:500]
+                await self._db.commit()
+                publish_source_sync_update(failed_source)
             raise
 
     async def _ingest_phone_contacts(
@@ -123,7 +164,9 @@ class FileUploadImportService:
         filename: str,
     ) -> None:
         contacts: list[ParsedPhoneContact] = parse_phone_contacts_upload(content, filename)
-        source.contacts_pending = len(contacts)
+        total_contacts: int = len(contacts)
+        source.contacts_found = total_contacts
+        source.contacts_pending = total_contacts
         await self._db.flush()
         await self._commit_progress(source)
 
@@ -134,6 +177,9 @@ class FileUploadImportService:
         user_person: Person | None = None
         if user is not None:
             user_person = await ensure_user_person(self._db, user)
+
+        processed_since_commit: int = 0
+        commit_interval: int = _IMPORT_PROGRESS_COMMIT_BATCH
 
         for contact in contacts:
             if not contact.display_name:
@@ -151,9 +197,10 @@ class FileUploadImportService:
                 linkedin_url=contact.linkedin_url,
             )
 
-            if contact.display_name and (
-                not person.canonical_name
-                or person.canonical_name == (person.primary_email or "")
+            if contact.display_name and _should_prefer_phone_name(
+                phone_name=contact.display_name,
+                existing_name=person.canonical_name,
+                primary_email=person.primary_email,
             ):
                 person.canonical_name = contact.display_name
 
@@ -243,8 +290,23 @@ class FileUploadImportService:
                     contributor_source_kind="phone_contacts_upload",
                 )
 
-            source.contacts_found += 1
             source.contacts_resolved += 1
+            source.contacts_pending = max(0, total_contacts - source.contacts_resolved)
+
+            processed_since_commit += 1
+            if processed_since_commit >= commit_interval or source.contacts_resolved == 1:
+                await self._db.flush()
+                await self._commit_progress(source)
+                logger.info(
+                    "Phone import progress: %d/%d",
+                    source.contacts_resolved,
+                    total_contacts,
+                )
+                processed_since_commit = 0
+
+        if processed_since_commit > 0:
+            await self._db.flush()
+            await self._commit_progress(source)
 
         await self._db.flush()
 
@@ -254,8 +316,10 @@ class FileUploadImportService:
         content: str,
     ) -> None:
         connections: list[ParsedLinkedInConnection] = parse_linkedin_connections_csv(content)
-        logger.info("Parsed %d LinkedIn connections for source %s", len(connections), source.id)
-        source.contacts_pending = len(connections)
+        total_connections: int = len(connections)
+        logger.info("Parsed %d LinkedIn connections for source %s", total_connections, source.id)
+        source.contacts_found = total_connections
+        source.contacts_pending = total_connections
         await self._db.flush()
         await self._commit_progress(source)
 
@@ -327,29 +391,35 @@ class FileUploadImportService:
 
             if connection.company:
                 org = await resolver.resolve_org(domain=None, name=connection.company)
-                await record_employment(
-                    self._db,
-                    person_id=person.id,
-                    org_id=org.id,
-                    role_title=connection.position,
-                    contributor_user_id=source.user_id,
-                    contributor_source_kind="linkedin_connections_upload",
-                    contributor_source_id=source.id,
-                    confidence=0.8,
-                )
+                if org is not None:
+                    await record_employment(
+                        self._db,
+                        person_id=person.id,
+                        org_id=org.id,
+                        role_title=connection.position,
+                        contributor_user_id=source.user_id,
+                        contributor_source_kind="linkedin_connections_upload",
+                        contributor_source_id=source.id,
+                        confidence=0.8,
+                    )
 
-            source.contacts_found += 1
             source.contacts_resolved += 1
+            source.contacts_pending = max(0, total_connections - source.contacts_resolved)
 
             processed_since_commit += 1
-            if processed_since_commit >= commit_interval:
+            if processed_since_commit >= commit_interval or source.contacts_resolved == 1:
                 await self._db.flush()
                 await self._commit_progress(source)
-                logger.info("LinkedIn import progress: %d/%d", source.contacts_resolved, len(connections))
+                logger.info(
+                    "LinkedIn import progress: %d/%d",
+                    source.contacts_resolved,
+                    total_connections,
+                )
                 processed_since_commit = 0
 
         if processed_since_commit > 0:
             await self._db.flush()
+            await self._commit_progress(source)
 
         unique_touched: list[uuid.UUID] = list(dict.fromkeys(touched_person_ids))
         logger.info("LinkedIn import loop done (%d contacts, %d unique persons). Starting recompute...",
@@ -380,8 +450,18 @@ class FileUploadImportService:
         if profile.location and not user.location:
             user.location = profile.location
 
+        await self._db.execute(
+            delete(EmploymentClaim).where(
+                EmploymentClaim.person_id == person.id,
+                EmploymentClaim.contributor_source_kind == "linkedin_profile_upload",
+                EmploymentClaim.contributor_user_id == user_id,
+            )
+        )
+
         for exp in profile.experiences:
             org = await resolver.resolve_org(domain=None, name=exp.company)
+            if org is None:
+                continue
             await record_employment(
                 self._db,
                 person_id=person.id,

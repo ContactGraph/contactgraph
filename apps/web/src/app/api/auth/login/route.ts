@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { apiFetchUnauthenticated } from "@/lib/api-client";
 import type { ConnectSourceResult } from "@/lib/api-types";
+import { applyAuthTokensToSession } from "@/lib/session-auth";
 import { getSession } from "@/lib/session";
 
 export async function POST(): Promise<NextResponse> {
@@ -17,10 +18,11 @@ export async function POST(): Promise<NextResponse> {
       result.access_token &&
       result.refresh_token
     ) {
-      session.accessToken = result.access_token;
-      session.refreshToken = result.refresh_token;
-      session.email = result.email ?? session.email ?? "";
-      session.isLoggedIn = true;
+      applyAuthTokensToSession(session, {
+        accessToken: result.access_token,
+        refreshToken: result.refresh_token,
+        email: result.email ?? session.email ?? "",
+      });
       await session.save();
     }
 

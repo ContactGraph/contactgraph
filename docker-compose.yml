@@ -20,9 +20,19 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
+
+  worker:
+    build: .
+    command: uv run --package contactsafe-server arq contactsafe_server.worker.WorkerSettings
+    depends_on:
+      - redis
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379
+      USE_ARQ_WORKER: "true"
 
 volumes:
   postgres_data:

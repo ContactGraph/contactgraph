@@ -238,6 +238,7 @@ class TrustListInviteSummary(BaseModel):
     invitee_email: str
     status: TrustListInviteStatus
     created_at: datetime
+    invite_copy: str | None = None
 
 
 class PendingInboundInvite(BaseModel):
@@ -373,6 +374,11 @@ class UserProfileResult(BaseModel):
     headline: str | None = None
     location: str | None = None
     google_profile_name: str | None = None
+    google_profile_picture: str | None = None
+    phone: str | None = None
+    linkedin_url: str | None = None
+    bio_summary: str | None = None
+    social_profiles: dict[str, str] = Field(default_factory=dict)
     experiences: list[UserExperience] = Field(default_factory=list)
     message: str = ""
 
@@ -380,6 +386,10 @@ class UserProfileResult(BaseModel):
 class UpdateUserProfileRequest(BaseModel):
     display_name: str | None = None
     location: str | None = None
+    phone: str | None = None
+    linkedin_url: str | None = None
+    bio_summary: str | None = None
+    social_profiles: dict[str, str] | None = None
 
 
 class SaveUserExperienceRequest(BaseModel):
@@ -393,6 +403,11 @@ class SaveUserExperienceRequest(BaseModel):
 
 class DeleteUserExperienceRequest(BaseModel):
     id: UUID
+
+
+class DeleteUserAccountResult(BaseModel):
+    deleted: bool
+    message: str = ""
 
 
 class QueryNetworkRequest(BaseModel):

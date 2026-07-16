@@ -303,10 +303,6 @@ async def test_request_sync_for_user_schedules_all_sources(
         fake_schedule,
     )
     monkeypatch.setattr(
-        "contactsafe_server.services.source_service.is_user_sync_running",
-        lambda _: False,
-    )
-    monkeypatch.setattr(
         "contactsafe_server.services.source_service.is_source_sync_running",
         lambda _: False,
     )

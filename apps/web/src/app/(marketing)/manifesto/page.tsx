@@ -7,11 +7,12 @@ import { MarketingMain, MarketingProse } from "../components/marketing-prose";
 export const metadata: Metadata = {
   title: "Manifesto — ContactGraph",
   description:
-    "We gave away our relationships — ContactGraph builds a private graph from your email so your agent can answer who you know.",
+    "We gave away our relationships to LinkedIn and Facebook. ContactGraph builds a private graph from your own data so your agent can answer who you know.",
+  alternates: { canonical: "/manifesto" },
   openGraph: {
     title: "Manifesto — ContactGraph",
     description:
-      "We gave away our relationships — ContactGraph builds a private graph from your email so your agent can answer who you know.",
+      "We gave away our relationships to LinkedIn and Facebook. ContactGraph builds a private graph from your own data so your agent can answer who you know.",
     type: "article",
     siteName: "ContactGraph",
     locale: "en_US",
@@ -20,7 +21,7 @@ export const metadata: Metadata = {
     card: "summary",
     title: "Manifesto — ContactGraph",
     description:
-      "We gave away our relationships — ContactGraph builds a private graph from your email so your agent can answer who you know.",
+      "We gave away our relationships to LinkedIn and Facebook. ContactGraph builds a private graph from your own data so your agent can answer who you know.",
   },
 };
 

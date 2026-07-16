@@ -62,7 +62,7 @@ export function LoginForm() {
       if (result.status === "connected") {
         clearPollTimer();
         popupRef.current?.close();
-        router.push("/people");
+        router.push("/home");
         router.refresh();
         return;
       }
@@ -106,7 +106,7 @@ export function LoginForm() {
         result.access_token &&
         result.refresh_token
       ) {
-        router.push("/people");
+        router.push("/home");
         router.refresh();
         return;
       }
@@ -155,11 +155,11 @@ export function LoginForm() {
   };
 
   return (
-    <Card className="w-full max-w-md border-border">
+    <Card className="w-full border-border">
       <CardHeader className="p-5 pb-3">
-        <CardTitle className="text-sm font-semibold">Sign in to ContactGraph</CardTitle>
+        <CardTitle className="text-sm font-semibold">Sign in</CardTitle>
         <CardDescription className="text-sm">
-          Connect your Google account to access your private contact graph.
+          Connect your Google account to get started.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4 p-5 pt-0">

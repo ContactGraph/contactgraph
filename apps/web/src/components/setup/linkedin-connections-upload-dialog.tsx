@@ -1,8 +1,5 @@
 "use client";
 
-import { Loader2, Upload } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
-
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Dialog,
@@ -11,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { FileDropZone } from "@/components/ui/file-drop-zone";
 import type { SyncState } from "@/lib/api-types";
 
 interface LinkedInConnectionsUploadDialogProps {
@@ -49,9 +47,6 @@ export function LinkedInConnectionsUploadDialog({
   syncError = null,
   contactsResolved = 0,
 }: LinkedInConnectionsUploadDialogProps): React.JSX.Element {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [dragActive, setDragActive] = useState<boolean>(false);
-
   const isSyncing: boolean =
     isPending ||
     isProcessing ||
@@ -61,25 +56,6 @@ export function LinkedInConnectionsUploadDialog({
   const isFailed: boolean = syncState === "failed" && !isProcessing;
   const failureMessage: string | null =
     error ?? syncError ?? (isFailed ? "Import failed. Try uploading again." : null);
-
-  const handleFile = useCallback(
-    (file: File | undefined): void => {
-      if (file === undefined) {
-        return;
-      }
-      onFileSelect(file);
-    },
-    [onFileSelect],
-  );
-
-  const onDrop = useCallback(
-    (event: React.DragEvent<HTMLDivElement>): void => {
-      event.preventDefault();
-      setDragActive(false);
-      handleFile(event.dataTransfer.files[0]);
-    },
-    [handleFile],
-  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -145,58 +121,13 @@ export function LinkedInConnectionsUploadDialog({
             </p>
           </div>
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            className="hidden"
-            onChange={(event) => {
-              handleFile(event.target.files?.[0]);
-              event.target.value = "";
-            }}
+          <FileDropZone
+            onFileSelect={onFileSelect}
+            busy={isSyncing}
+            busyMessage={importStatusMessage(syncState, contactsResolved)}
+            idleMessage="Drag and drop your .zip or Connections.csv here"
+            idleHint="or click to choose a file"
           />
-          <div
-            role="button"
-            tabIndex={0}
-            onDragOver={(event) => {
-              event.preventDefault();
-              setDragActive(true);
-            }}
-            onDragLeave={() => {
-              setDragActive(false);
-            }}
-            onDrop={onDrop}
-            onClick={() => fileInputRef.current?.click()}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                fileInputRef.current?.click();
-              }
-            }}
-            className={`flex min-h-32 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-6 text-center transition-colors ${
-              dragActive
-                ? "border-foreground bg-muted/50"
-                : "border-muted-foreground/40"
-            }`}
-          >
-            {isSyncing ? (
-              <>
-                <Loader2 className="size-7 animate-spin text-muted-foreground" />
-                <p className="text-sm text-muted-foreground">
-                  {importStatusMessage(syncState, contactsResolved)}
-                </p>
-              </>
-            ) : (
-              <>
-                <Upload className="size-7 text-muted-foreground" />
-                <p className="text-sm font-medium">
-                  Drag and drop your .zip or Connections.csv here
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  or click to choose a file
-                </p>
-              </>
-            )}
-          </div>
         </div>
       </DialogContent>
     </Dialog>

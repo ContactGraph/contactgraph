@@ -11,7 +11,7 @@ import re
 import uuid
 from datetime import datetime
 
-from sqlalchemy import bindparam, func, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.config import Settings, get_settings
@@ -42,6 +42,17 @@ _STRIP_QUOTE_RE: re.Pattern[str] = re.compile(
 def sanitize_display_name(name: str) -> str:
     """Strip stray quote characters and whitespace from a display name."""
     return _STRIP_QUOTE_RE.sub("", name)
+
+
+def _manual_attrs(attrs: list[PersonAttributeClaim], kind: str) -> list[PersonAttributeClaim]:
+    return [attr for attr in attrs if attr.kind == kind and attr.contributor_source_kind == "user_manual"]
+
+
+def _attrs_for_kind(attrs: list[PersonAttributeClaim], kind: str) -> list[PersonAttributeClaim]:
+    manual: list[PersonAttributeClaim] = _manual_attrs(attrs, kind)
+    if manual:
+        return manual
+    return [attr for attr in attrs if attr.kind == kind]
 
 
 class PersonProfileRecompute:
@@ -179,24 +190,38 @@ class PersonProfileRecompute:
 
         best_bio_len: int = 0
         for attr in attrs:
-            if attr.kind.startswith("social_profile."):
-                platform: str = attr.kind.removeprefix("social_profile.")
-                social_profiles[platform] = attr.value
-            elif attr.kind == "category":
+            if attr.kind == "category":
                 if attr.value not in categories:
                     categories.append(attr.value)
             elif attr.kind == "descriptive_tag":
                 if attr.value not in descriptive_tags:
                     descriptive_tags.append(attr.value)
-            elif attr.kind == "bio_summary":
-                if len(attr.value) > best_bio_len:
-                    bio_summary = attr.value
-                    best_bio_len = len(attr.value)
-            elif attr.kind == "location":
-                location = attr.value
-            elif attr.kind == "phone":
-                if attr.value not in claim_phones:
-                    claim_phones.append(attr.value)
+
+        for attr in attrs:
+            if not attr.kind.startswith("social_profile."):
+                continue
+            platform: str = attr.kind.removeprefix("social_profile.")
+            if attr.contributor_source_kind == "user_manual":
+                social_profiles[platform] = attr.value
+
+        for attr in attrs:
+            if attr.kind.startswith("social_profile."):
+                platform = attr.kind.removeprefix("social_profile.")
+                if platform not in social_profiles:
+                    social_profiles[platform] = attr.value
+
+        for attr in _attrs_for_kind(attrs, "bio_summary"):
+            if len(attr.value) > best_bio_len:
+                bio_summary = attr.value
+                best_bio_len = len(attr.value)
+
+        location_attrs: list[PersonAttributeClaim] = _attrs_for_kind(attrs, "location")
+        if location_attrs:
+            location = location_attrs[-1].value
+
+        for attr in _attrs_for_kind(attrs, "phone"):
+            if attr.value not in claim_phones:
+                claim_phones.append(attr.value)
 
         person_row: Person | None = self._person_cache.get(person_id)
         seen_phones: set[str] = set()
@@ -242,8 +267,8 @@ class PersonProfileRecompute:
                     categories.append(cat)
 
         if current_role is None:
-            for attr in attrs:
-                if attr.kind == "role" and attr.value.strip():
+            for attr in _attrs_for_kind(attrs, "role"):
+                if attr.value.strip():
                     candidate_role: str = attr.value.strip()
                     if candidate_role.lower() not in _INVALID_ROLE_VALUES:
                         current_role = candidate_role
@@ -255,7 +280,7 @@ class PersonProfileRecompute:
             .values(
                 current_org_id=current_org_id,
                 current_org_name=current_org_name,
-                current_role=bindparam("recomputed_current_role"),
+                current_role=current_role,
                 bio_summary=bio_summary,
                 social_profiles=social_profiles,
                 inferred_categories=categories,
@@ -263,5 +288,4 @@ class PersonProfileRecompute:
                 phone_numbers=phone_numbers,
                 location=location,
             ),
-            {"recomputed_current_role": current_role},
         )

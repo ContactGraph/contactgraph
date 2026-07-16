@@ -37,33 +37,56 @@ async def record_employment(
     confidence: float = 0.7,
     evidence: dict[str, object] | None = None,
 ) -> None:
-    stmt = pg_insert(EmploymentClaim).values(
-        person_id=person_id,
-        org_id=org_id,
-        role_title=role_title,
-        is_current=is_current,
-        started_at=started_at,
-        ended_at=ended_at,
-        contributor_user_id=contributor_user_id,
-        contributor_source_kind=contributor_source_kind,
-        contributor_source_id=contributor_source_id,
-        confidence=confidence,
-        evidence=evidence,
-        observed_at=func.now(),
+    from sqlalchemy import and_, select
+
+    filters = [
+        EmploymentClaim.person_id == person_id,
+        EmploymentClaim.org_id == org_id,
+        EmploymentClaim.contributor_source_kind == contributor_source_kind,
+    ]
+    if role_title is None:
+        filters.append(EmploymentClaim.role_title.is_(None))
+    else:
+        filters.append(EmploymentClaim.role_title == role_title)
+    if started_at is None:
+        filters.append(EmploymentClaim.started_at.is_(None))
+    else:
+        filters.append(EmploymentClaim.started_at == started_at)
+    if contributor_user_id is None:
+        filters.append(EmploymentClaim.contributor_user_id.is_(None))
+    else:
+        filters.append(EmploymentClaim.contributor_user_id == contributor_user_id)
+
+    result = await session.execute(
+        select(EmploymentClaim).where(and_(*filters)),
     )
-    stmt = stmt.on_conflict_do_update(
-        constraint="uq_employment_claim",
-        set_={
-            "role_title": stmt.excluded.role_title,
-            "is_current": stmt.excluded.is_current,
-            "started_at": stmt.excluded.started_at,
-            "ended_at": stmt.excluded.ended_at,
-            "observed_at": stmt.excluded.observed_at,
-            "confidence": func.greatest(EmploymentClaim.confidence, stmt.excluded.confidence),
-            "evidence": stmt.excluded.evidence,
-        },
-    )
-    await session.execute(stmt)
+    existing: EmploymentClaim | None = result.scalar_one_or_none()
+
+    if existing is not None:
+        existing.is_current = is_current
+        existing.ended_at = ended_at
+        existing.observed_at = func.now()
+        if confidence > (existing.confidence or 0):
+            existing.confidence = confidence
+        if evidence is not None:
+            existing.evidence = evidence
+    else:
+        session.add(
+            EmploymentClaim(
+                person_id=person_id,
+                org_id=org_id,
+                role_title=role_title,
+                is_current=is_current,
+                started_at=started_at,
+                ended_at=ended_at,
+                contributor_user_id=contributor_user_id,
+                contributor_source_kind=contributor_source_kind,
+                contributor_source_id=contributor_source_id,
+                confidence=confidence,
+                evidence=evidence,
+            ),
+        )
+    await session.flush()
 
 
 async def record_relationship(

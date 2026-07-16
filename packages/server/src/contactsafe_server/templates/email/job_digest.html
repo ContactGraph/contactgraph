@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ subject }}</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; max-width: 48rem; margin: 0 auto; padding: 1.5rem 1rem; line-height: 1.5; color: #111; }
+    h1 { font-size: 1.35rem; margin: 0 0 0.5rem; }
+    .intro { color: #444; margin: 0 0 1.5rem; }
+    .cta { display: inline-block; margin: 1.5rem 0; padding: 0.7rem 1.1rem; background: #1a73e8; color: #fff !important; text-decoration: none; border-radius: 6px; font-weight: 500; }
+    .footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #e5e5e5; font-size: 0.8rem; color: #666; }
+    .footer a { color: #666; }
+    .overflow { font-size: 0.875rem; color: #555; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>{{ job_count }} new job match{{ "es" if job_count != 1 else "" }}</h1>
+  <p class="intro">New roles at your target companies that match your preferences.</p>
+
+  <table cellpadding="0" cellspacing="0" border="0" width="100%" style="border-collapse: collapse; font-size: 0.875rem;">
+    <thead>
+      <tr style="border-bottom: 2px solid #e5e5e5;">
+        <th align="left" style="padding: 0.5rem 0.4rem; font-size: 0.75rem; font-weight: 600; color: #666; white-space: nowrap;">Match</th>
+        <th align="left" style="padding: 0.5rem 0.4rem; font-size: 0.75rem; font-weight: 600; color: #666;">Title</th>
+        <th align="left" style="padding: 0.5rem 0.4rem; font-size: 0.75rem; font-weight: 600; color: #666;">Company</th>
+        <th align="left" style="padding: 0.5rem 0.4rem; font-size: 0.75rem; font-weight: 600; color: #666;">Location</th>
+        <th align="left" style="padding: 0.5rem 0.4rem; font-size: 0.75rem; font-weight: 600; color: #666;">Contacts</th>
+        <th align="center" style="padding: 0.5rem 0.4rem; font-size: 0.75rem; font-weight: 600; color: #666; white-space: nowrap;">Feedback</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for job, ui_url in jobs %}
+      <tr style="border-bottom: 1px solid #eee;">
+        <td valign="top" style="padding: 0.6rem 0.4rem; white-space: nowrap;">
+          <span style="display: inline-block; font-size: 0.75rem; font-weight: 600; color: #0d652d; background: #e6f4ea; padding: 0.1rem 0.4rem; border-radius: 4px;">{{ job.match_score }}%</span>
+        </td>
+        <td valign="top" style="padding: 0.6rem 0.4rem; font-weight: 600;">
+          <a href="{{ ui_url }}" style="color: #1a73e8; text-decoration: none;">{{ job.title }}</a>
+        </td>
+        <td valign="top" style="padding: 0.6rem 0.4rem; color: #333;">{{ job.company_name }}</td>
+        <td valign="top" style="padding: 0.6rem 0.4rem; color: #555;">{{ job.location or "" }}</td>
+        <td valign="top" style="padding: 0.6rem 0.4rem; font-size: 0.8rem; color: #1a73e8;">
+          {% if job.contact_blurb %}You know {{ job.contact_blurb }}{% endif %}
+        </td>
+        <td valign="top" align="center" style="padding: 0.6rem 0.4rem; white-space: nowrap;">
+          <a href="{{ ui_url }}" style="text-decoration: none; display: inline-block; margin: 0 0.15rem;" title="Bookmark in ContactGraph">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m19 21-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v16z"/></svg>
+          </a>
+          <a href="{{ ui_url }}" style="text-decoration: none; display: inline-block; margin: 0 0.15rem;" title="Mark interested in ContactGraph">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2a3.13 3.13 0 0 1 3 3.88Z"/></svg>
+          </a>
+          <a href="{{ ui_url }}" style="text-decoration: none; display: inline-block; margin: 0 0.15rem;" title="Dismiss in ContactGraph">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#888" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22a3.13 3.13 0 0 1-3-3.88Z"/></svg>
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if overflow_count > 0 %}
+  <p class="overflow">+ {{ overflow_count }} more match{{ "es" if overflow_count != 1 else "" }} in ContactGraph.</p>
+  {% endif %}
+
+  <a class="cta" href="{{ jobs_url }}">View all jobs</a>
+
+  <div class="footer">
+    <p>
+      <a href="{{ profile_url }}">Manage notification settings</a>
+      &nbsp;·&nbsp;
+      <a href="{{ unsubscribe_url }}">Unsubscribe</a>
+    </p>
+    <p>ContactGraph — your job search assistant</p>
+  </div>
+</body>
+</html>

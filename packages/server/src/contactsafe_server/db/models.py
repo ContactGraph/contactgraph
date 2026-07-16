@@ -1,5 +1,5 @@
 import uuid
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
@@ -42,10 +42,25 @@ class User(Base):
     display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     location: Mapped[str | None] = mapped_column(Text, nullable=True)
     person_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("persons.id", ondelete="SET NULL"), nullable=True)
+    job_monitor_list_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("org_lists.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    job_monitor_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    job_preferences_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_location_pref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_location_city: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_commute_max_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    job_commute_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    job_target_scope: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    job_digest_frequency: Mapped[str] = mapped_column(Text, nullable=False, default="daily")
+    job_digest_last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     person: Mapped["Person | None"] = relationship(foreign_keys=[person_id])
+    job_monitor_list: Mapped["OrgList | None"] = relationship(foreign_keys=[job_monitor_list_id])
     identities: Mapped[list["UserIdentity"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     oauth_credentials: Mapped[list["OAuthCredential"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     sessions: Mapped[list["ConnectSession"]] = relationship(back_populates="user")
@@ -170,6 +185,22 @@ class EnrichmentRun(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+class OrgEnrichmentRun(Base):
+    __tablename__ = "org_enrichment_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    orgs_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    orgs_enriched: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
 class ConnectSession(Base):
     __tablename__ = "sessions"
 
@@ -247,7 +278,7 @@ class Person(Base):
     primary_email: Mapped[str | None] = mapped_column(Text, nullable=True)
     current_org_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="SET NULL"), nullable=True)
     current_org_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    current_role: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_role: Mapped[str | None] = mapped_column("current_role", Text, nullable=True, quote=True)
     bio_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     social_profiles: Mapped[dict[str, str]] = mapped_column(JSONB, nullable=False, default=dict)
     inferred_categories: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
@@ -270,7 +301,14 @@ class Org(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
     primary_domain: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    careers_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ats_provider: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ats_board_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    linkedin_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     categories: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, default=list)
+    employee_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    company_size_band: Mapped[str | None] = mapped_column(String(32), nullable=True)
     attributes: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
@@ -278,6 +316,87 @@ class Org(Base):
     persons: Mapped[list["Person"]] = relationship(back_populates="current_org", foreign_keys=[Person.current_org_id])
     aliases: Mapped[list["OrgAlias"]] = relationship(back_populates="org", cascade="all, delete-orphan")
     employment_claims: Mapped[list["EmploymentClaim"]] = relationship(back_populates="org", cascade="all, delete-orphan")
+    jobs: Mapped[list["OrgJob"]] = relationship(back_populates="org", cascade="all, delete-orphan")
+    job_scrape_runs: Mapped[list["JobScrapeRun"]] = relationship(back_populates="org", cascade="all, delete-orphan")
+    enrichment_scrape_runs: Mapped[list["OrgEnrichmentScrapeRun"]] = relationship(
+        back_populates="org",
+        cascade="all, delete-orphan",
+    )
+
+
+class OrgJob(Base):
+    __tablename__ = "org_jobs"
+    __table_args__ = (
+        UniqueConstraint("org_id", "external_job_id", "source", name="uq_org_job_external"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="CASCADE"), nullable=False)
+    external_job_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    location: Mapped[str | None] = mapped_column(Text, nullable=True)
+    department: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    description_snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    salary_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    salary_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    remote_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    org: Mapped["Org"] = relationship(back_populates="jobs")
+
+
+class JobScrapeRun(Base):
+    __tablename__ = "job_scrape_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="CASCADE"), nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    jobs_found: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    new_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    org: Mapped["Org"] = relationship(back_populates="job_scrape_runs")
+
+
+class OrgEnrichmentScrapeRun(Base):
+    __tablename__ = "org_enrichment_scrape_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    org_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("orgs.id", ondelete="CASCADE"), nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    fields_updated: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    org: Mapped["Org"] = relationship(back_populates="enrichment_scrape_runs")
+
+
+class JobDiscoveryRun(Base):
+    __tablename__ = "job_discovery_runs"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    orgs_total: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    orgs_processed: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    jobs_found: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    new_jobs: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    progress_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
 class PersonAlias(Base):
@@ -315,7 +434,15 @@ class OrgAlias(Base):
 class EmploymentClaim(Base):
     __tablename__ = "employment_claims"
     __table_args__ = (
-        UniqueConstraint("person_id", "org_id", "contributor_source_kind", "contributor_user_id", name="uq_employment_claim"),
+        UniqueConstraint(
+            "person_id",
+            "org_id",
+            "role_title",
+            "started_at",
+            "contributor_source_kind",
+            "contributor_user_id",
+            name="uq_employment_claim",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -328,7 +455,7 @@ class EmploymentClaim(Base):
     contributor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contributor_source_kind: Mapped[str] = mapped_column(Text, nullable=False)
     contributor_source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), default=lambda: datetime.now(UTC), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
     evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
@@ -350,7 +477,7 @@ class RelationshipClaim(Base):
     observed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     contributor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contributor_source_kind: Mapped[str] = mapped_column(Text, nullable=False, default="gmail")
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), default=lambda: datetime.now(UTC), nullable=False)
     last_seen_together_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
@@ -368,7 +495,7 @@ class PersonAttributeClaim(Base):
     contributor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contributor_source_kind: Mapped[str] = mapped_column(Text, nullable=False)
     contributor_source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), default=lambda: datetime.now(UTC), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
     evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
@@ -388,7 +515,7 @@ class OrgAttributeClaim(Base):
     contributor_user_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     contributor_source_kind: Mapped[str] = mapped_column(Text, nullable=False)
     contributor_source_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), default=lambda: datetime.now(UTC), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.7)
     evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
 
@@ -543,3 +670,124 @@ class ContactPrivacyLabelRow(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     person_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("persons.id", ondelete="CASCADE"), nullable=False)
     label: Mapped[str] = mapped_column(String(32), nullable=False, default="standard")
+
+
+# ---------------------------------------------------------------------------
+# User-scoped organization lists
+# ---------------------------------------------------------------------------
+
+
+class OrgList(Base):
+    __tablename__ = "org_lists"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_org_list_user_name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    memberships: Mapped[list["OrgListMembership"]] = relationship(
+        back_populates="org_list",
+        cascade="all, delete-orphan",
+    )
+
+
+class OrgListMembership(Base):
+    __tablename__ = "org_list_memberships"
+
+    org_list_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("org_lists.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    org_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("orgs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    org_list: Mapped["OrgList"] = relationship(back_populates="memberships")
+    org: Mapped["Org"] = relationship()
+
+
+class UserJobRelevance(Base):
+    __tablename__ = "user_job_relevance"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("org_jobs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    is_relevant: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    match_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    role_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    role_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    location_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    location_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seniority_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    seniority_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    classified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class UserJobFeedback(Base):
+    __tablename__ = "user_job_feedback"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("org_jobs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    interest: Mapped[str] = mapped_column(Text, nullable=False)
+    reviewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class UserTask(Base):
+    __tablename__ = "user_tasks"
+    __table_args__ = (UniqueConstraint("user_id", "dedup_key", name="uq_user_tasks_user_dedup_key"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    dedup_key: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="open")
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sort_rank: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("org_jobs.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    person_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("persons.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("orgs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    payload: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

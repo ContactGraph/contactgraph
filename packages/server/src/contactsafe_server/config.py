@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     database_ssl: bool | None = Field(default=None)
     # macOS uv Python often lacks system CA certs; set false for local Supabase dev if needed
     database_ssl_verify: bool = Field(default=True)
+    database_pool_size: int = Field(
+        default=3,
+        description="SQLAlchemy pool size per process (keep low for Supabase session pooler)",
+    )
+    database_max_overflow: int = Field(
+        default=2,
+        description="Extra connections beyond pool_size under burst load",
+    )
 
     token_encryption_key: str = Field(
         description="Fernet key for encrypting OAuth tokens at rest"
@@ -227,6 +235,93 @@ class Settings(BaseSettings):
         description="Minimum delay between ScrapingDog requests for rate limiting",
     )
 
+    theirstack_api_key: str | None = Field(
+        default=None,
+        description="TheirStack API key for aggregated job discovery",
+    )
+    theirstack_webhook_secret: str | None = Field(
+        default=None,
+        description="HMAC signing secret for TheirStack webhook verification",
+    )
+
+    admin_emails: list[str] = Field(
+        default_factory=list,
+        description="Email addresses that automatically receive contactsafe:admin scope on login",
+    )
+    theirstack_base_url: str = Field(default="https://api.theirstack.com")
+    theirstack_request_timeout_seconds: float = Field(default=90.0)
+    theirstack_job_max_age_days: int = Field(
+        default=30,
+        description="Max age of job postings returned by TheirStack searches",
+    )
+
+    job_discovery_request_timeout_seconds: float = Field(default=30.0)
+    job_scrape_cooldown_hours: int = Field(
+        default=24,
+        description="Skip re-scraping an org if it was successfully checked within this window",
+    )
+    job_scan_poll_interval_minutes: int = Field(
+        default=5,
+        description="How often the global job scanner checks for orgs needing a scrape",
+    )
+
+    org_enrichment_cooldown_days: int = Field(
+        default=30,
+        description="Skip re-enriching an org if it was successfully enriched within this window",
+    )
+    org_enrichment_scan_poll_interval_minutes: int = Field(
+        default=10,
+        description="How often the global org enrichment scanner checks for orgs needing enrichment",
+    )
+
+    redis_url: str = Field(
+        default="redis://localhost:6379",
+        description="Redis URL for arq task queue and cross-process event pub/sub",
+    )
+    use_arq_worker: bool = Field(
+        default=False,
+        description="When true, background work is enqueued to arq instead of in-process asyncio tasks",
+    )
+    arq_max_jobs: int = Field(
+        default=3,
+        description="Max concurrent jobs per arq worker process",
+    )
+    arq_job_timeout_seconds: int = Field(
+        default=600,
+        description="Default arq job timeout in seconds",
+    )
+
+    resend_api_key: str | None = Field(
+        default=None,
+        description="Resend API key for transactional email; unset disables outbound email",
+    )
+    email_from_address: str = Field(
+        default="ContactGraph <notifications@contactsafe.com>",
+        description="From address for transactional emails",
+    )
+    email_digest_send_hour_utc: int = Field(
+        default=15,
+        ge=0,
+        le=23,
+        description="UTC hour when daily/weekly job digests are enqueued (~morning US)",
+    )
+    email_digest_min_match_score: int = Field(
+        default=60,
+        ge=0,
+        le=100,
+        description="Minimum match score for jobs included in email digests",
+    )
+    email_digest_max_jobs: int = Field(
+        default=20,
+        ge=1,
+        le=100,
+        description="Maximum jobs included in a single digest email",
+    )
+    email_unsubscribe_token_expire_days: int = Field(
+        default=365,
+        description="Lifetime of one-click unsubscribe tokens in email footers",
+    )
+
     @field_validator("database_url", mode="before")
     @classmethod
     def ensure_asyncpg_driver(cls, value: str) -> str:
@@ -261,7 +356,7 @@ class Settings(BaseSettings):
         return (self.web_base_url or self.base_url).rstrip("/")
 
     def upload_url_for_source(self, source_id: object) -> str:
-        return f"{self.effective_web_base_url}/sources/upload/{source_id}"
+        return f"{self.effective_web_base_url}/setup/upload/{source_id}"
 
     @property
     def upload_max_file_size_bytes(self) -> int:

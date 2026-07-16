@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends
 
 from contactsafe_server.config import Settings, get_settings
-from contactsafe_server.services.jwt_service import MCP_SCOPES
+from contactsafe_server.services.jwt_service import DEFAULT_MCP_SCOPES
 
 router: APIRouter = APIRouter(tags=["oauth-metadata"])
 
@@ -11,7 +11,7 @@ def _protected_resource_document(settings: Settings) -> dict[str, object]:
     return {
         "resource": settings.canonical_mcp_resource,
         "authorization_servers": [base],
-        "scopes_supported": list(MCP_SCOPES),
+        "scopes_supported": list(DEFAULT_MCP_SCOPES),
     }
 
 
@@ -39,7 +39,7 @@ async def oauth_authorization_server_metadata(
         "authorization_endpoint": f"{base}/oauth/authorize",
         "token_endpoint": f"{base}/oauth/token",
         "registration_endpoint": f"{base}/oauth/register",
-        "scopes_supported": list(MCP_SCOPES),
+        "scopes_supported": list(DEFAULT_MCP_SCOPES),
         "response_types_supported": ["code"],
         "code_challenge_methods_supported": ["S256"],
         "grant_types_supported": ["authorization_code", "refresh_token"],

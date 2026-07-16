@@ -134,6 +134,16 @@ _DATE_RANGE_RE: re.Pattern[str] = re.compile(
 )
 
 
+_EMPLOYMENT_TYPE_RE: re.Pattern[str] = re.compile(
+    r"\b(full-time|part-time|self-employed|contract|internship|freelance)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _strip_employment_type(line: str) -> str:
+    return line.split("·", maxsplit=1)[0].strip()
+
+
 def _heuristic_parse_experiences(text: str) -> list[ParsedExperience]:
     """Best-effort parsing of the Experience section."""
     experiences: list[ParsedExperience] = []
@@ -152,8 +162,19 @@ def _heuristic_parse_experiences(text: str) -> list[ParsedExperience]:
         loc: str | None = None
 
         if len(lines) >= 2:
-            title = lines[0]
-            company = lines[1]
+            first_line: str = lines[0]
+            second_line: str = lines[1]
+            company_first: bool = (
+                "·" in first_line
+                and _EMPLOYMENT_TYPE_RE.search(first_line) is not None
+            )
+
+            if company_first:
+                company = _strip_employment_type(first_line)
+                title = second_line.split("·", maxsplit=1)[0].strip()
+            else:
+                title = first_line
+                company = second_line
         elif len(lines) == 1:
             company = lines[0]
 

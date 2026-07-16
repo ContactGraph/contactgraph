@@ -1,0 +1,8 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+watchPatterns = ["packages/**", "migrations/**", "Dockerfile", "pyproject.toml", "uv.lock", "railway.worker.toml"]
+
+[deploy]
+startCommand = "uv run --package contactsafe-server arq contactsafe_server.worker.WorkerSettings"
+restartPolicyType = "on_failure"

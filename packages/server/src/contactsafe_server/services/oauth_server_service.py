@@ -255,11 +255,9 @@ class OAuthServerService:
             raise ValueError("Refresh token expired")
 
         try:
-            claims: dict[str, object] = self._jwt.decode_token(refresh_token)
+            claims: dict[str, object] = self._jwt.decode_refresh_token(refresh_token)
         except ValueError as exc:
             raise ValueError("Invalid refresh token") from exc
-        if claims.get("typ") != "refresh":
-            raise ValueError("Token is not a refresh token")
 
         user_id_str: str = str(claims.get("sub", ""))
         try:
@@ -309,6 +307,15 @@ class OAuthServerService:
         self,
         user_id: uuid.UUID,
         scopes: list[str] | None = None,
+        *,
+        email: str | None = None,
     ) -> TokenResponse:
         effective_scopes: list[str] = scopes if scopes else list(DEFAULT_MCP_SCOPES)
+        admin_scope: str = "contactsafe:admin"
+        if (
+            email is not None
+            and admin_scope not in effective_scopes
+            and email.lower() in (e.lower() for e in self._settings.admin_emails)
+        ):
+            effective_scopes = [*effective_scopes, admin_scope]
         return await self._mint_tokens(user_id, effective_scopes)

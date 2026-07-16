@@ -1,0 +1,42 @@
+# ContactGraph
+
+> A private, agent-native contact graph that merges your phone contacts and LinkedIn connections into one searchable network — then finds open roles at companies where you already know someone.
+
+## Pages
+
+- [Home](https://www.contactgraph.ai/)
+- [About](https://www.contactgraph.ai/about)
+- [Manifesto](https://www.contactgraph.ai/manifesto)
+- [Resources](https://www.contactgraph.ai/resources)
+- [Privacy Policy](https://www.contactgraph.ai/privacy)
+- [Terms of Service](https://www.contactgraph.ai/terms)
+- [Join (Invite)](https://www.contactgraph.ai/join)
+
+## Guides — Connect AI to LinkedIn
+
+- [How to Connect Claude to Your LinkedIn Network](https://www.contactgraph.ai/guides/connect-claude-to-linkedin)
+- [LinkedIn MCP Server for Job Search](https://www.contactgraph.ai/guides/linkedin-mcp-server-job-search)
+- [Use AI with Your LinkedIn Contacts](https://www.contactgraph.ai/guides/ai-linkedin-contacts)
+
+## Company lists — Who's hiring
+
+- [Top Tech Companies Hiring](https://www.contactgraph.ai/company-lists/top-tech-companies-hiring)
+- [AI Startups Hiring](https://www.contactgraph.ai/company-lists/ai-startups-hiring)
+- [Remote-First Companies Hiring](https://www.contactgraph.ai/company-lists/remote-first-companies-hiring)
+- [Series A Startups Hiring](https://www.contactgraph.ai/company-lists/series-a-startups-hiring)
+- [Fintech Companies Hiring](https://www.contactgraph.ai/company-lists/fintech-companies-hiring)
+- [Healthtech Companies Hiring](https://www.contactgraph.ai/company-lists/healthtech-companies-hiring)
+
+## Alternatives — Job search tool comparisons
+
+- [LinkedIn Jobs Alternatives](https://www.contactgraph.ai/alternatives/linkedin-jobs-alternatives)
+- [CareerShift Alternatives](https://www.contactgraph.ai/alternatives/careershift-alternatives)
+- [VouchedIn Alternatives](https://www.contactgraph.ai/alternatives/vouchedin-alternatives)
+- [Nudge Alternatives](https://www.contactgraph.ai/alternatives/nudge-alternatives)
+- [Notwork Alternatives](https://www.contactgraph.ai/alternatives/notwork-alternatives)
+
+## Developer
+
+- [GitHub](https://github.com/ContactGraph/contactgraph)
+- [MCP Server / skill.md](https://api.contactgraph.ai/skill.md)
+- [Sitemap](https://www.contactgraph.ai/sitemap.xml)

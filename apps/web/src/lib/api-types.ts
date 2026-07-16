@@ -153,6 +153,11 @@ export interface UserProfileResult {
   headline: string | null;
   location: string | null;
   google_profile_name: string | null;
+  google_profile_picture: string | null;
+  phone: string | null;
+  linkedin_url: string | null;
+  bio_summary: string | null;
+  social_profiles: Record<string, string>;
   experiences: UserExperience[];
   message: string;
 }
@@ -160,6 +165,10 @@ export interface UserProfileResult {
 export interface UpdateUserProfileRequest {
   display_name?: string | null;
   location?: string | null;
+  phone?: string | null;
+  linkedin_url?: string | null;
+  bio_summary?: string | null;
+  social_profiles?: Record<string, string> | null;
 }
 
 export interface SaveUserExperienceRequest {
@@ -173,6 +182,11 @@ export interface SaveUserExperienceRequest {
 
 export interface DeleteUserExperienceRequest {
   id: string;
+}
+
+export interface DeleteUserAccountResult {
+  deleted: boolean;
+  message: string;
 }
 
 export interface PersonMatch {
@@ -250,6 +264,7 @@ export interface TrustListInviteSummary {
   invitee_email: string;
   status: TrustListInviteStatus;
   created_at: string;
+  invite_copy: string | null;
 }
 
 export interface PendingInboundInvite {
@@ -295,6 +310,7 @@ export interface PersonListItem {
   primary_email: string | null;
   phone: string | null;
   org_name: string | null;
+  org_primary_domain: string | null;
   current_role: string | null;
   emails: string[];
   sources: string[];
@@ -305,8 +321,13 @@ export interface PersonListItem {
   is_broadcast: boolean;
   is_automated: boolean;
   is_strong_tie: boolean;
+  is_claimed: boolean;
+  avatar_url: string | null;
   linkedin_url: string | null;
   scrapingdog_enriched: boolean;
+  shared_from: string | null;
+  shared_from_user_id: string | null;
+  job_count: number;
 }
 
 export interface EnrichPersonResult {
@@ -316,6 +337,11 @@ export interface EnrichPersonResult {
 
 export interface ListPeopleRequest {
   network_only?: boolean;
+  include_shared?: boolean;
+}
+
+export interface ListOrgsRequest {
+  include_shared?: boolean;
 }
 
 export interface ListPeopleResult {
@@ -418,6 +444,7 @@ export interface PersonDetailResult {
   inferred_categories: string[];
   descriptive_tags: string[];
   social_profiles: Record<string, string>;
+  linkedin_url: string | null;
   web_links: string[];
   sources: string[];
   first_contact_at: string | null;
@@ -428,6 +455,8 @@ export interface PersonDetailResult {
   is_human: boolean;
   is_broadcast: boolean;
   is_automated: boolean;
+  is_claimed: boolean;
+  avatar_url: string | null;
   message: string;
 }
 
@@ -435,8 +464,19 @@ export interface OrgListItem {
   org_id: string;
   name: string;
   primary_domain: string | null;
+  description: string | null;
+  careers_url: string | null;
+  linkedin_url: string | null;
   categories: string[];
+  employee_count: number | null;
+  company_size_band: string | null;
   contact_count: number;
+  primary_contact_name: string | null;
+  shared_from: string[];
+  shared_contact_count: number;
+  shared_primary_contact_name: string | null;
+  shared_primary_bridge_name: string | null;
+  job_count: number;
 }
 
 export interface ListOrgsResult {
@@ -450,17 +490,122 @@ export interface OrgPersonSummary {
   display_name: string;
   primary_email: string | null;
   current_role: string | null;
+  shared_from: string | null;
 }
 
 export interface OrgDetailResult {
   org_id: string;
   name: string;
   primary_domain: string | null;
+  description: string | null;
+  careers_url: string | null;
+  linkedin_url: string | null;
   categories: string[];
+  employee_count: number | null;
+  company_size_band: string | null;
   attributes: Record<string, unknown>;
   aliases: string[];
   people: OrgPersonSummary[];
   contact_count: number;
+  message: string;
+}
+
+export interface UpdatePersonRequest {
+  person_id: string;
+  first_name?: string;
+  last_name?: string;
+  primary_email?: string;
+  phone?: string;
+  org_name?: string;
+  current_role?: string;
+  location?: string;
+  bio_summary?: string;
+  linkedin_url?: string;
+  social_profiles?: Record<string, string>;
+}
+
+export interface UpdateOrgRequest {
+  org_id: string;
+  name?: string;
+  primary_domain?: string;
+  description?: string;
+  linkedin_url?: string;
+  careers_url?: string;
+  categories?: string[];
+}
+
+export interface OrgListSummary {
+  list_id: string;
+  name: string;
+  org_count: number;
+  org_ids: string[];
+}
+
+export interface ListOrgListsResult {
+  lists: OrgListSummary[];
+  message: string;
+}
+
+export interface CreateOrgListRequest {
+  name: string;
+}
+
+export interface CreateOrgListResult {
+  list_id: string;
+  name: string;
+  message: string;
+}
+
+export interface RenameOrgListRequest {
+  list_id: string;
+  name: string;
+}
+
+export interface RenameOrgListResult {
+  list_id: string;
+  name: string;
+  message: string;
+}
+
+export interface DeleteOrgListRequest {
+  list_id: string;
+}
+
+export interface DeleteOrgListResult {
+  deleted: boolean;
+  message: string;
+}
+
+export interface ModifyOrgListMembershipRequest {
+  list_id: string;
+  org_ids: string[];
+}
+
+export interface ModifyOrgListMembershipResult {
+  list_id: string;
+  affected_count: number;
+  message: string;
+}
+
+export type OrgEnrichmentState = "pending" | "running" | "complete" | "failed";
+
+export interface EnrichOrgsResult {
+  scheduled: boolean;
+  state: OrgEnrichmentState;
+  message: string;
+}
+
+export interface OrgEnrichmentStatusResult {
+  state: OrgEnrichmentState;
+  orgs_total: number;
+  orgs_enriched: number;
+  progress_message: string | null;
+  error: string | null;
+  message: string;
+}
+
+export interface CancelOrgEnrichmentResult {
+  cancelled: boolean;
   message: string;
 }
 
@@ -505,4 +650,247 @@ export interface SecondDegreeTargetCompaniesResult {
   companies: SecondDegreeTargetCompanySummary[];
   message: string;
   system_messages: string[];
+}
+
+export interface JobMonitorConfigResult {
+  enabled: boolean;
+  list_id: string | null;
+  list_name: string | null;
+  message: string;
+}
+
+export interface SetJobMonitorConfigRequest {
+  list_id?: string | null;
+  enabled?: boolean;
+}
+
+export interface JobScanStatusResult {
+  scanned: number;
+  total: number;
+  scanning_active: boolean;
+  message: string;
+}
+
+export interface OrgJobItem {
+  job_id: string;
+  external_job_id: string;
+  source: string;
+  title: string;
+  org_name: string | null;
+  org_id: string | null;
+  org_primary_domain: string | null;
+  location: string | null;
+  department: string | null;
+  url: string;
+  description_snippet: string | null;
+  salary_min: number | null;
+  salary_max: number | null;
+  remote_status: string | null;
+  posted_at: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  is_active: boolean;
+  is_relevant: boolean | null;
+  match_score: number | null;
+  relevance_reason: string | null;
+  role_score: number | null;
+  role_reason: string | null;
+  seniority_score: number | null;
+  seniority_reason: string | null;
+  location_score: number | null;
+  location_reason: string | null;
+  contact_count: number;
+  primary_contact_name: string | null;
+  shared_contact_count: number;
+  shared_primary_contact_name: string | null;
+  shared_primary_bridge_name: string | null;
+  user_interest: "interested" | "dismissed" | null;
+}
+
+export interface OrgJobsByCompany {
+  org_id: string;
+  org_name: string;
+  primary_domain: string | null;
+  description: string | null;
+  last_checked_at: string | null;
+  jobs: OrgJobItem[];
+}
+
+export interface StartSingleOrgDiscoveryResult {
+  scheduled: boolean;
+  jobs_found: number;
+  new_jobs: number;
+  message: string;
+}
+
+export interface ListOrgJobsResult {
+  companies: OrgJobsByCompany[];
+  total_jobs: number;
+  total_relevant: number;
+  message: string;
+}
+
+export interface FlatJobListResult {
+  jobs: OrgJobItem[];
+  total_jobs: number;
+  total_relevant: number;
+  message: string;
+}
+
+export interface JobDetailResult {
+  job: OrgJobItem;
+  org_description: string | null;
+  org_primary_domain: string | null;
+  contacts: OrgPersonSummary[];
+  contact_count: number;
+  message: string;
+}
+
+export interface DedupPersonsResult {
+  groups_merged: number;
+  persons_removed: number;
+  message: string;
+}
+
+export interface SetJobPreferencesRequest {
+  text: string;
+  location_pref: string | null;
+  location_city: string | null;
+  commute_max_minutes: number | null;
+  commute_note: string | null;
+}
+
+export interface JobTargetScopePayload {
+  industry_tags: string[];
+  sharer_names: string[];
+  size_bands: string[];
+}
+
+export interface SetJobTargetScopeRequest {
+  target_scope: JobTargetScopePayload;
+}
+
+export interface JobPreferencesResult {
+  text: string | null;
+  location_pref: string | null;
+  location_city: string | null;
+  commute_max_minutes: number | null;
+  commute_note: string | null;
+  target_scope: JobTargetScopePayload | null;
+  classified_job_count: number;
+  message: string;
+}
+
+export type JobDigestFrequency = "daily" | "weekly" | "off";
+
+export interface NotificationPreferencesResult {
+  job_digest_frequency: JobDigestFrequency;
+  message: string;
+}
+
+export interface SetNotificationPreferencesRequest {
+  job_digest_frequency: JobDigestFrequency;
+}
+
+export interface PipelineStatus {
+  name: string;
+  queued: number;
+  active: number;
+  completed_24h: number;
+  failed_24h: number;
+  last_run_at: string | null;
+  last_run_duration_ms: number | null;
+  items_processed: number | null;
+  items_total: number | null;
+}
+
+export interface WorkerStatusResult {
+  pipelines: PipelineStatus[];
+  worker_connected: boolean;
+  redis_connected: boolean;
+  message: string;
+}
+
+export interface AdminUserItem {
+  user_id: string;
+  email: string;
+  display_name: string | null;
+  has_vcf: boolean;
+  has_linkedin: boolean;
+  person_count: number;
+  org_count: number;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+}
+
+export interface AdminUsersResult {
+  users: AdminUserItem[];
+  message: string;
+}
+
+export interface NextStepActionLink {
+  label: string;
+  href: string;
+}
+
+export interface NextStepContactCandidate {
+  person_id: string;
+  display_name: string;
+  current_role: string | null;
+  phone: string | null;
+}
+
+export interface NextStepPayload {
+  unreviewed_job_count: number | null;
+  job_id: string | null;
+  job_title: string | null;
+  org_name: string | null;
+  job_url: string | null;
+  proposed_message: string | null;
+  outreach_type: "direct" | "bridge" | null;
+  bridge_name: string | null;
+  bridge_phone: string | null;
+  target_contact_name: string | null;
+  contacts: NextStepContactCandidate[];
+  action_links: NextStepActionLink[];
+}
+
+export interface NextStepItem {
+  dedup_key: string;
+  kind: string;
+  status: "open" | "done" | "skipped";
+  title: string;
+  detail: string | null;
+  sort_rank: number;
+  job_id: string | null;
+  person_id: string | null;
+  org_id: string | null;
+  payload: NextStepPayload;
+}
+
+export interface NextStepsResult {
+  tasks: NextStepItem[];
+  message: string;
+}
+
+export interface UpdateTaskStatusRequest {
+  dedup_key: string;
+  status: "done" | "skipped";
+}
+
+export interface UpdateTaskStatusResult {
+  dedup_key: string;
+  status: "open" | "done" | "skipped";
+  message: string;
+}
+
+export interface SetJobInterestRequest {
+  job_id: string;
+  interest: "interested" | "dismissed";
+}
+
+export interface SetJobInterestResult {
+  job_id: string;
+  interest: "interested" | "dismissed";
+  message: string;
 }
