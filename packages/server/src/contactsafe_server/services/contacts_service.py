@@ -33,6 +33,8 @@ from contactsafe_server.db.models import (
     EmploymentClaim,
     Org,
     OrgJob,
+    OrgList,
+    OrgListMembership,
     Person,
     PersonAlias,
     PersonAttributeClaim,
@@ -404,6 +406,8 @@ class ContactsService:
         if include_shared:
             await self._merge_shared_orgs(user_id, org_map)
 
+        await self._merge_org_list_member_orgs(user_id, org_map)
+
         job_counts: dict[uuid.UUID, int] = await self._load_active_job_counts(
             set(org_map.keys())
         )
@@ -424,6 +428,35 @@ class ContactsService:
             total=len(orgs),
             message=f"Found {len(orgs)} organization(s) in your graph.",
         )
+
+    async def _merge_org_list_member_orgs(
+        self,
+        user_id: uuid.UUID,
+        org_map: dict[uuid.UUID, OrgListItem],
+    ) -> None:
+        """Include orgs on the user's lists (e.g. watched companies with no contacts)."""
+        result = await self._db.execute(
+            select(Org)
+            .join(OrgListMembership, OrgListMembership.org_id == Org.id)
+            .join(OrgList, OrgList.id == OrgListMembership.org_list_id)
+            .where(OrgList.user_id == user_id)
+            .distinct(),
+        )
+        for org in result.scalars().all():
+            if org.id in org_map:
+                continue
+            org_map[org.id] = OrgListItem(
+                org_id=org.id,
+                name=org.canonical_name,
+                primary_domain=org.primary_domain,
+                description=org.description,
+                careers_url=org.careers_url,
+                linkedin_url=org.linkedin_url,
+                categories=list(org.categories or []),
+                employee_count=org.employee_count,
+                company_size_band=org.company_size_band,
+                contact_count=0,
+            )
 
     async def get_org(
         self,

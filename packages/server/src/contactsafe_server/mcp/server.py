@@ -6,6 +6,8 @@ from typing import Any
 from uuid import UUID
 
 from contactsafe_core.contact_schemas import (
+    AddWatchedCompanyRequest,
+    AddWatchedCompanyResult,
     DedupPersonsResult,
     FlatJobListResult,
     JobDetailResult,
@@ -80,6 +82,7 @@ def create_mcp_server(settings: Settings) -> FastMCP:
             "list_people / get_person to browse and inspect contacts, "
             "list_orgs / get_org to browse and inspect organizations, "
             "list_jobs / get_job to browse job openings at network companies, "
+            "add_watched_company to monitor a company with no contacts, "
             "view_trusted_users / edit_trusted_users to manage your "
             "trust list."
         ),
@@ -444,6 +447,38 @@ def create_mcp_server(settings: Settings) -> FastMCP:
             user_id,
             job_id=UUID(job_id),
             interest=interest,  # type: ignore[arg-type]
+        )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def add_watched_company(
+        name: str,
+        website: str | None = None,
+        industry_tags: list[str] | None = None,
+        company_size_band: str | None = None,
+        employee_count: int | None = None,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> AddWatchedCompanyResult:
+        """Add a company to job search monitoring even with no contacts there.
+
+        Creates the company in the graph if needed, adds it to the user's
+        Job Prospects list, and queues enrichment/job scraping. Prefer
+        including a website/domain (e.g. hubspot.com) for better matching.
+        Optionally pass industry_tags (NAICS-style codes such as "naics:51"),
+        company_size_band (e.g. "51-200"), and employee_count as hints used
+        for scoping/ranking until enrichment refines them.
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.add_watched_company(
+            lifespan.app_context,
+            user_id,
+            body=AddWatchedCompanyRequest(
+                name=name,
+                website=website,
+                industry_tags=industry_tags or [],
+                company_size_band=company_size_band,
+                employee_count=employee_count,
+            ),
         )
 
     return mcp

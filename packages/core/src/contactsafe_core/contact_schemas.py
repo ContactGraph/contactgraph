@@ -344,6 +344,21 @@ class ModifyOrgListMembershipResult(BaseModel):
     message: str
 
 
+class AddWatchedCompanyRequest(BaseModel):
+    name: str
+    website: str | None = None
+    industry_tags: list[str] = Field(default_factory=list)
+    company_size_band: str | None = None
+    employee_count: int | None = None
+
+
+class AddWatchedCompanyResult(BaseModel):
+    org_id: UUID | None = None
+    name: str
+    added: bool
+    message: str
+
+
 class JobMonitorConfigResult(BaseModel):
     enabled: bool = False
     list_id: UUID | None = None

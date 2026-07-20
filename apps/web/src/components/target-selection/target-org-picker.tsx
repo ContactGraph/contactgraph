@@ -1,7 +1,7 @@
 "use client";
 
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { Star, X } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Loader2, Plus, Star, X } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -22,8 +22,13 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import type { ListOrgsResult, OrgListItem } from "@/lib/api-types";
-import { formatIndustryTags } from "@/lib/industry-tags";
+import type {
+  AddWatchedCompanyResult,
+  ListOrgsResult,
+  OrgListItem,
+} from "@/lib/api-types";
+import { COMPANY_SIZE_OPTIONS } from "@/lib/company-size";
+import { formatIndustryTags, ORG_INDUSTRY_OPTIONS } from "@/lib/industry-tags";
 import { proxyPost } from "@/lib/proxy-client";
 import { cn } from "@/lib/utils";
 import {
@@ -65,8 +70,13 @@ export function TargetOrgPicker({
   onScopeChange,
   onScopePersist,
 }: TargetOrgPickerProps) {
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState<string>("");
   const [scopeExpanded, setScopeExpanded] = useState<boolean>(true);
+  const [watchName, setWatchName] = useState<string>("");
+  const [watchWebsite, setWatchWebsite] = useState<string>("");
+  const [watchIndustry, setWatchIndustry] = useState<string>("");
+  const [watchSize, setWatchSize] = useState<string>("");
   const [sorting, setSorting] = useState<SortingState>([
     { id: "name", desc: false },
   ]);
@@ -89,6 +99,35 @@ export function TargetOrgPicker({
     replaceSelection,
   } = useOrgListMembership(config.listName);
 
+  const watchCompanyMutation = useMutation({
+    mutationFn: (payload: {
+      name: string;
+      website: string | null;
+      industry_tags: string[];
+      company_size_band: string | null;
+    }) => proxyPost<AddWatchedCompanyResult>("add-watched-company", payload),
+    onSuccess: async (result: AddWatchedCompanyResult) => {
+      if (!result.added) {
+        toast.error(result.message);
+        return;
+      }
+      toast.success(result.message);
+      setWatchName("");
+      setWatchWebsite("");
+      setWatchIndustry("");
+      setWatchSize("");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["org-lists"] }),
+        queryClient.invalidateQueries({ queryKey: ["organizations"] }),
+        queryClient.invalidateQueries({ queryKey: ["job-scan-status"] }),
+        queryClient.invalidateQueries({ queryKey: ["flat-jobs"] }),
+      ]);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
   const allOrgs: OrgListItem[] = orgsQuery.data?.orgs ?? [];
 
   const scopedOrgs: OrgListItem[] = useMemo(
@@ -103,6 +142,17 @@ export function TargetOrgPicker({
       .filter((org): org is OrgListItem => org !== undefined)
       .sort((left, right) => left.name.localeCompare(right.name));
   }, [allOrgs, selectedOrgIds]);
+
+  // Orgs the user has explicitly selected/watched should always stay visible in
+  // the table, even if the active scope filters (industry/size) would hide them
+  // (e.g. a freshly watched company has no category until enrichment runs).
+  const visibleOrgs: OrgListItem[] = useMemo(() => {
+    const scopedIds = new Set<string>(scopedOrgs.map((org) => org.org_id));
+    const extraSelected: OrgListItem[] = allOrgs.filter(
+      (org) => selectedOrgIds.has(org.org_id) && !scopedIds.has(org.org_id),
+    );
+    return [...scopedOrgs, ...extraSelected];
+  }, [scopedOrgs, allOrgs, selectedOrgIds]);
 
   const applyMatchingMutation = useMutation({
     mutationFn: async (mode: "add" | "replace") => {
@@ -270,7 +320,7 @@ export function TargetOrgPicker({
   );
 
   const table = useReactTable({
-    data: scopedOrgs,
+    data: visibleOrgs,
     columns,
     state: { sorting, globalFilter: search },
     onSortingChange: setSorting,
@@ -354,6 +404,112 @@ export function TargetOrgPicker({
             collapsed={selectedCount > 0 && !scopeExpanded}
             onToggleCollapsed={() => setScopeExpanded((current) => !current)}
           />
+
+          <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+            <p className="text-xs font-medium">Watch a company</p>
+            <p className="text-xs text-muted-foreground">
+              Add a company even if you don&apos;t know anyone there — we&apos;ll
+              include it in job search.
+            </p>
+            <form
+              className="flex flex-wrap items-end gap-2"
+              onSubmit={(event) => {
+                event.preventDefault();
+                const name: string = watchName.trim();
+                if (!name || watchCompanyMutation.isPending) {
+                  return;
+                }
+                watchCompanyMutation.mutate({
+                  name,
+                  website: watchWebsite.trim() || null,
+                  industry_tags: watchIndustry ? [watchIndustry] : [],
+                  company_size_band: watchSize || null,
+                });
+              }}
+            >
+              <label className="flex min-w-[10rem] flex-1 flex-col gap-1">
+                <span className="text-[10px] text-muted-foreground">
+                  Company name
+                </span>
+                <input
+                  type="text"
+                  className="h-8 rounded-md border bg-background px-2 text-sm"
+                  placeholder="e.g. HubSpot"
+                  value={watchName}
+                  onChange={(event) => setWatchName(event.target.value)}
+                  disabled={watchCompanyMutation.isPending}
+                />
+              </label>
+              <label className="flex min-w-[10rem] flex-1 flex-col gap-1">
+                <span className="text-[10px] text-muted-foreground">
+                  Website (optional)
+                </span>
+                <input
+                  type="text"
+                  className="h-8 rounded-md border bg-background px-2 text-sm"
+                  placeholder="e.g. hubspot.com"
+                  value={watchWebsite}
+                  onChange={(event) => setWatchWebsite(event.target.value)}
+                  disabled={watchCompanyMutation.isPending}
+                />
+              </label>
+              <label className="flex min-w-[10rem] flex-1 flex-col gap-1">
+                <span className="text-[10px] text-muted-foreground">
+                  Industry (optional)
+                </span>
+                <select
+                  className="h-8 rounded-md border bg-background px-2 text-sm"
+                  value={watchIndustry}
+                  onChange={(event) => setWatchIndustry(event.target.value)}
+                  disabled={watchCompanyMutation.isPending}
+                >
+                  <option value="">Any / unknown</option>
+                  {ORG_INDUSTRY_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex min-w-[10rem] flex-1 flex-col gap-1">
+                <span className="text-[10px] text-muted-foreground">
+                  Company size (optional)
+                </span>
+                <select
+                  className="h-8 rounded-md border bg-background px-2 text-sm"
+                  value={watchSize}
+                  onChange={(event) => setWatchSize(event.target.value)}
+                  disabled={watchCompanyMutation.isPending}
+                >
+                  <option value="">Any / unknown</option>
+                  {COMPANY_SIZE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <Button
+                type="submit"
+                size="sm"
+                className="h-8"
+                disabled={
+                  !watchName.trim() || watchCompanyMutation.isPending
+                }
+              >
+                {watchCompanyMutation.isPending ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Plus className="size-3.5" />
+                )}
+                Add
+              </Button>
+            </form>
+            <p className="text-[10px] text-muted-foreground">
+              Industry and size help us scope and rank jobs before enrichment
+              fills in the rest.
+            </p>
+          </div>
 
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">

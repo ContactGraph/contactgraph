@@ -9,6 +9,15 @@ const LINKEDIN_SIZE_BAND_LABELS: Readonly<Record<string, string>> = {
   "10001+": "10,001+ employees",
 };
 
+export interface CompanySizeOption {
+  value: string;
+  label: string;
+}
+
+export const COMPANY_SIZE_OPTIONS: ReadonlyArray<CompanySizeOption> = Object.entries(
+  LINKEDIN_SIZE_BAND_LABELS,
+).map(([value, label]): CompanySizeOption => ({ value, label }));
+
 export function formatCompanySize(
   band: string | null | undefined,
   employeeCount: number | null | undefined = null,

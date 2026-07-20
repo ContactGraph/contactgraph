@@ -24,6 +24,17 @@ const ORG_INDUSTRY_LABELS: Readonly<Record<string, string>> = {
   legal: "Legal",
 };
 
+export interface IndustryTagOption {
+  value: string;
+  label: string;
+}
+
+export const ORG_INDUSTRY_OPTIONS: ReadonlyArray<IndustryTagOption> = Object.entries(
+  ORG_INDUSTRY_LABELS,
+)
+  .map(([value, label]): IndustryTagOption => ({ value, label }))
+  .sort((left, right) => left.label.localeCompare(right.label));
+
 export function formatIndustryTag(tag: string): string {
   const normalized: string = tag.trim().toLowerCase();
   return ORG_INDUSTRY_LABELS[normalized] ?? tag;

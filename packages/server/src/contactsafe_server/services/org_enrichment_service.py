@@ -25,8 +25,10 @@ from contactsafe_server.db.models import (
     Org,
     OrgEnrichmentRun,
     OrgEnrichmentScrapeRun,
+    OrgListMembership,
     Person,
     PersonAlias,
+    User,
     UserPersonObservation,
 )
 from contactsafe_server.graph_event_publishers import (
@@ -347,17 +349,38 @@ class OrgEnrichmentService:
             orgs_total=run.orgs_total,
         )
 
-    async def collect_all_enrichable_org_ids(self) -> list[uuid.UUID]:
+    async def _collect_monitored_org_ids(self) -> set[uuid.UUID]:
+        """Orgs on any enabled user's job-monitor list (includes contact-less watches)."""
         result = await self._db.execute(
+            select(OrgListMembership.org_id)
+            .join(User, User.job_monitor_list_id == OrgListMembership.org_list_id)
+            .where(
+                User.job_monitor_enabled.is_(True),
+                User.job_monitor_list_id.is_not(None),
+            )
+            .distinct(),
+        )
+        return set(result.scalars().all())
+
+    async def collect_all_enrichable_org_ids(self) -> list[uuid.UUID]:
+        person_linked = await self._db.execute(
             select(Org.id)
             .join(Person, Person.current_org_id == Org.id)
-            .group_by(Org.id)
+            .group_by(Org.id),
+        )
+        org_ids: set[uuid.UUID] = set(person_linked.scalars().all())
+        org_ids |= await self._collect_monitored_org_ids()
+        if not org_ids:
+            return []
+        ordered = await self._db.execute(
+            select(Org.id)
+            .where(Org.id.in_(org_ids))
             .order_by(Org.canonical_name.asc()),
         )
-        return [row[0] for row in result.all()]
+        return list(ordered.scalars().all())
 
     async def collect_orgs_needing_enrichment(self) -> list[uuid.UUID]:
-        """Orgs linked to a person that are outside the enrichment cooldown window."""
+        """Person-linked or monitored orgs outside the enrichment cooldown window."""
         cutoff: datetime = datetime.now(tz=UTC) - timedelta(
             days=self._settings.org_enrichment_cooldown_days,
         )
@@ -369,14 +392,26 @@ class OrgEnrichmentService:
             )
             .distinct()
         )
-        result = await self._db.execute(
+        person_linked = await self._db.execute(
             select(Org.id)
             .join(Person, Person.current_org_id == Org.id)
             .where(Org.id.not_in(recently_enriched))
-            .group_by(Org.id)
+            .group_by(Org.id),
+        )
+        org_ids: set[uuid.UUID] = set(person_linked.scalars().all())
+        monitored: set[uuid.UUID] = await self._collect_monitored_org_ids()
+        if monitored:
+            recently_ids = await self._db.execute(recently_enriched)
+            recently_set: set[uuid.UUID] = set(recently_ids.scalars().all())
+            org_ids |= monitored - recently_set
+        if not org_ids:
+            return []
+        ordered = await self._db.execute(
+            select(Org.id)
+            .where(Org.id.in_(org_ids))
             .order_by(Org.canonical_name.asc()),
         )
-        return [row[0] for row in result.all()]
+        return list(ordered.scalars().all())
 
     async def was_recently_enriched(self, org_id: uuid.UUID) -> bool:
         cutoff: datetime = datetime.now(tz=UTC) - timedelta(

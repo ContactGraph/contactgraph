@@ -6,8 +6,12 @@ export function orgMatchesSharerScope(
   org: OrgListItem,
   sharerNames: ReadonlySet<string>,
 ): boolean {
+  // Watched companies (list membership, no contacts) should always remain visible.
+  const isWatchedOnly: boolean =
+    org.contact_count === 0 && org.shared_contact_count === 0;
+
   if (sharerNames.size === 0) {
-    return org.contact_count > 0;
+    return org.contact_count > 0 || isWatchedOnly;
   }
 
   const includeMine: boolean = sharerNames.has(MINE_SHARER_KEY);
@@ -15,7 +19,7 @@ export function orgMatchesSharerScope(
     (name) => name !== MINE_SHARER_KEY && org.shared_from.includes(name),
   );
 
-  if (includeMine && org.contact_count > 0) {
+  if (includeMine && (org.contact_count > 0 || isWatchedOnly)) {
     return true;
   }
   return includeShared;

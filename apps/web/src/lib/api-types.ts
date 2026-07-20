@@ -587,6 +587,21 @@ export interface ModifyOrgListMembershipResult {
   message: string;
 }
 
+export interface AddWatchedCompanyRequest {
+  name: string;
+  website?: string | null;
+  industry_tags?: string[];
+  company_size_band?: string | null;
+  employee_count?: number | null;
+}
+
+export interface AddWatchedCompanyResult {
+  org_id: string | null;
+  name: string;
+  added: boolean;
+  message: string;
+}
+
 export type OrgEnrichmentState = "pending" | "running" | "complete" | "failed";
 
 export interface EnrichOrgsResult {
