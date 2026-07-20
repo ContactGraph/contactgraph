@@ -17,7 +17,9 @@ migrate-new:
 	uv run --package contactsafe-server alembic -c migrations/alembic.ini revision --autogenerate -m "$$msg"
 
 dev:
-	uv run --package contactsafe-server uvicorn contactsafe_server.main:app --reload --host 0.0.0.0 --port 8000
+	uv run --package contactsafe-server python -m uvicorn contactsafe_server.main:app --reload \
+		--reload-dir packages/server --reload-dir packages/core \
+		--host 0.0.0.0 --port 8000
 
 worker:
 	uv run --package contactsafe-server arq contactsafe_server.worker.WorkerSettings

@@ -22,6 +22,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_core.contact_schemas import (
+    AddWatchedCompanyRequest,
+    AddWatchedCompanyResult,
     CancelOrgEnrichmentResult,
     CreateOrgListRequest,
     CreateOrgListResult,
@@ -735,6 +737,18 @@ async def api_remove_orgs_from_list(
         return await actions.remove_orgs_from_list(ctx, user_id, body=body)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/add-watched-company", response_model=AddWatchedCompanyResult)
+async def api_add_watched_company(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: AddWatchedCompanyRequest,
+) -> AddWatchedCompanyResult:
+    try:
+        return await actions.add_watched_company(ctx, user_id, body=body)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.post("/get-job-monitor-config", response_model=JobMonitorConfigResult)

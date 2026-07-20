@@ -14,6 +14,8 @@ from uuid import UUID
 from datetime import UTC, datetime
 
 from contactsafe_core.contact_schemas import (
+    AddWatchedCompanyRequest,
+    AddWatchedCompanyResult,
     CancelOrgEnrichmentResult,
     CreateOrgListRequest,
     CreateOrgListResult,
@@ -55,6 +57,7 @@ from contactsafe_core.contact_schemas import (
     UpdatePersonRequest,
 )
 from datetime import date
+from urllib.parse import urlparse
 
 from contactsafe_core.enums import SessionStatus, SourceType, EnrichmentRunState, SyncState
 from contactsafe_core.schemas import (
@@ -88,7 +91,39 @@ from contactsafe_core.schemas import (
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from contactsafe_server.db.models import ConnectSession, EmploymentClaim, Org, Person, PersonAlias, PersonAttributeClaim, Source, User
+from contactsafe_server.db.models import (
+    ConnectSession,
+    EmploymentClaim,
+    Org,
+    OrgAlias,
+    OrgList,
+    Person,
+    PersonAlias,
+    PersonAttributeClaim,
+    Source,
+    User,
+)
+
+JOB_PROSPECTS_LIST_NAME: str = "Job Prospects"
+
+
+def _normalize_website_to_domain(website: str | None) -> str | None:
+    """Extract a bare domain from a website URL or domain string."""
+    if website is None:
+        return None
+    raw: str = website.strip()
+    if not raw:
+        return None
+    candidate: str = raw if "://" in raw else f"https://{raw}"
+    parsed = urlparse(candidate)
+    host: str = (parsed.hostname or "").lower().removeprefix("www.")
+    if not host or "." not in host:
+        # Bare-looking input without a parseable host (e.g. "hubspot.com/path")
+        bare: str = raw.lower().removeprefix("www.").split("/")[0].split("?")[0]
+        if "." in bare and " " not in bare:
+            return bare
+        return None
+    return host
 from contactsafe_server.services.claim_writer import record_employment, record_person_attribute
 from contactsafe_server.services.contacts_service import normalize_social_platform
 from contactsafe_server.services.entity_resolution import EntityResolver
@@ -1610,6 +1645,131 @@ async def remove_orgs_from_list(
         )
         await db.commit()
         return result
+
+
+async def add_watched_company(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    body: AddWatchedCompanyRequest,
+) -> AddWatchedCompanyResult:
+    """Create/resolve an org by name (+ optional website) and add it to Job Prospects."""
+    if user_id is None:
+        raise ValueError("Authentication required.")
+
+    name: str = body.name.strip()
+    if not name:
+        return AddWatchedCompanyResult(
+            org_id=None,
+            name="",
+            added=False,
+            message="Company name is required.",
+        )
+
+    domain: str | None = _normalize_website_to_domain(body.website)
+
+    async with ctx.session_factory() as db:
+        resolver: EntityResolver = EntityResolver(db)
+        org: Org | None = await resolver.resolve_org(domain=domain, name=name)
+        if org is None:
+            return AddWatchedCompanyResult(
+                org_id=None,
+                name=name,
+                added=False,
+                message=(
+                    f"\"{name}\" does not look like a real company "
+                    "(e.g. Self Employed, Stealth Startup)."
+                ),
+            )
+
+        if domain is not None and org.primary_domain is None:
+            org.primary_domain = domain
+            existing_alias = await db.execute(
+                select(OrgAlias.id).where(
+                    OrgAlias.kind == "domain",
+                    OrgAlias.value == domain,
+                ),
+            )
+            if existing_alias.scalar_one_or_none() is None:
+                db.add(OrgAlias(org_id=org.id, kind="domain", value=domain))
+            await db.flush()
+
+        # Apply user-supplied metadata as hints. Only fill fields the org does
+        # not already have so we never clobber existing/enriched data; a later
+        # enrichment run may still refine these with authoritative values.
+        industry_tags: list[str] = [
+            tag.strip() for tag in body.industry_tags if tag.strip()
+        ]
+        if industry_tags and not org.categories:
+            org.categories = industry_tags
+        if body.company_size_band is not None and org.company_size_band is None:
+            band: str = body.company_size_band.strip()
+            if band:
+                org.company_size_band = band
+        if body.employee_count is not None and org.employee_count is None:
+            if body.employee_count > 0:
+                org.employee_count = body.employee_count
+        await db.flush()
+
+        list_service: OrgListService = OrgListService(db)
+        existing_list_result = await db.execute(
+            select(OrgList).where(
+                OrgList.user_id == user_id,
+                OrgList.name == JOB_PROSPECTS_LIST_NAME,
+            ),
+        )
+        org_list: OrgList | None = existing_list_result.scalar_one_or_none()
+        list_id: UUID
+        if org_list is None:
+            created: CreateOrgListResult = await list_service.create_org_list(
+                user_id,
+                name=JOB_PROSPECTS_LIST_NAME,
+            )
+            list_id = created.list_id
+        else:
+            list_id = org_list.id
+
+        membership: ModifyOrgListMembershipResult = await list_service.add_orgs_to_list(
+            user_id,
+            list_id=list_id,
+            org_ids=[org.id],
+        )
+        await db.commit()
+
+        from contactsafe_server.config import get_settings
+
+        if get_settings().use_arq_worker:
+            from contactsafe_server.queue import enqueue_background_job
+
+            org_id_str: str = str(org.id)
+            await enqueue_background_job(
+                "enrich_org",
+                org_id_str,
+                _job_id=f"enrich-org-{org_id_str}",
+            )
+            await enqueue_background_job(
+                "scrape_org_jobs",
+                org_id_str,
+                force=True,
+                trigger_user_id=str(user_id),
+                _job_id=f"scrape-org-{org_id_str}",
+            )
+
+        already_on_list: bool = membership.affected_count == 0
+        message: str
+        if already_on_list:
+            message = f"\"{org.canonical_name}\" is already on your job search list."
+        else:
+            message = (
+                f"Watching \"{org.canonical_name}\". "
+                "Jobs will appear after the next scan."
+            )
+        return AddWatchedCompanyResult(
+            org_id=org.id,
+            name=org.canonical_name,
+            added=True,
+            message=message,
+        )
 
 
 async def get_job_monitor_config(
