@@ -423,6 +423,8 @@ class OrgJobItem(BaseModel):
     seniority_reason: str | None = None
     location_score: int | None = None
     location_reason: str | None = None
+    qualification_score: int | None = None
+    qualification_reason: str | None = None
     contact_count: int = 0
     primary_contact_name: str | None = None
     shared_contact_count: int = 0
@@ -494,6 +496,7 @@ class SetJobTargetScopeRequest(BaseModel):
 
 class JobPreferencesResult(BaseModel):
     text: str | None = None
+    suggested_text: str | None = None
     location_pref: str | None = None
     location_city: str | None = None
     commute_max_minutes: int | None = None

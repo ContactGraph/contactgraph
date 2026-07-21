@@ -444,6 +444,7 @@ async def api_upload_source(
             source_type=body.source_type,
             filename=body.filename,
             content=body.content,
+            regenerate_role_suggestions=body.regenerate_role_suggestions,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

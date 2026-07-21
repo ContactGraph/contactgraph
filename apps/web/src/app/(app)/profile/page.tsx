@@ -330,6 +330,7 @@ export default function ProfilePage() {
       source_type: SourceType;
       filename: string;
       content: string;
+      regenerate_role_suggestions?: boolean;
     }) => proxyPost<UploadSourceResult>("upload-source", payload),
     onSuccess: async () => {
       setUploadError(null);
@@ -342,7 +343,7 @@ export default function ProfilePage() {
   });
 
   const handlePdfUpload = useCallback(
-    async (file: File): Promise<void> => {
+    async (file: File, regenerateRoleSuggestions: boolean): Promise<void> => {
       const buffer: ArrayBuffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       let binary = "";
@@ -354,6 +355,7 @@ export default function ProfilePage() {
         source_type: "linkedin_profile_upload",
         filename: file.name,
         content: base64,
+        regenerate_role_suggestions: regenerateRoleSuggestions,
       });
     },
     [uploadMutation],
@@ -404,8 +406,8 @@ export default function ProfilePage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">Your Profile</h1>
           <p className="text-muted-foreground">
-            Your professional background helps identify the right version of your
-            contacts during enrichment.
+            Your LinkedIn PDF or resume helps match you to relevant roles and
+            identify the right version of your contacts during enrichment.
           </p>
         </div>
         {linkedinProfileComplete ? (
@@ -430,11 +432,11 @@ export default function ProfilePage() {
         <>
           <FileDropZone
             accept=".pdf,application/pdf"
-            onFileSelect={(file: File) => void handlePdfUpload(file)}
+            onFileSelect={(file: File) => void handlePdfUpload(file, true)}
             disabled={linkedinProfileBusy}
             busy={linkedinProfileBusy}
             busyMessage={awaitingSync ? "Processing PDF…" : "Uploading…"}
-            idleMessage="Drag and drop your LinkedIn PDF here"
+            idleMessage="Drag and drop your LinkedIn PDF or resume here"
             idleHint="or click to choose a file"
           />
 
@@ -629,7 +631,7 @@ export default function ProfilePage() {
             </div>
           ) : experiences.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No experiences yet. Upload your LinkedIn PDF or add manually.
+              No experiences yet. Upload your LinkedIn PDF or resume, or add manually.
             </p>
           ) : (
             <ul className="divide-y">
@@ -865,8 +867,8 @@ export default function ProfilePage() {
       <LinkedInProfileUploadDialog
         open={uploadDialogOpen}
         onOpenChange={setUploadDialogOpen}
-        onFileSelect={(file: File) => {
-          void handlePdfUpload(file);
+        onFileSelect={(file: File, regenerateRoleSuggestions: boolean) => {
+          void handlePdfUpload(file, regenerateRoleSuggestions);
         }}
         isPending={uploadMutation.isPending}
         isProcessing={awaitingSync}

@@ -349,6 +349,7 @@ class UploadSourceRequest(BaseModel):
     source_type: str
     filename: str
     content: str
+    regenerate_role_suggestions: bool = True
 
 
 class UploadSourceResult(BaseModel):

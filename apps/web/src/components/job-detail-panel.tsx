@@ -94,7 +94,7 @@ function SubScoreRow({
   return (
     <div className="space-y-0.5">
       <div className="flex items-center gap-2">
-        <span className="w-16 shrink-0 text-xs font-medium">{label}</span>
+        <span className="w-24 shrink-0 text-xs font-medium">{label}</span>
         <div className="h-1.5 flex-1 rounded-full bg-muted">
           <div
             className={`h-full rounded-full ${barColor}`}
@@ -109,7 +109,7 @@ function SubScoreRow({
         </span>
       </div>
       {reason ? (
-        <p className="pl-[4.5rem] text-xs text-muted-foreground">{reason}</p>
+        <p className="pl-[6.5rem] text-xs text-muted-foreground">{reason}</p>
       ) : null}
     </div>
   );
@@ -180,19 +180,26 @@ export function JobDetailPanel({
           </div>
           {job.role_score !== null ||
           job.seniority_score !== null ||
-          job.location_score !== null ? (
+          job.location_score !== null ||
+          job.qualification_score !== null ? (
             <div className="space-y-1.5 rounded-md border bg-muted/30 px-3 py-2">
               <SubScoreRow
                 label="Function"
                 score={job.role_score}
                 reason={job.role_reason}
-                weight={60}
+                weight={45}
+              />
+              <SubScoreRow
+                label="Qualification"
+                score={job.qualification_score}
+                reason={job.qualification_reason}
+                weight={25}
               />
               <SubScoreRow
                 label="Seniority"
                 score={job.seniority_score}
                 reason={job.seniority_reason}
-                weight={25}
+                weight={15}
               />
               <SubScoreRow
                 label="Location"

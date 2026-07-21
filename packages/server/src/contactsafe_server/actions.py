@@ -832,6 +832,7 @@ async def upload_source(
     source_type: str,
     filename: str,
     content: str,
+    regenerate_role_suggestions: bool = True,
 ) -> UploadSourceResult:
     if user_id is None:
         raise ValueError("Authentication required. Provide a Bearer token.")
@@ -859,6 +860,7 @@ async def upload_source(
             filename=filename,
             content=content,
             encryptor=ctx.encryptor,
+            regenerate_role_suggestions=regenerate_role_suggestions,
         )
         await db.commit()
         sync_result: SyncSourceResult = await sources.request_sync(source.id)
@@ -1945,6 +1947,7 @@ async def get_job_preferences(
             )
         return JobPreferencesResult(
             text=user.job_preferences_text,
+            suggested_text=user.job_suggested_roles,
             location_pref=user.job_location_pref,
             location_city=user.job_location_city,
             commute_max_minutes=user.job_commute_max_minutes,
@@ -1977,6 +1980,7 @@ async def set_job_preferences(
         user.job_location_city = location_city.strip() if location_city else None
         user.job_commute_max_minutes = commute_max_minutes
         user.job_commute_note = commute_note.strip() if commute_note else None
+        suggested_text: str | None = user.job_suggested_roles
         await db.commit()
 
     import asyncio
@@ -2008,8 +2012,11 @@ async def set_job_preferences(
 
     return JobPreferencesResult(
         text=text.strip() or None,
+        suggested_text=suggested_text,
         location_pref=location_pref,
         location_city=location_city.strip() if location_city else None,
+        commute_max_minutes=commute_max_minutes,
+        commute_note=commute_note.strip() if commute_note else None,
         classified_job_count=0,
         message="Preferences saved. Rescoring jobs in background…",
     )
