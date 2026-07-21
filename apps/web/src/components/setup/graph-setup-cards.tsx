@@ -18,6 +18,7 @@ import {
 import { useGraphImport } from "@/lib/use-graph-import";
 import {
   importProgressLabel,
+  isGmailSyncComplete,
   isLinkedInImportComplete,
   isPhoneImportComplete,
   isSourceStepInProgress,
@@ -93,28 +94,36 @@ export function GraphSetupCards({ compact = false }: { compact?: boolean }) {
     sources,
     phoneSource,
     linkedinConnectionsSource,
+    gmailSource,
     phoneDialogOpen,
     setPhoneDialogOpen,
     linkedinConnectionsDialogOpen,
     setLinkedinConnectionsDialogOpen,
     phoneUploadError,
     connectionsUploadError,
+    gmailSyncError,
     phoneUploadPending,
     linkedinUploadPending,
+    gmailSyncPending,
     phoneProcessing,
     linkedinConnectionsProcessing,
+    gmailProcessing,
     handlePhoneFileUpload,
     handleLinkedInConnectionsFileUpload,
+    handleSyncGmail,
     handleCancelSync,
   } = graphImport;
 
   const phoneComplete: boolean = isPhoneImportComplete(sources);
   const linkedinComplete: boolean = isLinkedInImportComplete(sources);
+  const gmailComplete: boolean = isGmailSyncComplete(sources);
   const phoneInProgress: boolean =
     isSourceStepInProgress("phone_contacts_upload", sources) || phoneProcessing;
   const linkedinInProgress: boolean =
     isSourceStepInProgress("linkedin_connections_upload", sources) ||
     linkedinConnectionsProcessing;
+  const gmailInProgress: boolean =
+    isSourceStepInProgress("google_mail", sources) || gmailProcessing;
 
   return (
     <div className={compact ? "space-y-4" : "space-y-6"}>
@@ -123,7 +132,8 @@ export function GraphSetupCards({ compact = false }: { compact?: boolean }) {
           <h1 className="text-2xl font-semibold tracking-tight">My Graph</h1>
           <p className="text-muted-foreground">
             Import your contacts to build your network graph. You can upload
-            phone contacts and LinkedIn connections at the same time.
+            phone contacts and LinkedIn connections at the same time, and
+            optionally sync your Gmail contacts.
           </p>
         </div>
       ) : null}
@@ -207,6 +217,48 @@ export function GraphSetupCards({ compact = false }: { compact?: boolean }) {
               </p>
             ) : connectionsUploadError ? (
               <p className="text-xs text-destructive">{connectionsUploadError}</p>
+            ) : null
+          }
+        />
+
+        <SetupCard
+          title="Sync Gmail contacts (optional)"
+          description="Find people you've emailed who may work at a target company — another way to reach someone you know via email or phone."
+          complete={gmailComplete}
+          inProgress={gmailInProgress}
+          statusText={
+            gmailComplete && gmailSource
+              ? `${gmailSource.contacts_resolved.toLocaleString()} synced`
+              : null
+          }
+          primaryLabel="Sync now"
+          onPrimary={handleSyncGmail}
+          disabled={
+            gmailSource === undefined || gmailSyncPending || gmailInProgress
+          }
+          progressDetail={
+            gmailSource &&
+            (gmailSource.sync_state === "syncing" ||
+              gmailSource.sync_state === "pending") ? (
+              <p className="text-xs text-muted-foreground">
+                {importProgressLabel(gmailSource)}
+                {" · "}
+                <button
+                  type="button"
+                  className="text-destructive hover:underline"
+                  onClick={() => handleCancelSync(gmailSource.source_id)}
+                >
+                  Cancel
+                </button>
+              </p>
+            ) : gmailSource?.sync_state === "failed" ? (
+              <p className="text-xs text-destructive">
+                {gmailSource.sync_error ??
+                  gmailSyncError ??
+                  "Gmail sync failed — try again"}
+              </p>
+            ) : gmailSyncError ? (
+              <p className="text-xs text-destructive">{gmailSyncError}</p>
             ) : null
           }
         />

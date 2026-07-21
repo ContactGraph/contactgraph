@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -11,7 +11,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { ChevronDown, Download } from "lucide-react";
+import { ChevronDown, Download, ListFilter, Loader2 } from "lucide-react";
 import Link from "next/link";
 
 import {
@@ -28,9 +28,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { SearchInput } from "@/components/ui/search-input";
@@ -46,6 +48,43 @@ import type { ListPeopleResult, PersonDetailResult, PersonListItem } from "@/lib
 import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { proxyPost } from "@/lib/proxy-client";
+
+interface PeopleFilters {
+  contactable: boolean;
+  email: boolean;
+  phone: boolean;
+  company: boolean;
+  position: boolean;
+}
+
+type PeopleFilterKey = keyof PeopleFilters;
+
+const DEFAULT_PEOPLE_FILTERS: PeopleFilters = {
+  contactable: true,
+  email: false,
+  phone: false,
+  company: true,
+  position: false,
+};
+
+const EMPTY_PEOPLE_FILTERS: PeopleFilters = {
+  contactable: false,
+  email: false,
+  phone: false,
+  company: false,
+  position: false,
+};
+
+const PEOPLE_FILTER_OPTIONS: ReadonlyArray<{
+  key: PeopleFilterKey;
+  label: string;
+}> = [
+  { key: "contactable", label: "Email or phone" },
+  { key: "email", label: "Email" },
+  { key: "phone", label: "Phone" },
+  { key: "company", label: "Current company" },
+  { key: "position", label: "Current position" },
+];
 
 export function PeopleView({
   embedded = false,
@@ -67,7 +106,32 @@ export function PeopleView({
   const [isClosingSave, setIsClosingSave] = useState<boolean>(false);
   const detailPanelRef = useRef<EditableDetailPanelHandle>(null);
 
-  const [sourceFilter, setSourceFilter] = useState<"all" | "phone_linkedin" | "phone_only" | "linkedin_only">("phone_linkedin");
+  // `filters` updates synchronously so the menu checkboxes reflect clicks
+  // instantly; `appliedFilters` is updated inside a transition so the expensive
+  // table recompute happens at low priority (surfaced via `isFiltering`).
+  const [filters, setFilters] = useState<PeopleFilters>(
+    DEFAULT_PEOPLE_FILTERS,
+  );
+  const [appliedFilters, setAppliedFilters] = useState<PeopleFilters>(
+    DEFAULT_PEOPLE_FILTERS,
+  );
+  const [isFiltering, startFilterTransition] = useTransition();
+
+  const applyFilters = (next: PeopleFilters): void => {
+    setFilters(next);
+    startFilterTransition(() => {
+      setAppliedFilters(next);
+    });
+  };
+
+  const toggleFilter = (key: PeopleFilterKey): void => {
+    applyFilters({ ...filters, [key]: !filters[key] });
+  };
+
+  const activeFilterCount: number =
+    PEOPLE_FILTER_OPTIONS.filter((option) => filters[option.key]).length;
+  const appliedFilterCount: number =
+    PEOPLE_FILTER_OPTIONS.filter((option) => appliedFilters[option.key]).length;
 
   useEffect(() => {
     setIsDetailDirty(false);
@@ -270,26 +334,24 @@ export function PeopleView({
       rows = all.filter((p: PersonListItem) => p.shared_from === viewingFilter);
     }
 
-    // Second: apply source filter (only meaningful for own contacts)
-    if (viewingFilter === "mine" && sourceFilter !== "all") {
+    // Second: apply attribute filters (only meaningful for own contacts)
+    if (viewingFilter === "mine" && appliedFilterCount > 0) {
       rows = rows.filter((p: PersonListItem) => {
         const hasPhone: boolean = !!p.phone;
-        const hasLinkedin: boolean = !!p.linkedin_url;
-        switch (sourceFilter) {
-          case "phone_linkedin":
-            return hasPhone && hasLinkedin;
-          case "phone_only":
-            return hasPhone && !hasLinkedin;
-          case "linkedin_only":
-            return !hasPhone && hasLinkedin;
-          default:
-            return true;
-        }
+        const hasEmail: boolean = !!(p.primary_email || p.emails.length > 0);
+        const hasCompany: boolean = !!p.org_name;
+        const hasPosition: boolean = !!p.current_role;
+        if (appliedFilters.contactable && !(hasEmail || hasPhone)) return false;
+        if (appliedFilters.email && !hasEmail) return false;
+        if (appliedFilters.phone && !hasPhone) return false;
+        if (appliedFilters.company && !hasCompany) return false;
+        if (appliedFilters.position && !hasPosition) return false;
+        return true;
       });
     }
 
     return rows;
-  }, [peopleQuery.data?.people, viewingFilter, sourceFilter]);
+  }, [peopleQuery.data?.people, viewingFilter, appliedFilters, appliedFilterCount]);
 
   const table = useReactTable({
     data: filteredPeople,
@@ -355,13 +417,6 @@ export function PeopleView({
     downloadCsv(csvFilename("people"), csv);
   };
 
-  const sourceFilterLabels: Record<typeof sourceFilter, string> = {
-    phone_linkedin: "Phone & LinkedIn",
-    phone_only: "Phone only",
-    linkedin_only: "LinkedIn only",
-    all: "All sources",
-  };
-
   const contactCountText: string = peopleQuery.isLoading
     ? "Loading your network…"
     : peopleQuery.data
@@ -392,67 +447,48 @@ export function PeopleView({
         />
 
         {viewingFilter === "mine" ? (
-          <>
-            {/* Desktop: inline pill buttons */}
-            <div className="hidden items-center gap-2 sm:flex">
-              {(
-                [
-                  ["phone_linkedin", "Phone & LinkedIn"],
-                  ["phone_only", "Phone only"],
-                  ["linkedin_only", "LinkedIn only"],
-                  ["all", "All sources"],
-                ] as const
-              ).map(([value, label]) => (
-                <Button
-                  key={value}
-                  type="button"
-                  variant={sourceFilter === value ? "default" : "outline"}
-                  size="sm"
-                  className="h-8 text-xs px-2.5"
-                  onClick={() => setSourceFilter(value)}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs"
+              >
+                <ListFilter className="size-3.5" />
+                <span>Filters</span>
+                {activeFilterCount > 0 ? (
+                  <Badge
+                    variant="secondary"
+                    className="ml-0.5 h-4 min-w-4 justify-center rounded-full px-1 text-[10px] tabular-nums"
+                  >
+                    {activeFilterCount}
+                  </Badge>
+                ) : null}
+                <ChevronDown className="size-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-56">
+              <DropdownMenuLabel>Show records with</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {PEOPLE_FILTER_OPTIONS.map((option) => (
+                <DropdownMenuCheckboxItem
+                  key={option.key}
+                  checked={filters[option.key]}
+                  onCheckedChange={() => toggleFilter(option.key)}
+                  onSelect={(event) => event.preventDefault()}
                 >
-                  {label}
-                </Button>
+                  {option.label}
+                </DropdownMenuCheckboxItem>
               ))}
-            </div>
-
-            {/* Mobile: compact dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-8 text-xs sm:hidden"
-                >
-                  {sourceFilterLabels[sourceFilter]}
-                  <ChevronDown className="ml-1 size-3" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                <DropdownMenuRadioGroup
-                  value={sourceFilter}
-                  onValueChange={(v) =>
-                    setSourceFilter(
-                      v as typeof sourceFilter,
-                    )
-                  }
-                >
-                  <DropdownMenuRadioItem value="phone_linkedin">
-                    Phone & LinkedIn
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="phone_only">
-                    Phone only
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="linkedin_only">
-                    LinkedIn only
-                  </DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="all">
-                    All sources
-                  </DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={activeFilterCount === 0}
+                onSelect={() => applyFilters(EMPTY_PEOPLE_FILTERS)}
+              >
+                Clear filters
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         ) : null}
 
         <Button
@@ -485,7 +521,7 @@ export function PeopleView({
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-md border bg-card">
+      <div className="relative overflow-hidden rounded-md border bg-card">
         {peopleQuery.isLoading ? (
           <div className="space-y-1.5 p-2">
             <Skeleton className="h-7 w-full" />
@@ -493,16 +529,33 @@ export function PeopleView({
             <Skeleton className="h-7 w-full" />
           </div>
         ) : (
-          <CompactTableShell
-            table={table}
-            columnCount={columns.length}
-            emptyMessage="No phone contacts in your network yet. Import them from Graph Settings."
-            minWidth="38rem"
-            onRowClick={(person: PersonListItem) =>
-              setSelectedPersonId(person.person_id)
+          <div
+            className={
+              isFiltering
+                ? "pointer-events-none opacity-60 transition-opacity"
+                : "transition-opacity"
             }
-          />
+            aria-busy={isFiltering}
+          >
+            <CompactTableShell
+              table={table}
+              columnCount={columns.length}
+              emptyMessage="No people match these filters. Try adjusting or clearing them, or import contacts from Graph Settings."
+              minWidth="38rem"
+              onRowClick={(person: PersonListItem) =>
+                setSelectedPersonId(person.person_id)
+              }
+            />
+          </div>
         )}
+        {isFiltering ? (
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+            <div className="flex items-center gap-2 rounded-md border bg-background/95 px-3 py-1.5 text-xs text-muted-foreground shadow-sm">
+              <Loader2 className="size-3.5 animate-spin" />
+              Filtering…
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <Sheet

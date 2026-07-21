@@ -8,6 +8,7 @@ import type {
   ListSourcesResult,
   SourceSummary,
   SourceType,
+  SyncSourceResult,
   UploadSourceResult,
 } from "@/lib/api-types";
 import { proxyPost } from "@/lib/proxy-client";
@@ -19,18 +20,23 @@ export interface GraphImportState {
   sourcesLoading: boolean;
   phoneSource: SourceSummary | undefined;
   linkedinConnectionsSource: SourceSummary | undefined;
+  gmailSource: SourceSummary | undefined;
   phoneDialogOpen: boolean;
   setPhoneDialogOpen: (open: boolean) => void;
   linkedinConnectionsDialogOpen: boolean;
   setLinkedinConnectionsDialogOpen: (open: boolean) => void;
   phoneUploadError: string | null;
   connectionsUploadError: string | null;
+  gmailSyncError: string | null;
   phoneUploadPending: boolean;
   linkedinUploadPending: boolean;
+  gmailSyncPending: boolean;
   phoneProcessing: boolean;
   linkedinConnectionsProcessing: boolean;
+  gmailProcessing: boolean;
   handlePhoneFileUpload: (file: File) => void;
   handleLinkedInConnectionsFileUpload: (file: File) => Promise<void>;
+  handleSyncGmail: () => void;
   handleCancelSync: (sourceId: string) => void;
 }
 
@@ -73,12 +79,14 @@ export function useGraphImport(): GraphImportState {
   const [phoneUploadError, setPhoneUploadError] = useState<string | null>(null);
   const [connectionsUploadError, setConnectionsUploadError] =
     useState<string | null>(null);
+  const [gmailSyncError, setGmailSyncError] = useState<string | null>(null);
   const [phoneDialogOpen, setPhoneDialogOpen] = useState<boolean>(false);
   const [linkedinConnectionsDialogOpen, setLinkedinConnectionsDialogOpen] =
     useState<boolean>(false);
   const [phoneProcessing, setPhoneProcessing] = useState<boolean>(false);
   const [linkedinConnectionsProcessing, setLinkedinConnectionsProcessing] =
     useState<boolean>(false);
+  const [gmailProcessing, setGmailProcessing] = useState<boolean>(false);
   const [phoneUploadPending, setPhoneUploadPending] = useState<boolean>(false);
   const [linkedinUploadPending, setLinkedinUploadPending] =
     useState<boolean>(false);
@@ -121,6 +129,24 @@ export function useGraphImport(): GraphImportState {
     sources,
     "linkedin_connections_upload",
   );
+  const gmailSource: SourceSummary | undefined = sourceForType(
+    sources,
+    "google_mail",
+  );
+
+  const gmailSyncMutation = useMutation({
+    mutationFn: (sourceId: string) =>
+      proxyPost<SyncSourceResult>("sync-source", { source_id: sourceId }),
+    onSuccess: async () => {
+      setGmailSyncError(null);
+      setGmailProcessing(true);
+      await queryClient.invalidateQueries({ queryKey: ["sources"] });
+      await queryClient.invalidateQueries({ queryKey: ["network-status"] });
+    },
+    onError: (error: Error) => {
+      setGmailSyncError(error.message);
+    },
+  });
 
   useEffect(() => {
     if (!phoneProcessing) {
@@ -164,6 +190,26 @@ export function useGraphImport(): GraphImportState {
       }
     }
   }, [linkedinConnectionsProcessing, linkedinConnectionsSource, queryClient]);
+
+  useEffect(() => {
+    if (!gmailProcessing) {
+      return;
+    }
+    if (gmailSource === undefined) {
+      return;
+    }
+    if (
+      gmailSource.sync_state === "complete" ||
+      gmailSource.sync_state === "failed"
+    ) {
+      setGmailProcessing(false);
+      if (gmailSource.sync_state === "failed") {
+        setGmailSyncError(
+          gmailSource.sync_error ?? "Gmail sync failed. Try again.",
+        );
+      }
+    }
+  }, [gmailProcessing, gmailSource]);
 
   const uploadForType = useCallback(
     async (sourceType: SourceType, file: File): Promise<void> => {
@@ -213,6 +259,13 @@ export function useGraphImport(): GraphImportState {
     [uploadForType],
   );
 
+  const handleSyncGmail = useCallback((): void => {
+    if (gmailSource === undefined) {
+      return;
+    }
+    gmailSyncMutation.mutate(gmailSource.source_id);
+  }, [gmailSource, gmailSyncMutation]);
+
   const handleCancelSync = useCallback(
     (sourceId: string): void => {
       void proxyPost("cancel-sync", { source_id: sourceId }).then(() => {
@@ -227,18 +280,23 @@ export function useGraphImport(): GraphImportState {
     sourcesLoading: sourcesQuery.isLoading,
     phoneSource,
     linkedinConnectionsSource,
+    gmailSource,
     phoneDialogOpen,
     setPhoneDialogOpen,
     linkedinConnectionsDialogOpen,
     setLinkedinConnectionsDialogOpen,
     phoneUploadError,
     connectionsUploadError,
+    gmailSyncError,
     phoneUploadPending,
     linkedinUploadPending,
+    gmailSyncPending: gmailSyncMutation.isPending,
     phoneProcessing,
     linkedinConnectionsProcessing,
+    gmailProcessing,
     handlePhoneFileUpload,
     handleLinkedInConnectionsFileUpload,
+    handleSyncGmail,
     handleCancelSync,
   };
 }
