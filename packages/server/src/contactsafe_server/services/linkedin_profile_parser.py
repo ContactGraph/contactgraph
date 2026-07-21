@@ -426,3 +426,141 @@ async def parse_linkedin_profile_pdf(
         return llm_result
 
     return _heuristic_parse(raw_text)
+
+
+_ROLE_SUGGESTION_SYSTEM_PROMPT: str = """\
+You are a career strategist. Given a candidate's professional profile, propose the \
+DISTINCT career directions they could credibly be recruited into right now.
+
+A strong candidate often fits several genuinely different directions that should be \
+pursued independently (for example: a startup CEO/founder path, a founding product \
+leader at an early startup, an AI product role at a later-stage company, or a domain \
+specialist role in a specific industry). These differ in company stage, scope, and \
+day-to-day work — do not collapse them into one generic blurb.
+
+Return a JSON object with a single field:
+- "directions": array of 3-5 objects, each with:
+    - "role": string — the target role/title band (e.g. "Founding Product Leader", \
+"VP/Head of Product", "Senior/Principal AI Product Manager", "CEO / Co-founder").
+    - "company_type": string — the kind and stage of company where this fits \
+(e.g. "Seed–Series A AI startup", "Series B/C ad-tech company", "public media platform").
+    - "why": string — one concise sentence grounding this in their actual experience.
+
+Rules:
+- Make the directions meaningfully different from one another in scope or company stage.
+- Order them from best-supported by their experience to more aspirational.
+- Ground every direction in real experience; do not invent skills they lack.
+- Prefer their recent/current trajectory over older roles.
+
+Return ONLY valid JSON, no markdown fencing."""
+
+
+def _render_role_directions(directions: list[dict[str, object]]) -> str | None:
+    """Render structured direction objects into an editable, readable list."""
+    lines: list[str] = []
+    for direction in directions:
+        role: str = str(direction.get("role", "")).strip()
+        if not role:
+            continue
+        company_type: str = str(direction.get("company_type", "")).strip()
+        why: str = str(direction.get("why", "")).strip()
+        line: str = f"- {role}"
+        if company_type:
+            line += f" — {company_type}"
+        if why:
+            line += f". {why}"
+        lines.append(line)
+    if not lines:
+        return None
+    header: str = (
+        "Open to several distinct directions (any one is a strong match):"
+    )
+    return header + "\n" + "\n".join(lines)
+
+
+def _profile_summary_for_suggestion(profile: ParsedLinkedInProfile) -> str:
+    parts: list[str] = []
+    if profile.name:
+        parts.append(f"Name: {profile.name}")
+    if profile.headline:
+        parts.append(f"Headline: {profile.headline}")
+    if profile.about:
+        parts.append(f"About: {profile.about[:800]}")
+    if profile.experiences:
+        exp_lines: list[str] = []
+        for exp in profile.experiences[:8]:
+            title: str = exp.title or "Unknown role"
+            period: str = ""
+            if exp.start_date is not None:
+                start: str = exp.start_date.strftime("%Y")
+                end: str = (
+                    "present"
+                    if exp.is_current or exp.end_date is None
+                    else exp.end_date.strftime("%Y")
+                )
+                period = f" ({start}–{end})"
+            current: str = " [current]" if exp.is_current else ""
+            exp_lines.append(f"- {title} at {exp.company}{period}{current}")
+        parts.append("Experience:\n" + "\n".join(exp_lines))
+    if profile.skills:
+        parts.append(f"Skills: {', '.join(profile.skills[:30])}")
+    if profile.education:
+        edu_lines: list[str] = []
+        for edu in profile.education[:5]:
+            detail: str = edu.degree or ""
+            if edu.field_of_study:
+                detail = f"{detail}, {edu.field_of_study}".strip(", ")
+            edu_lines.append(f"- {edu.school}" + (f" ({detail})" if detail else ""))
+        parts.append("Education:\n" + "\n".join(edu_lines))
+    return "\n".join(parts) if parts else profile.raw_text[:4000]
+
+
+async def derive_role_suggestions(
+    profile: ParsedLinkedInProfile,
+    settings: Settings,
+) -> str | None:
+    """Derive a short target-role description from a parsed profile/resume."""
+    if not settings.openai_api_key:
+        return None
+
+    summary: str = _profile_summary_for_suggestion(profile)
+    if not summary.strip():
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=45.0) as http:
+            response = await http.post(
+                f"{settings.openai_base_url.rstrip('/')}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.openai_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": settings.openai_enrichment_model,
+                    "temperature": 0,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {"role": "system", "content": _ROLE_SUGGESTION_SYSTEM_PROMPT},
+                        {"role": "user", "content": summary[:8000]},
+                    ],
+                },
+            )
+            response.raise_for_status()
+            data: dict[str, object] = parse_json_object(
+                content_from_chat_completion(json.loads(response.text))
+            )
+            directions: object = data.get("directions")
+            if isinstance(directions, list):
+                typed_directions: list[dict[str, object]] = [
+                    d for d in directions if isinstance(d, dict)
+                ]
+                rendered: str | None = _render_role_directions(typed_directions)
+                if rendered is not None:
+                    return rendered
+            suggested: object = data.get("suggested_roles")
+            if isinstance(suggested, str) and suggested.strip():
+                return suggested.strip()
+            return None
+    except Exception:
+        logger.exception("Failed to derive role suggestions from profile")
+        return None

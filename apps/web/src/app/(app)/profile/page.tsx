@@ -404,8 +404,8 @@ export default function ProfilePage() {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">Your Profile</h1>
           <p className="text-muted-foreground">
-            Your professional background helps identify the right version of your
-            contacts during enrichment.
+            Your LinkedIn PDF or resume helps match you to relevant roles and
+            identify the right version of your contacts during enrichment.
           </p>
         </div>
         {linkedinProfileComplete ? (
@@ -434,7 +434,7 @@ export default function ProfilePage() {
             disabled={linkedinProfileBusy}
             busy={linkedinProfileBusy}
             busyMessage={awaitingSync ? "Processing PDF…" : "Uploading…"}
-            idleMessage="Drag and drop your LinkedIn PDF here"
+            idleMessage="Drag and drop your LinkedIn PDF or resume here"
             idleHint="or click to choose a file"
           />
 
@@ -629,7 +629,7 @@ export default function ProfilePage() {
             </div>
           ) : experiences.length === 0 ? (
             <p className="text-sm text-muted-foreground">
-              No experiences yet. Upload your LinkedIn PDF or add manually.
+              No experiences yet. Upload your LinkedIn PDF or resume, or add manually.
             </p>
           ) : (
             <ul className="divide-y">

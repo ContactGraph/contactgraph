@@ -69,6 +69,7 @@ export function JobSetupCards({
   const sourcesQuery = useQuery({
     queryKey: ["sources"],
     queryFn: () => proxyPost<ListSourcesResult>("list-sources"),
+    refetchInterval: linkedinProfileProcessing ? 2000 : false,
   });
 
   const orgListsQuery = useQuery({
@@ -180,18 +181,27 @@ export function JobSetupCards({
       setLinkedinProfileProcessing(false);
       if (linkedinProfileSource.sync_state === "complete") {
         setLinkedinProfileDialogOpen(false);
+        void queryClient.invalidateQueries({ queryKey: ["job-preferences"] });
+        void queryClient.invalidateQueries({ queryKey: ["flat-jobs"] });
+        void queryClient.invalidateQueries({ queryKey: ["org-jobs"] });
       } else {
         setLinkedinProfileUploadError(
-          "Could not read that PDF. Try re-exporting from LinkedIn.",
+          "Could not read that PDF. Try a LinkedIn PDF export or a resume PDF.",
         );
       }
     }
-  }, [linkedinProfileProcessing, linkedinProfileSource]);
+  }, [linkedinProfileProcessing, linkedinProfileSource, queryClient]);
 
   useEffect(() => {
     const serverText: string | null = jobPreferencesQuery.data?.text ?? null;
-    if (serverText !== null && preferencesText === "") {
-      setPreferencesText(serverText);
+    const suggestedText: string | null =
+      jobPreferencesQuery.data?.suggested_text ?? null;
+    if (preferencesText === "") {
+      if (serverText !== null && serverText !== "") {
+        setPreferencesText(serverText);
+      } else if (suggestedText !== null && suggestedText !== "") {
+        setPreferencesText(suggestedText);
+      }
     }
     const serverLocPref: string | null =
       jobPreferencesQuery.data?.location_pref ?? null;
@@ -215,6 +225,7 @@ export function JobSetupCards({
     }
   }, [
     jobPreferencesQuery.data?.text,
+    jobPreferencesQuery.data?.suggested_text,
     jobPreferencesQuery.data?.location_pref,
     jobPreferencesQuery.data?.location_city,
     jobPreferencesQuery.data?.commute_max_minutes,
@@ -228,6 +239,8 @@ export function JobSetupCards({
 
   const preferencesDirty: boolean = useMemo(() => {
     const serverText: string = jobPreferencesQuery.data?.text ?? "";
+    const suggestedText: string = jobPreferencesQuery.data?.suggested_text ?? "";
+    const baselineText: string = serverText !== "" ? serverText : suggestedText;
     const serverLocPref: string | null =
       jobPreferencesQuery.data?.location_pref ?? null;
     const serverCity: string = jobPreferencesQuery.data?.location_city ?? "";
@@ -237,9 +250,9 @@ export function JobSetupCards({
         : "";
     const serverCommuteNote: string =
       jobPreferencesQuery.data?.commute_note ?? "";
-    if (!serverText && !preferencesText.trim()) return false;
+    if (!baselineText.trim() && !preferencesText.trim()) return false;
     return (
-      preferencesText !== serverText ||
+      preferencesText.trim() !== baselineText.trim() ||
       locationPref !== serverLocPref ||
       locationCity !== serverCity ||
       commuteMaxMinutes !== serverCommute ||
@@ -252,6 +265,7 @@ export function JobSetupCards({
     commuteMaxMinutes,
     commuteNote,
     jobPreferencesQuery.data?.text,
+    jobPreferencesQuery.data?.suggested_text,
     jobPreferencesQuery.data?.location_pref,
     jobPreferencesQuery.data?.location_city,
     jobPreferencesQuery.data?.commute_max_minutes,
@@ -349,9 +363,12 @@ export function JobSetupCards({
               />
             </div>
             <div className="space-y-1">
-              <CardTitle className="text-base">Upload your LinkedIn profile</CardTitle>
+              <CardTitle className="text-base">
+                Upload your LinkedIn PDF or resume
+              </CardTitle>
               <CardDescription>
-                Export your profile as PDF so we can match you to relevant roles.
+                We use your background to suggest roles and score how well you
+                match each job&apos;s requirements.
               </CardDescription>
               {linkedinProfileUploadError ? (
                 <p className="text-xs text-destructive">{linkedinProfileUploadError}</p>
@@ -402,18 +419,26 @@ export function JobSetupCards({
               <CardTitle className="text-base">Describe your ideal roles</CardTitle>
               <CardDescription>
                 Tell us what kinds of jobs, companies, and locations you are looking for.
+                Or leave blank and we&apos;ll match from your profile.
               </CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-3">
           <textarea
-            className="min-h-[80px] w-full rounded-md border bg-background px-3 py-2 text-sm"
+            className="min-h-[140px] w-full rounded-md border bg-background px-3 py-2 text-sm"
             placeholder="e.g. Senior backend engineer, distributed systems, Python or Go, remote or SF Bay Area."
             value={preferencesText}
             onChange={(e) => setPreferencesText(e.target.value)}
           />
-          <div className="flex flex-wrap items-center gap-2">
+          {jobPreferencesQuery.data?.suggested_text &&
+          (!jobPreferencesQuery.data.text ||
+            preferencesText === jobPreferencesQuery.data.suggested_text) ? (
+            <p className="text-xs text-muted-foreground">
+              Suggested directions from your profile — we match jobs against any of
+              them. Edit or trim as needed, then save.
+            </p>
+          ) : null}          <div className="flex flex-wrap items-center gap-2">
             <select
               className="rounded-md border bg-background px-2 py-1.5 text-sm"
               value={locationPref ?? ""}
@@ -456,37 +481,62 @@ export function JobSetupCards({
             value={commuteNote}
             onChange={(e) => setCommuteNote(e.target.value)}
           />
-          <Button
-            variant={preferencesDirty ? "default" : "outline"}
-            size="sm"
-            disabled={
-              setJobPreferencesMutation.isPending || !preferencesText.trim()
-            }
-            onClick={() =>
-              setJobPreferencesMutation.mutate({
-                text: preferencesText,
-                location_pref: locationPref,
-                location_city: locationCity || null,
-                commute_max_minutes: commuteMaxMinutes
-                  ? parseInt(commuteMaxMinutes, 10)
-                  : null,
-                commute_note: commuteNote.trim() || null,
-              })
-            }
-          >
-            {setJobPreferencesMutation.isPending ? (
-              <>
-                <Loader2 className="size-4 animate-spin" />
-                Saving…
-              </>
-            ) : preferencesDirty ? (
-              "Save"
-            ) : preferencesComplete ? (
-              "Saved"
-            ) : (
-              "Save preferences"
-            )}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant={preferencesDirty ? "default" : "outline"}
+              size="sm"
+              disabled={
+                setJobPreferencesMutation.isPending ||
+                !preferencesText.trim() ||
+                !preferencesDirty
+              }
+              onClick={() =>
+                setJobPreferencesMutation.mutate({
+                  text: preferencesText,
+                  location_pref: locationPref,
+                  location_city: locationCity || null,
+                  commute_max_minutes: commuteMaxMinutes
+                    ? parseInt(commuteMaxMinutes, 10)
+                    : null,
+                  commute_note: commuteNote.trim() || null,
+                })
+              }
+            >
+              {setJobPreferencesMutation.isPending ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Saving…
+                </>
+              ) : preferencesDirty ? (
+                "Save"
+              ) : preferencesComplete ? (
+                "Saved"
+              ) : (
+                "Save preferences"
+              )}
+            </Button>
+            {preferencesComplete ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                disabled={setJobPreferencesMutation.isPending}
+                onClick={() => {
+                  setPreferencesText("");
+                  setJobPreferencesMutation.mutate({
+                    text: "",
+                    location_pref: locationPref,
+                    location_city: locationCity || null,
+                    commute_max_minutes: commuteMaxMinutes
+                      ? parseInt(commuteMaxMinutes, 10)
+                      : null,
+                    commute_note: commuteNote.trim() || null,
+                  });
+                }}
+              >
+                Clear
+              </Button>
+            ) : null}
+          </div>
         </CardContent>
       </Card>
 

@@ -22,6 +22,7 @@ from contactsafe_server.services.linkedin_connections_parser import (
 )
 from contactsafe_server.services.linkedin_profile_parser import (
     ParsedLinkedInProfile,
+    derive_role_suggestions,
     parse_linkedin_profile_pdf,
 )
 from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
@@ -520,6 +521,59 @@ class FileUploadImportService:
                 confidence=0.9,
             )
 
+        for skill in profile.skills[:40]:
+            await record_person_attribute(
+                self._db,
+                person_id=person.id,
+                kind="skill",
+                value=skill,
+                contributor_user_id=user_id,
+                contributor_source_kind="linkedin_profile_upload",
+                contributor_source_id=source_id,
+                confidence=0.9,
+            )
+
         recompute = PersonProfileRecompute(self._db)
         await recompute.recompute_persons([person.id])
+
+        suggested_roles: str | None = await derive_role_suggestions(
+            profile,
+            self._settings,
+        )
+        if suggested_roles is not None:
+            user.job_suggested_roles = suggested_roles
+
         await self._db.flush()
+        await self._enqueue_job_rescore(user_id)
+
+    async def _enqueue_job_rescore(self, user_id: uuid.UUID) -> None:
+        """Rescore jobs after profile/resume ingest so qualification scores refresh."""
+        from contactsafe_server.config import get_settings
+        from contactsafe_server.services.job_relevance_service import cancel_scoring
+
+        cancel_scoring(user_id)
+        if get_settings().use_arq_worker:
+            from contactsafe_server.queue import enqueue_background_job
+
+            await enqueue_background_job(
+                "score_jobs_for_user",
+                str(user_id),
+                reclassify=True,
+                _job_id=f"score-user-{user_id}",
+            )
+            return
+
+        import asyncio
+
+        settings: Settings = self._settings
+
+        async def _reclassify_background() -> None:
+            from contactsafe_server.db.connection import get_session_factory
+            from contactsafe_server.services.job_relevance_service import JobRelevanceService
+
+            factory = get_session_factory(settings)
+            async with factory() as bg_db:
+                svc = JobRelevanceService(bg_db, settings)
+                await svc.reclassify_all(user_id)
+
+        asyncio.ensure_future(_reclassify_background())

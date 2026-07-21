@@ -714,6 +714,8 @@ export interface OrgJobItem {
   seniority_reason: string | null;
   location_score: number | null;
   location_reason: string | null;
+  qualification_score: number | null;
+  qualification_reason: string | null;
   contact_count: number;
   primary_contact_name: string | null;
   shared_contact_count: number;
@@ -787,6 +789,7 @@ export interface SetJobTargetScopeRequest {
 
 export interface JobPreferencesResult {
   text: string | null;
+  suggested_text: string | null;
   location_pref: string | null;
   location_city: string | null;
   commute_max_minutes: number | null;

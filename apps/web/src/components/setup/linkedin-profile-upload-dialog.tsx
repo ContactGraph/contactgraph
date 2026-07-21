@@ -37,7 +37,9 @@ export function LinkedInProfileUploadDialog({
         <DialogHeader>
           <DialogTitle>Set up your profile</DialogTitle>
           <DialogDescription>
-            Upload your LinkedIn PDF to identify your contacts during enrichment.
+            Upload a LinkedIn PDF or resume so we can suggest roles and score how
+            well you match each job&apos;s requirements. A resume usually has
+            richer detail than a sparse LinkedIn profile.
           </DialogDescription>
         </DialogHeader>
 
@@ -57,14 +59,15 @@ export function LinkedInProfileUploadDialog({
           ) : null}
 
           <div className="space-y-2 text-sm text-muted-foreground">
-            <p className="font-medium text-foreground">Export from LinkedIn</p>
+            <p className="font-medium text-foreground">Option A — LinkedIn PDF</p>
             <p>1. Go to your LinkedIn profile.</p>
             <p>
               2. Click the rightmost button under your name — it may say
               &quot;Resources&quot; or &quot;…&quot; (three dots).
             </p>
             <p>3. Select &quot;Save to PDF&quot; and download the file.</p>
-            <p>4. Upload the PDF below.</p>
+            <p className="font-medium text-foreground pt-1">Option B — Resume PDF</p>
+            <p>Upload any resume PDF. Re-uploading replaces your previous profile.</p>
           </div>
 
           <FileDropZone
@@ -73,9 +76,17 @@ export function LinkedInProfileUploadDialog({
             disabled={isBusy}
             busy={isBusy}
             busyMessage={isProcessing ? "Processing PDF…" : "Uploading…"}
-            idleMessage="Drag and drop your LinkedIn PDF here"
+            idleMessage="Drag and drop your LinkedIn PDF or resume here"
             idleHint="or click to choose a file"
           />
+
+          {isProcessing ? (
+            <p className="text-center text-xs text-muted-foreground">
+              Reading your PDF and analyzing your background — this can take up to
+              a couple of minutes for a detailed resume. You can keep this open or
+              come back later.
+            </p>
+          ) : null}
         </div>
       </DialogContent>
     </Dialog>
