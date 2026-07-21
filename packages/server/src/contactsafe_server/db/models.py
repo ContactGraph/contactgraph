@@ -56,6 +56,7 @@ class User(Base):
     job_commute_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     job_target_scope: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     preferred_funding_stages: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    job_scoring_weights: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
     job_digest_frequency: Mapped[str] = mapped_column(Text, nullable=False, default="daily")
     job_digest_last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)

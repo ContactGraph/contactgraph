@@ -13,12 +13,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from contactsafe_server.config import Settings
-from contactsafe_server.events import (
-    ScoringCancelledEvent,
-    ScoringCompleteEvent,
-    ScoringProgressEvent,
-    job_event_bus,
-)
 from contactsafe_server.db.models import (
     EmploymentClaim,
     Org,
@@ -28,22 +22,45 @@ from contactsafe_server.db.models import (
     User,
     UserJobRelevance,
 )
+from contactsafe_server.events import (
+    ScoringCancelledEvent,
+    ScoringCompleteEvent,
+    ScoringProgressEvent,
+    job_event_bus,
+)
 from contactsafe_server.services.openai_json import (
     content_from_chat_completion,
     parse_json_object,
 )
-from contactsafe_server.services.org_funding_stage import funding_stage_label
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 _BATCH_SIZE: int = 15
-_MATCH_SCORE_RELEVANT_THRESHOLD: int = 40
-_STAGE_BOOST: int = 8
+_MATCH_SCORE_RELEVANT_THRESHOLD: int = 35
 
-_ROLE_WEIGHT: float = 0.45
-_QUALIFICATION_WEIGHT: float = 0.25
-_SENIORITY_WEIGHT: float = 0.15
-_LOCATION_WEIGHT: float = 0.15
+SCORING_WEIGHT_KEYS: tuple[str, ...] = (
+    "role",
+    "qualification",
+    "seniority",
+    "location",
+    "funding_stage",
+)
+
+DEFAULT_SCORING_WEIGHTS: dict[str, float] = {
+    "role": 1.0,
+    "qualification": 0.9,
+    "seniority": 0.6,
+    "location": 0.9,
+    "funding_stage": 0.7,
+}
+
+_DIMENSION_LABELS: dict[str, str] = {
+    "role": "role",
+    "qualification": "qualification",
+    "seniority": "seniority",
+    "location": "location",
+    "funding_stage": "funding stage",
+}
 
 _SYSTEM_PROMPT: str = """\
 You are a strict job-match scoring engine. You will receive the candidate's professional \
@@ -335,23 +352,74 @@ def _cap_role_score_for_function_mismatch(
     return role_score, role_reason
 
 
-def _apply_funding_stage_boost(
-    match_score: int,
-    reason: str,
+def resolve_scoring_weights(raw: dict[str, object] | None) -> dict[str, float]:
+    """Merge stored weights over defaults and clamp each to [0, 1]."""
+    resolved: dict[str, float] = dict(DEFAULT_SCORING_WEIGHTS)
+    if raw is None:
+        return resolved
+    for key in SCORING_WEIGHT_KEYS:
+        value: object | None = raw.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            resolved[key] = max(0.0, min(1.0, float(value)))
+    return resolved
+
+
+def _dimension_factor(score_0_100: int, weight: float) -> float:
+    s: float = max(0.0, min(1.0, score_0_100 / 100.0))
+    w: float = max(0.0, min(1.0, weight))
+    return 1.0 - w * (1.0 - s)
+
+
+def stage_match_factor(
     *,
     org_funding_stage: str | None,
     preferred_funding_stages: list[str] | None,
-) -> tuple[int, str]:
-    """Positive-only stage nudge when the org stage is in the user's preferences."""
+    weight: float,
+) -> float:
+    """Return the funding-stage knock-out factor (1.0 = neutral)."""
     if not preferred_funding_stages:
-        return match_score, reason
-    if org_funding_stage is None or org_funding_stage not in preferred_funding_stages:
-        return match_score, reason
-    boosted: int = min(100, match_score + _STAGE_BOOST)
-    stage_note: str = f"{funding_stage_label(org_funding_stage)} matches your stage preference"
-    if reason:
-        return boosted, f"{reason} | {stage_note}"
-    return boosted, stage_note
+        return 1.0
+    if org_funding_stage is None or org_funding_stage == "unknown":
+        return 1.0
+    s_stage: float = 1.0 if org_funding_stage in preferred_funding_stages else 0.0
+    return _dimension_factor(int(round(s_stage * 100)), weight)
+
+
+def compute_match_score(
+    *,
+    role_score: int,
+    qualification_score: int,
+    seniority_score: int,
+    location_score: int,
+    weights: dict[str, float],
+    stage_factor: float,
+) -> tuple[int, str | None]:
+    """Conjunctive noisy-AND match score.
+
+    match = 100 · Π_i (1 − wᵢ·(1 − sᵢ))
+
+    Returns (match_score, limiting_factor_note).
+    """
+    factors: dict[str, float] = {
+        "role": _dimension_factor(role_score, weights.get("role", 1.0)),
+        "qualification": _dimension_factor(
+            qualification_score,
+            weights.get("qualification", 0.9),
+        ),
+        "seniority": _dimension_factor(seniority_score, weights.get("seniority", 0.6)),
+        "location": _dimension_factor(location_score, weights.get("location", 0.9)),
+        "funding_stage": max(0.0, min(1.0, stage_factor)),
+    }
+    product: float = 1.0
+    for factor in factors.values():
+        product *= factor
+    match_score: int = max(0, min(100, round(product * 100)))
+
+    limiting_key: str = min(factors, key=lambda k: factors[k])
+    limiting_note: str | None = None
+    if factors[limiting_key] < 0.95:
+        limiting_note = f"Limited by {_DIMENSION_LABELS[limiting_key]} fit"
+    return match_score, limiting_note
 
 
 class JobRelevanceService:
@@ -385,6 +453,12 @@ class JobRelevanceService:
         total_classified: int = 0
         cancelled: bool = False
         preferences_text: str | None = effective_role_text
+        weights: dict[str, float] = resolve_scoring_weights(user.job_scoring_weights)
+        preferred_funding_stages: list[str] | None = (
+            list(user.preferred_funding_stages)
+            if user.preferred_funding_stages
+            else None
+        )
         try:
             for i in range(0, len(unclassified_jobs), _BATCH_SIZE):
                 if await _is_scoring_cancelled(user_id):
@@ -403,11 +477,8 @@ class JobRelevanceService:
                     profile_section,
                     batch,
                     preferences_text=preferences_text,
-                    preferred_funding_stages=(
-                        list(user.preferred_funding_stages)
-                        if user.preferred_funding_stages
-                        else None
-                    ),
+                    preferred_funding_stages=preferred_funding_stages,
+                    weights=weights,
                 )
                 total_classified += classified
                 await _set_progress(user_id, total_classified, total_jobs)
@@ -603,7 +674,11 @@ class JobRelevanceService:
         *,
         preferences_text: str | None = None,
         preferred_funding_stages: list[str] | None = None,
+        weights: dict[str, float] | None = None,
     ) -> int:
+        resolved_weights: dict[str, float] = (
+            weights if weights is not None else dict(DEFAULT_SCORING_WEIGHTS)
+        )
         job_descriptions: list[str] = []
         for idx, job in enumerate(jobs):
             job_descriptions.append(
@@ -657,13 +732,19 @@ class JobRelevanceService:
                 role_reason,
             )
 
-            match_score: int = round(
-                role_score * _ROLE_WEIGHT
-                + qualification_score * _QUALIFICATION_WEIGHT
-                + seniority_score * _SENIORITY_WEIGHT
-                + location_score * _LOCATION_WEIGHT,
+            stage_factor: float = stage_match_factor(
+                org_funding_stage=org_stage_map.get(job.org_id),
+                preferred_funding_stages=preferred_funding_stages,
+                weight=resolved_weights.get("funding_stage", 0.7),
             )
-            match_score = max(0, min(100, match_score))
+            match_score, limiting_note = compute_match_score(
+                role_score=role_score,
+                qualification_score=qualification_score,
+                seniority_score=seniority_score,
+                location_score=location_score,
+                weights=resolved_weights,
+                stage_factor=stage_factor,
+            )
 
             qualification_reason: str | None = item.get("qualification_reason")
             seniority_reason: str | None = item.get("seniority_reason")
@@ -677,15 +758,9 @@ class JobRelevanceService:
                         qualification_reason,
                         seniority_reason,
                         location_reason,
+                        limiting_note,
                     ],
                 ),
-            )
-
-            match_score, reason = _apply_funding_stage_boost(
-                match_score,
-                reason,
-                org_funding_stage=org_stage_map.get(job.org_id),
-                preferred_funding_stages=preferred_funding_stages,
             )
             is_relevant: bool = match_score >= _MATCH_SCORE_RELEVANT_THRESHOLD
 

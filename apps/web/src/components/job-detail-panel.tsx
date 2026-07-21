@@ -32,9 +32,9 @@ function MatchBadge({ score }: { score: number | null }) {
     );
   }
   const color: string =
-    score >= 70
+    score >= 55
       ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-      : score >= 40
+      : score >= 30
         ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
         : "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400";
   return (
@@ -81,18 +81,16 @@ function SubScoreRow({
   label,
   score,
   reason,
-  weight,
 }: {
   label: string;
   score: number | null;
   reason: string | null;
-  weight: number;
 }) {
   if (score === null) return null;
   const barColor: string =
-    score >= 70
+    score >= 55
       ? "bg-green-500"
-      : score >= 40
+      : score >= 30
         ? "bg-yellow-500"
         : "bg-red-400";
   return (
@@ -107,9 +105,6 @@ function SubScoreRow({
         </div>
         <span className="w-8 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
           {score}
-        </span>
-        <span className="w-8 shrink-0 text-right text-[10px] text-muted-foreground/60">
-          ×{weight}%
         </span>
       </div>
       {reason ? (
@@ -191,25 +186,21 @@ export function JobDetailPanel({
                 label="Function"
                 score={job.role_score}
                 reason={job.role_reason}
-                weight={45}
               />
               <SubScoreRow
                 label="Qualification"
                 score={job.qualification_score}
                 reason={job.qualification_reason}
-                weight={25}
               />
               <SubScoreRow
                 label="Seniority"
                 score={job.seniority_score}
                 reason={job.seniority_reason}
-                weight={15}
               />
               <SubScoreRow
                 label="Location"
                 score={job.location_score}
                 reason={job.location_reason}
-                weight={15}
               />
             </div>
           ) : job.relevance_reason ? (

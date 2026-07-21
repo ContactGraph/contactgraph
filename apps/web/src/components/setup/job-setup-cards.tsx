@@ -20,6 +20,7 @@ import type {
   JobMonitorConfigResult,
   JobPreferencesResult,
   JobScanStatusResult,
+  JobScoringWeights,
   SetJobPreferencesRequest,
   ListOrgListsResult,
   ListSourcesResult,
@@ -44,6 +45,34 @@ import {
   isSourceStepInProgress,
   sourceForType,
 } from "@/lib/setup-utils";
+
+const DEFAULT_SCORING_WEIGHTS: JobScoringWeights = {
+  role: 1.0,
+  qualification: 0.9,
+  seniority: 0.6,
+  location: 0.9,
+  funding_stage: 0.7,
+};
+
+const SCORING_WEIGHT_SLIDERS: ReadonlyArray<{
+  key: keyof JobScoringWeights;
+  label: string;
+}> = [
+  { key: "role", label: "Role / function" },
+  { key: "qualification", label: "Qualification" },
+  { key: "seniority", label: "Seniority" },
+  { key: "location", label: "Location" },
+  { key: "funding_stage", label: "Funding stage" },
+];
+
+function scoringWeightsEqual(
+  left: JobScoringWeights,
+  right: JobScoringWeights,
+): boolean {
+  return SCORING_WEIGHT_SLIDERS.every(
+    (item) => Math.abs(left[item.key] - right[item.key]) < 0.005,
+  );
+}
 
 export function JobSetupCards({
   compact = false,
@@ -70,6 +99,11 @@ export function JobSetupCards({
   const [preferredFundingStages, setPreferredFundingStages] = useState<
     string[] | null
   >(null);
+  const [scoringWeights, setScoringWeights] = useState<JobScoringWeights | null>(
+    null,
+  );
+  const [scoringWeightsHydrated, setScoringWeightsHydrated] =
+    useState<boolean>(false);
 
   const sourcesQuery = useQuery({
     queryKey: ["sources"],
@@ -234,7 +268,14 @@ export function JobSetupCards({
     if (serverStages !== null && preferredFundingStages === null) {
       setPreferredFundingStages(serverStages);
     }
+    if (!scoringWeightsHydrated && jobPreferencesQuery.data !== undefined) {
+      const serverWeights: JobScoringWeights =
+        jobPreferencesQuery.data.scoring_weights ?? DEFAULT_SCORING_WEIGHTS;
+      setScoringWeights(serverWeights);
+      setScoringWeightsHydrated(true);
+    }
   }, [
+    jobPreferencesQuery.data,
     jobPreferencesQuery.data?.text,
     jobPreferencesQuery.data?.suggested_text,
     jobPreferencesQuery.data?.location_pref,
@@ -242,13 +283,18 @@ export function JobSetupCards({
     jobPreferencesQuery.data?.commute_max_minutes,
     jobPreferencesQuery.data?.commute_note,
     jobPreferencesQuery.data?.preferred_funding_stages,
+    jobPreferencesQuery.data?.scoring_weights,
     preferencesText,
     locationPref,
     locationCity,
     commuteMaxMinutes,
     commuteNote,
     preferredFundingStages,
+    scoringWeightsHydrated,
   ]);
+
+  const effectiveScoringWeights: JobScoringWeights =
+    scoringWeights ?? DEFAULT_SCORING_WEIGHTS;
 
   const preferencesDirty: boolean = useMemo(() => {
     const serverText: string = jobPreferencesQuery.data?.text ?? "";
@@ -269,7 +315,18 @@ export function JobSetupCards({
     const stagesEqual: boolean =
       serverStages.length === localStages.length &&
       serverStages.every((stage: string) => localStages.includes(stage));
-    if (!baselineText.trim() && !preferencesText.trim() && stagesEqual) {
+    const serverWeights: JobScoringWeights =
+      jobPreferencesQuery.data?.scoring_weights ?? DEFAULT_SCORING_WEIGHTS;
+    const weightsEqual: boolean = scoringWeightsEqual(
+      effectiveScoringWeights,
+      serverWeights,
+    );
+    if (
+      !baselineText.trim() &&
+      !preferencesText.trim() &&
+      stagesEqual &&
+      weightsEqual
+    ) {
       return false;
     }
     return (
@@ -278,7 +335,8 @@ export function JobSetupCards({
       locationCity !== serverCity ||
       commuteMaxMinutes !== serverCommute ||
       commuteNote !== serverCommuteNote ||
-      !stagesEqual
+      !stagesEqual ||
+      !weightsEqual
     );
   }, [
     preferencesText,
@@ -287,6 +345,7 @@ export function JobSetupCards({
     commuteMaxMinutes,
     commuteNote,
     preferredFundingStages,
+    effectiveScoringWeights,
     jobPreferencesQuery.data?.text,
     jobPreferencesQuery.data?.suggested_text,
     jobPreferencesQuery.data?.location_pref,
@@ -294,6 +353,7 @@ export function JobSetupCards({
     jobPreferencesQuery.data?.commute_max_minutes,
     jobPreferencesQuery.data?.commute_note,
     jobPreferencesQuery.data?.preferred_funding_stages,
+    jobPreferencesQuery.data?.scoring_weights,
   ]);
 
   useEffect(() => {
@@ -309,6 +369,17 @@ export function JobSetupCards({
       return [...existing, stage];
     });
   }, []);
+
+  const updateScoringWeight = useCallback(
+    (key: keyof JobScoringWeights, percent: number): void => {
+      const clamped: number = Math.max(0, Math.min(100, percent)) / 100;
+      setScoringWeights((current: JobScoringWeights | null) => ({
+        ...(current ?? DEFAULT_SCORING_WEIGHTS),
+        [key]: clamped,
+      }));
+    },
+    [],
+  );
 
   const handleLinkedInProfileUpload = useCallback(
     async (file: File, regenerateRoleSuggestions: boolean): Promise<void> => {
@@ -550,6 +621,49 @@ export function JobSetupCards({
               })}
             </div>
           </div>
+          <div className="space-y-2">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">
+                How much should a poor fit hurt the match?
+              </p>
+              <p className="text-[11px] text-muted-foreground">
+                100% = a 0 on that dimension zeroes the match. 0% = ignore that
+                dimension.
+              </p>
+            </div>
+            <div className="space-y-2">
+              {SCORING_WEIGHT_SLIDERS.map((item) => {
+                const percent: number = Math.round(
+                  effectiveScoringWeights[item.key] * 100,
+                );
+                return (
+                  <label
+                    key={item.key}
+                    className="grid grid-cols-[7.5rem_1fr_2.5rem] items-center gap-2 text-xs"
+                  >
+                    <span className="text-muted-foreground">{item.label}</span>
+                    <input
+                      type="range"
+                      min={0}
+                      max={100}
+                      step={5}
+                      value={percent}
+                      onChange={(e) =>
+                        updateScoringWeight(
+                          item.key,
+                          parseInt(e.target.value, 10),
+                        )
+                      }
+                      className="w-full accent-primary"
+                    />
+                    <span className="tabular-nums text-muted-foreground">
+                      {percent}%
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             <Button
               variant={preferencesDirty ? "default" : "outline"}
@@ -572,6 +686,7 @@ export function JobSetupCards({
                     (preferredFundingStages ?? []).length > 0
                       ? preferredFundingStages
                       : null,
+                  scoring_weights: effectiveScoringWeights,
                 })
               }
             >
@@ -607,6 +722,7 @@ export function JobSetupCards({
                       (preferredFundingStages ?? []).length > 0
                         ? preferredFundingStages
                         : null,
+                    scoring_weights: effectiveScoringWeights,
                   });
                 }}
               >

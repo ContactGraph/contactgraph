@@ -8,10 +8,10 @@ obtain those two values.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, date, datetime
 from typing import Literal, cast
+from urllib.parse import urlparse
 from uuid import UUID
-
-from datetime import UTC, datetime
 
 from contactsafe_core.contact_schemas import (
     AddWatchedCompanyRequest,
@@ -25,6 +25,14 @@ from contactsafe_core.contact_schemas import (
     EnrichOrgsResult,
     EnrichPersonResult,
     EnrichStrongTiesResult,
+    FlatJobListResult,
+    JobDetailResult,
+    JobMonitorConfigResult,
+    JobPreferencesResult,
+    JobScanStatusResult,
+    JobScoringWeights,
+    JobTargetScope,
+    ListOrgJobsResult,
     ListOrgListsResult,
     ListOrgsResult,
     ListPeopleResult,
@@ -32,36 +40,26 @@ from contactsafe_core.contact_schemas import (
     ModifyOrgListMembershipRequest,
     ModifyOrgListMembershipResult,
     NetworkStatusResult,
+    NextStepsResult,
+    NotificationPreferencesResult,
     OrgDetailResult,
     OrgEnrichmentStatusResult,
     PersonDetailResult,
     RenameOrgListRequest,
     RenameOrgListResult,
     ScrapingDogEnrichmentStatusResult,
-    StrongTieCompaniesResult,
-    StrongTieCountResult,
-    FlatJobListResult,
-    JobDetailResult,
-    JobMonitorConfigResult,
-    JobScanStatusResult,
-    JobPreferencesResult,
-    JobTargetScope,
-    ListOrgJobsResult,
-    NextStepsResult,
-    NotificationPreferencesResult,
     SetJobInterestResult,
     SetJobMonitorConfigRequest,
-    SetJobTargetScopeRequest,
-    UpdateTaskStatusResult,
+    StrongTieCompaniesResult,
+    StrongTieCountResult,
     UpdateOrgRequest,
     UpdatePersonRequest,
+    UpdateTaskStatusResult,
 )
-from datetime import date
-from urllib.parse import urlparse
-
-from contactsafe_core.enums import SessionStatus, SourceType, EnrichmentRunState, SyncState
+from contactsafe_core.enums import EnrichmentRunState, SessionStatus, SourceType, SyncState
 from contactsafe_core.schemas import (
     ConnectSourceResult,
+    DeleteUserAccountResult,
     DescribeGraphResult,
     EditTrustedUsersResult,
     EnrichmentStatusResult,
@@ -84,10 +82,8 @@ from contactsafe_core.schemas import (
     UploadSourceResult,
     UserExperience,
     UserProfileResult,
-    DeleteUserAccountResult,
     ViewTrustedUsersResult,
 )
-
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -144,35 +140,56 @@ def _normalize_preferred_funding_stages(
     return normalized or None
 
 
-from contactsafe_server.services.claim_writer import record_employment, record_person_attribute
-from contactsafe_server.services.contacts_service import normalize_social_platform
-from contactsafe_server.services.entity_resolution import EntityResolver
-from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
-from contactsafe_server.services.phone_normalization import normalize_phone
-from contactsafe_server.services.user_person_service import ensure_user_person
+def _normalize_scoring_weights(
+    raw: JobScoringWeights | dict[str, object] | None,
+) -> JobScoringWeights:
+    from contactsafe_server.services.job_relevance_service import resolve_scoring_weights
+
+    as_dict: dict[str, object] | None
+    if raw is None:
+        as_dict = None
+    elif isinstance(raw, JobScoringWeights):
+        as_dict = raw.model_dump()
+    else:
+        as_dict = raw
+    resolved: dict[str, float] = resolve_scoring_weights(as_dict)
+    return JobScoringWeights(
+        role=resolved["role"],
+        qualification=resolved["qualification"],
+        seniority=resolved["seniority"],
+        location=resolved["location"],
+        funding_stage=resolved["funding_stage"],
+    )
+
+
 from contactsafe_server.deps import (
     AppContext,
+    build_enrichment_service,
     build_oauth_server_service,
     build_oauth_service,
-    build_enrichment_service,
     build_source_service,
 )
-from contactsafe_server.services.contacts_service import ContactsService
-from contactsafe_server.services.org_list_service import OrgListService
-from contactsafe_server.services.strong_tie_api_service import StrongTieApiService
+from contactsafe_server.services.claim_writer import record_employment, record_person_attribute
+from contactsafe_server.services.connect_session_poll import verify_poll_secret
+from contactsafe_server.services.contacts_service import ContactsService, normalize_social_platform
+from contactsafe_server.services.entity_resolution import EntityResolver
 from contactsafe_server.services.graph_summary_service import GraphSummaryService
 from contactsafe_server.services.network_query_service import NetworkQueryService
+from contactsafe_server.services.org_list_service import OrgListService
 from contactsafe_server.services.person_dedup_service import PersonDedupService
+from contactsafe_server.services.person_profile_recompute import PersonProfileRecompute
+from contactsafe_server.services.phone_normalization import normalize_phone
 from contactsafe_server.services.query_planner import QueryPlanner
 from contactsafe_server.services.source_service import SourceService
+from contactsafe_server.services.strong_tie_api_service import StrongTieApiService
 from contactsafe_server.services.target_companies_service import (
     SecondDegreeTargetCompanyMatch,
     TargetCompaniesService,
     TargetCompanyMatch,
 )
-from contactsafe_server.services.connect_session_poll import verify_poll_secret
 from contactsafe_server.services.trust_list_service import TrustListService
 from contactsafe_server.services.upload_payload_crypto import build_upload_payload
+from contactsafe_server.services.user_person_service import ensure_user_person
 from contactsafe_server.utils import parse_source_id
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -263,16 +280,18 @@ async def cancel_sync(
     user_id: UUID | None,
     *,
     source_id: str,
-) -> "CancelSyncResult":
-    from contactsafe_core.schemas import CancelSyncResult
+) -> CancelSyncResult:
     from contactsafe_core.enums import SyncState
+    from contactsafe_core.schemas import CancelSyncResult
+
     from contactsafe_server.services.import_scheduler import release_sync_lock
 
     if user_id is None:
         return CancelSyncResult(cancelled=False, message="Not authenticated.")
     async with ctx.session_factory() as db:
-        from contactsafe_server.db.models import Source
         from sqlalchemy import select
+
+        from contactsafe_server.db.models import Source
 
         result = await db.execute(
             select(Source).where(Source.id == UUID(source_id), Source.user_id == user_id),
@@ -786,8 +805,10 @@ async def delete_user_account(
     user_id: UUID | None,
 ) -> DeleteUserAccountResult:
     import asyncio
+
     from sqlalchemy import select
     from sqlalchemy.exc import DBAPIError
+
     from contactsafe_server.db.models import Source
     from contactsafe_server.services.import_scheduler import (
         is_source_sync_running,
@@ -1398,8 +1419,8 @@ async def enrich_person(
         )
         await db.commit()
 
-        from contactsafe_server.services.contact_enrichment_worker import ContactEnrichmentWorker
         from contactsafe_server.db.models import EnrichmentQueueItem
+        from contactsafe_server.services.contact_enrichment_worker import ContactEnrichmentWorker
 
         item: EnrichmentQueueItem | None = (
             await db.execute(
@@ -1624,10 +1645,10 @@ async def add_orgs_to_list(
         await db.commit()
 
         # If the list is the user's job monitor list, immediately scrape new orgs
+        from sqlalchemy import select
+
         from contactsafe_server.config import get_settings
         from contactsafe_server.db.models import User
-
-        from sqlalchemy import select
 
         user_row = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
         if (
@@ -1868,7 +1889,7 @@ async def start_single_org_job_discovery(
     ctx: AppContext,
     user_id: UUID | None,
     org_id: UUID,
-) -> "StartSingleOrgDiscoveryResult":
+) -> StartSingleOrgDiscoveryResult:
     from contactsafe_core.contact_schemas import StartSingleOrgDiscoveryResult
 
     if user_id is None:
@@ -1965,6 +1986,9 @@ async def get_job_preferences(
                 sharer_names=list(raw_scope.get("sharer_names") or []),
                 size_bands=list(raw_scope.get("size_bands") or []),
             )
+        scoring_weights: JobScoringWeights = _normalize_scoring_weights(
+            user.job_scoring_weights,
+        )
         return JobPreferencesResult(
             text=user.job_preferences_text,
             suggested_text=user.job_suggested_roles,
@@ -1975,6 +1999,7 @@ async def get_job_preferences(
             preferred_funding_stages=_normalize_preferred_funding_stages(
                 user.preferred_funding_stages,
             ),
+            scoring_weights=scoring_weights,
             target_scope=target_scope,
             classified_job_count=count,
             message="OK",
@@ -1990,6 +2015,7 @@ async def set_job_preferences(
     commute_max_minutes: int | None = None,
     commute_note: str | None = None,
     preferred_funding_stages: list[str] | None = None,
+    scoring_weights: JobScoringWeights | None = None,
 ) -> JobPreferencesResult:
     if user_id is None:
         return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
@@ -2008,6 +2034,11 @@ async def set_job_preferences(
             preferred_funding_stages,
         )
         user.preferred_funding_stages = normalized_stages
+        normalized_weights: JobScoringWeights = _normalize_scoring_weights(
+            scoring_weights if scoring_weights is not None else user.job_scoring_weights,
+        )
+        if scoring_weights is not None:
+            user.job_scoring_weights = normalized_weights.model_dump()
         suggested_text: str | None = user.job_suggested_roles
         await db.commit()
 
@@ -2046,6 +2077,7 @@ async def set_job_preferences(
         commute_max_minutes=commute_max_minutes,
         commute_note=commute_note.strip() if commute_note else None,
         preferred_funding_stages=normalized_stages,
+        scoring_weights=normalized_weights,
         classified_job_count=0,
         message="Preferences saved. Rescoring jobs in background…",
     )
@@ -2085,6 +2117,7 @@ async def get_notification_preferences(
         )
     async with ctx.session_factory() as db:
         from contactsafe_core.enums import JobDigestFrequency
+
         from contactsafe_server.db.models import User
 
         user: User | None = await db.get(User, user_id)
