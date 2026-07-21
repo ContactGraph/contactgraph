@@ -124,6 +124,26 @@ def _normalize_website_to_domain(website: str | None) -> str | None:
             return bare
         return None
     return host
+
+
+def _normalize_preferred_funding_stages(
+    raw: list[str] | None,
+) -> list[str] | None:
+    if raw is None:
+        return None
+    from contactsafe_server.services.org_funding_stage import normalize_funding_stage
+
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for item in raw:
+        stage: str | None = normalize_funding_stage(item)
+        if stage is None or stage == "unknown" or stage in seen:
+            continue
+        seen.add(stage)
+        normalized.append(stage)
+    return normalized or None
+
+
 from contactsafe_server.services.claim_writer import record_employment, record_person_attribute
 from contactsafe_server.services.contacts_service import normalize_social_platform
 from contactsafe_server.services.entity_resolution import EntityResolver
@@ -1952,6 +1972,9 @@ async def get_job_preferences(
             location_city=user.job_location_city,
             commute_max_minutes=user.job_commute_max_minutes,
             commute_note=user.job_commute_note,
+            preferred_funding_stages=_normalize_preferred_funding_stages(
+                user.preferred_funding_stages,
+            ),
             target_scope=target_scope,
             classified_job_count=count,
             message="OK",
@@ -1966,6 +1989,7 @@ async def set_job_preferences(
     location_city: str | None = None,
     commute_max_minutes: int | None = None,
     commute_note: str | None = None,
+    preferred_funding_stages: list[str] | None = None,
 ) -> JobPreferencesResult:
     if user_id is None:
         return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
@@ -1980,6 +2004,10 @@ async def set_job_preferences(
         user.job_location_city = location_city.strip() if location_city else None
         user.job_commute_max_minutes = commute_max_minutes
         user.job_commute_note = commute_note.strip() if commute_note else None
+        normalized_stages: list[str] | None = _normalize_preferred_funding_stages(
+            preferred_funding_stages,
+        )
+        user.preferred_funding_stages = normalized_stages
         suggested_text: str | None = user.job_suggested_roles
         await db.commit()
 
@@ -2017,6 +2045,7 @@ async def set_job_preferences(
         location_city=location_city.strip() if location_city else None,
         commute_max_minutes=commute_max_minutes,
         commute_note=commute_note.strip() if commute_note else None,
+        preferred_funding_stages=normalized_stages,
         classified_job_count=0,
         message="Preferences saved. Rescoring jobs in background…",
     )

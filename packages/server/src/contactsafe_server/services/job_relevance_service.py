@@ -32,11 +32,13 @@ from contactsafe_server.services.openai_json import (
     content_from_chat_completion,
     parse_json_object,
 )
+from contactsafe_server.services.org_funding_stage import funding_stage_label
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 _BATCH_SIZE: int = 15
 _MATCH_SCORE_RELEVANT_THRESHOLD: int = 40
+_STAGE_BOOST: int = 8
 
 _ROLE_WEIGHT: float = 0.45
 _QUALIFICATION_WEIGHT: float = 0.25
@@ -333,6 +335,25 @@ def _cap_role_score_for_function_mismatch(
     return role_score, role_reason
 
 
+def _apply_funding_stage_boost(
+    match_score: int,
+    reason: str,
+    *,
+    org_funding_stage: str | None,
+    preferred_funding_stages: list[str] | None,
+) -> tuple[int, str]:
+    """Positive-only stage nudge when the org stage is in the user's preferences."""
+    if not preferred_funding_stages:
+        return match_score, reason
+    if org_funding_stage is None or org_funding_stage not in preferred_funding_stages:
+        return match_score, reason
+    boosted: int = min(100, match_score + _STAGE_BOOST)
+    stage_note: str = f"{funding_stage_label(org_funding_stage)} matches your stage preference"
+    if reason:
+        return boosted, f"{reason} | {stage_note}"
+    return boosted, stage_note
+
+
 class JobRelevanceService:
     def __init__(self, db: AsyncSession, settings: Settings) -> None:
         self._db: AsyncSession = db
@@ -382,6 +403,11 @@ class JobRelevanceService:
                     profile_section,
                     batch,
                     preferences_text=preferences_text,
+                    preferred_funding_stages=(
+                        list(user.preferred_funding_stages)
+                        if user.preferred_funding_stages
+                        else None
+                    ),
                 )
                 total_classified += classified
                 await _set_progress(user_id, total_classified, total_jobs)
@@ -576,6 +602,7 @@ class JobRelevanceService:
         jobs: list[OrgJob],
         *,
         preferences_text: str | None = None,
+        preferred_funding_stages: list[str] | None = None,
     ) -> int:
         job_descriptions: list[str] = []
         for idx, job in enumerate(jobs):
@@ -597,6 +624,14 @@ class JobRelevanceService:
         user_content: str = "Score these jobs:\n\n" + "\n".join(job_descriptions)
 
         results: list[dict[str, Any]] = await self._call_openai(system_prompt, user_content)
+
+        org_ids: list[uuid.UUID] = list({job.org_id for job in jobs})
+        org_stage_map: dict[uuid.UUID, str | None] = {}
+        if org_ids:
+            org_result = await self._db.execute(
+                select(Org.id, Org.funding_stage).where(Org.id.in_(org_ids)),
+            )
+            org_stage_map = {row.id: row.funding_stage for row in org_result.all()}
 
         now: datetime = datetime.now(tz=UTC)
         classified: int = 0
@@ -629,7 +664,6 @@ class JobRelevanceService:
                 + location_score * _LOCATION_WEIGHT,
             )
             match_score = max(0, min(100, match_score))
-            is_relevant: bool = match_score >= _MATCH_SCORE_RELEVANT_THRESHOLD
 
             qualification_reason: str | None = item.get("qualification_reason")
             seniority_reason: str | None = item.get("seniority_reason")
@@ -646,6 +680,14 @@ class JobRelevanceService:
                     ],
                 ),
             )
+
+            match_score, reason = _apply_funding_stage_boost(
+                match_score,
+                reason,
+                org_funding_stage=org_stage_map.get(job.org_id),
+                preferred_funding_stages=preferred_funding_stages,
+            )
+            is_relevant: bool = match_score >= _MATCH_SCORE_RELEVANT_THRESHOLD
 
             relevance = UserJobRelevance(
                 user_id=user_id,

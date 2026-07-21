@@ -190,6 +190,7 @@ class OrgListItem(BaseModel):
     categories: list[str] = Field(default_factory=list)
     employee_count: int | None = None
     company_size_band: str | None = None
+    funding_stage: str | None = None
     contact_count: int = 0
     primary_contact_name: str | None = None
     shared_from: list[str] = Field(default_factory=list)
@@ -223,6 +224,7 @@ class OrgDetailResult(BaseModel):
     categories: list[str] = Field(default_factory=list)
     employee_count: int | None = None
     company_size_band: str | None = None
+    funding_stage: str | None = None
     attributes: dict[str, object] = Field(default_factory=dict)
     aliases: list[str] = Field(default_factory=list)
     people: list[OrgPersonSummary] = Field(default_factory=list)
@@ -403,6 +405,9 @@ class OrgJobItem(BaseModel):
     org_name: str | None = None
     org_id: UUID | None = None
     org_primary_domain: str | None = None
+    org_funding_stage: str | None = None
+    org_company_size_band: str | None = None
+    org_employee_count: int | None = None
     location: str | None = None
     department: str | None = None
     url: str
@@ -471,6 +476,9 @@ class JobDetailResult(BaseModel):
     job: OrgJobItem
     org_description: str | None = None
     org_primary_domain: str | None = None
+    org_funding_stage: str | None = None
+    org_company_size_band: str | None = None
+    org_employee_count: int | None = None
     contacts: list[OrgPersonSummary] = Field(default_factory=list)
     contact_count: int = 0
     message: str
@@ -482,6 +490,7 @@ class SetJobPreferencesRequest(BaseModel):
     location_city: str | None = None
     commute_max_minutes: int | None = None
     commute_note: str | None = None
+    preferred_funding_stages: list[str] | None = None
 
 
 class JobTargetScope(BaseModel):
@@ -501,6 +510,7 @@ class JobPreferencesResult(BaseModel):
     location_city: str | None = None
     commute_max_minutes: int | None = None
     commute_note: str | None = None
+    preferred_funding_stages: list[str] | None = None
     target_scope: JobTargetScope | None = None
     classified_job_count: int = 0
     message: str

@@ -470,6 +470,7 @@ export interface OrgListItem {
   categories: string[];
   employee_count: number | null;
   company_size_band: string | null;
+  funding_stage: string | null;
   contact_count: number;
   primary_contact_name: string | null;
   shared_from: string[];
@@ -503,6 +504,7 @@ export interface OrgDetailResult {
   categories: string[];
   employee_count: number | null;
   company_size_band: string | null;
+  funding_stage: string | null;
   attributes: Record<string, unknown>;
   aliases: string[];
   people: OrgPersonSummary[];
@@ -694,6 +696,9 @@ export interface OrgJobItem {
   org_name: string | null;
   org_id: string | null;
   org_primary_domain: string | null;
+  org_funding_stage: string | null;
+  org_company_size_band: string | null;
+  org_employee_count: number | null;
   location: string | null;
   department: string | null;
   url: string;
@@ -758,6 +763,9 @@ export interface JobDetailResult {
   job: OrgJobItem;
   org_description: string | null;
   org_primary_domain: string | null;
+  org_funding_stage: string | null;
+  org_company_size_band: string | null;
+  org_employee_count: number | null;
   contacts: OrgPersonSummary[];
   contact_count: number;
   message: string;
@@ -775,6 +783,7 @@ export interface SetJobPreferencesRequest {
   location_city: string | null;
   commute_max_minutes: number | null;
   commute_note: string | null;
+  preferred_funding_stages: string[] | null;
 }
 
 export interface JobTargetScopePayload {
@@ -794,6 +803,7 @@ export interface JobPreferencesResult {
   location_city: string | null;
   commute_max_minutes: number | null;
   commute_note: string | null;
+  preferred_funding_stages: string[] | null;
   target_scope: JobTargetScopePayload | null;
   classified_job_count: number;
   message: string;

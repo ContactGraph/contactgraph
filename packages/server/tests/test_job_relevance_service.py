@@ -8,6 +8,7 @@ from uuid import uuid4
 from contactsafe_server.db.models import User
 from contactsafe_server.services.job_relevance_service import (
     JobRelevanceService,
+    _apply_funding_stage_boost,
     _cap_role_score_for_function_mismatch,
 )
 
@@ -100,3 +101,58 @@ def test_effective_role_text_falls_back_to_suggested() -> None:
 def test_effective_role_text_none_when_empty() -> None:
     user = User(id=uuid4(), email="a@example.com")
     assert JobRelevanceService._effective_role_text(user) is None
+
+
+def test_funding_stage_boost_applies_when_preferred() -> None:
+    score, reason = _apply_funding_stage_boost(
+        70,
+        "Strong role fit",
+        org_funding_stage="series_b",
+        preferred_funding_stages=["series_a", "series_b"],
+    )
+    assert score == 78
+    assert "Series B matches your stage preference" in reason
+
+
+def test_funding_stage_boost_skipped_when_not_preferred() -> None:
+    score, reason = _apply_funding_stage_boost(
+        70,
+        "Strong role fit",
+        org_funding_stage="public",
+        preferred_funding_stages=["series_a", "series_b"],
+    )
+    assert score == 70
+    assert reason == "Strong role fit"
+
+
+def test_funding_stage_boost_noop_without_preference() -> None:
+    score, reason = _apply_funding_stage_boost(
+        70,
+        "Strong role fit",
+        org_funding_stage="series_b",
+        preferred_funding_stages=None,
+    )
+    assert score == 70
+    assert reason == "Strong role fit"
+
+
+def test_funding_stage_boost_capped_at_100() -> None:
+    score, reason = _apply_funding_stage_boost(
+        96,
+        "",
+        org_funding_stage="seed",
+        preferred_funding_stages=["seed"],
+    )
+    assert score == 100
+    assert reason == "Seed matches your stage preference"
+
+
+def test_funding_stage_boost_no_penalty() -> None:
+    score, reason = _apply_funding_stage_boost(
+        40,
+        "Weak fit",
+        org_funding_stage="mature",
+        preferred_funding_stages=["seed"],
+    )
+    assert score == 40
+    assert reason == "Weak fit"

@@ -111,6 +111,7 @@ class _OrgEnrichmentSnapshot:
     categories: tuple[str, ...]
     employee_count: int | None
     company_size_band: str | None
+    funding_stage: str | None
     ats_provider: str | None
     ats_board_token: str | None
 
@@ -543,6 +544,8 @@ class OrgEnrichmentService:
             org.employee_count = parsed.employee_count
         if parsed.company_size_band is not None:
             org.company_size_band = parsed.company_size_band
+        if parsed.funding_stage is not None:
+            org.funding_stage = parsed.funding_stage
 
         attributes: dict[str, object] = dict(org.attributes or {})
         attributes["exa_enriched_at"] = datetime.now(tz=UTC).isoformat()
@@ -660,6 +663,7 @@ class ParsedOrgEnrichment:
     categories: list[str]
     employee_count: int | None
     company_size_band: str | None
+    funding_stage: str | None
 
 
 def parse_org_enrichment_hits(
@@ -674,6 +678,7 @@ def parse_org_enrichment_hits(
     description: str | None = _pick_description(company_hits, company_name)
     categories: list[str] = _pick_industry_tags(company_hits, company_name, description)
     company_size: ParsedCompanySize = _pick_company_size(company_hits)
+    funding_stage: str | None = _pick_funding_stage(company_hits)
     return ParsedOrgEnrichment(
         primary_domain=primary_domain,
         description=description,
@@ -682,6 +687,7 @@ def parse_org_enrichment_hits(
         categories=categories,
         employee_count=company_size.employee_count,
         company_size_band=company_size.company_size_band,
+        funding_stage=funding_stage,
     )
 
 
@@ -694,6 +700,7 @@ def _org_enrichment_snapshot(org: Org) -> _OrgEnrichmentSnapshot:
         categories=tuple(org.categories),
         employee_count=org.employee_count,
         company_size_band=org.company_size_band,
+        funding_stage=org.funding_stage,
         ats_provider=org.ats_provider,
         ats_board_token=org.ats_board_token,
     )
@@ -717,6 +724,8 @@ def _count_snapshot_changes(
     if before.employee_count != after.employee_count:
         changes += 1
     if before.company_size_band != after.company_size_band:
+        changes += 1
+    if before.funding_stage != after.funding_stage:
         changes += 1
     if before.ats_provider != after.ats_provider:
         changes += 1
@@ -909,6 +918,14 @@ def _pick_company_size(hits: list[WebSearchHit]) -> ParsedCompanySize:
             )
 
     return ParsedCompanySize(employee_count=None, company_size_band=None)
+
+
+def _pick_funding_stage(hits: list[WebSearchHit]) -> str | None:
+    for hit in hits:
+        structured = parse_structured_company_summary(hit.summary)
+        if structured is not None and structured.funding_stage is not None:
+            return structured.funding_stage
+    return None
 
 
 def _domain_from_url(url: str) -> str | None:
