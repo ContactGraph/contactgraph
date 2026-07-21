@@ -398,6 +398,7 @@ class ContactsService:
                 categories=list(org.categories or []),
                 employee_count=org.employee_count,
                 company_size_band=org.company_size_band,
+                funding_stage=org.funding_stage,
                 contact_count=count,
             )
 
@@ -455,6 +456,7 @@ class ContactsService:
                 categories=list(org.categories or []),
                 employee_count=org.employee_count,
                 company_size_band=org.company_size_band,
+                funding_stage=org.funding_stage,
                 contact_count=0,
             )
 
@@ -522,6 +524,7 @@ class ContactsService:
             categories=list(org.categories or []),
             employee_count=org.employee_count,
             company_size_band=org.company_size_band,
+            funding_stage=org.funding_stage,
             attributes=dict(org.attributes or {}),
             aliases=alias_values,
             people=people_summaries,
@@ -990,6 +993,7 @@ class ContactsService:
                         categories=list(org.categories or []),
                         employee_count=org.employee_count,
                         company_size_band=org.company_size_band,
+                        funding_stage=org.funding_stage,
                         contact_count=0,
                         shared_from=[sharer_name],
                         shared_contact_count=count,

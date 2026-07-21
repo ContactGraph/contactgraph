@@ -60,7 +60,7 @@ def test_parse_org_enrichment_hits_uses_structured_size_band() -> None:
             url="https://www.acme.com",
             text="Acme Corp builds widgets.",
             highlights=[],
-            summary='{"description":"Acme builds widgets.","industries":["naics:51"],"company_size_band":"1001-5000"}',
+            summary='{"description":"Acme builds widgets.","industries":["naics:51"],"company_size_band":"1001-5000","funding_stage":"series_b"}',
         ),
     ]
 
@@ -72,3 +72,4 @@ def test_parse_org_enrichment_hits_uses_structured_size_band() -> None:
 
     assert parsed.employee_count is None
     assert parsed.company_size_band == "1001-5000"
+    assert parsed.funding_stage == "series_b"

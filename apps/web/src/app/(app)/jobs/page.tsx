@@ -54,6 +54,10 @@ import type {
   JobScanStatusResult,
   OrgJobItem,
 } from "@/lib/api-types";
+import {
+  formatFundingStage,
+  shortFundingStage,
+} from "@/lib/company-funding-stage";
 import { proxyPost } from "@/lib/proxy-client";
 import { buildCsv, csvFilename, downloadCsv } from "@/lib/csv-export";
 import { formatNetworkContactsLabel } from "@/lib/format-network-contacts-label";
@@ -280,22 +284,55 @@ function JobsTable() {
         cell: ({ row }) => {
           const orgName: string | null = row.original.org_name;
           if (!orgName) return <CompactCell value="—" />;
+          const stage: string | null = row.original.org_funding_stage;
           return (
-            <Link
-              href={`/graph?tab=organizations&search=${encodeURIComponent(orgName)}`}
-              className="flex items-center gap-1.5 truncate text-xs text-primary no-underline"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <OrgLogo
-                domain={row.original.org_primary_domain}
-                name={orgName}
-                size={16}
-              />
-              <span className="truncate">{orgName}</span>
-            </Link>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <Link
+                href={`/graph?tab=organizations&search=${encodeURIComponent(orgName)}`}
+                className="flex min-w-0 items-center gap-1.5 truncate text-xs text-primary no-underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <OrgLogo
+                  domain={row.original.org_primary_domain}
+                  name={orgName}
+                  size={16}
+                />
+                <span className="truncate">{orgName}</span>
+              </Link>
+              {stage && stage !== "unknown" ? (
+                <Badge
+                  variant="secondary"
+                  className="shrink-0 px-1 py-0 text-[10px]"
+                >
+                  {shortFundingStage(stage)}
+                </Badge>
+              ) : null}
+            </div>
           );
         },
         meta: { width: "w-[8rem] sm:w-[12rem]" },
+      },
+      {
+        id: "stage",
+        accessorFn: (row: OrgJobItem) => row.org_funding_stage ?? "",
+        header: ({ column }) => (
+          <CompactSortHeader column={column} label="Stage" />
+        ),
+        cell: ({ row }) => {
+          const stage: string | null = row.original.org_funding_stage;
+          if (!stage || stage === "unknown") {
+            return <CompactCell value="—" />;
+          }
+          return (
+            <Badge
+              variant="secondary"
+              className="px-1.5 py-0 text-[10px]"
+            >
+              {formatFundingStage(stage)}
+            </Badge>
+          );
+        },
+        meta: { width: "w-[4.5rem] sm:w-[6rem]" },
       },
       {
         id: "contacts",
@@ -454,10 +491,11 @@ function JobsTable() {
       .getSortedRowModel()
       .rows.map((r) => r.original);
     const csv: string = buildCsv(
-      ["Match", "Company", "Title", "Location", "Department", "Remote", "Salary", "URL"],
+      ["Match", "Company", "Stage", "Title", "Location", "Department", "Remote", "Salary", "URL"],
       rows.map((job) => [
         job.match_score !== null ? `${job.match_score}%` : "",
         job.org_name ?? "",
+        formatFundingStage(job.org_funding_stage),
         job.title,
         job.location ?? "",
         job.department ?? "",

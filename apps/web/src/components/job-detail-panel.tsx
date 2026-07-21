@@ -16,6 +16,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { JobDetailResult, OrgJobItem } from "@/lib/api-types";
+import {
+  formatFundingStage,
+} from "@/lib/company-funding-stage";
+import { formatCompanySize } from "@/lib/company-size";
 import { proxyPost } from "@/lib/proxy-client";
 import { useJobBookmarks } from "@/lib/use-job-bookmarks";
 
@@ -258,7 +262,10 @@ export function JobDetailPanel({
         </a>
       </Button>
 
-      {data.org_primary_domain || data.org_description ? (
+      {data.org_primary_domain ||
+      data.org_description ||
+      data.org_funding_stage ||
+      data.org_company_size_band ? (
         <div className="space-y-1.5 rounded-lg border p-3">
           <div className="flex items-center gap-2 text-sm font-medium">
             <Building2 className="size-4" />
@@ -274,6 +281,23 @@ export function JobDetailPanel({
               </span>
             ) : null}
           </div>
+          {data.org_funding_stage || data.org_company_size_band ? (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {data.org_funding_stage ? (
+                <Badge variant="secondary" className="text-[10px]">
+                  {formatFundingStage(data.org_funding_stage)}
+                </Badge>
+              ) : null}
+              {data.org_company_size_band ? (
+                <span className="text-xs text-muted-foreground">
+                  {formatCompanySize(
+                    data.org_company_size_band,
+                    data.org_employee_count,
+                  )}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           {data.org_description ? (
             <p className="text-xs text-muted-foreground">
               {data.org_description}

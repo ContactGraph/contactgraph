@@ -30,6 +30,8 @@ import type {
   SourceType,
   UploadSourceResult,
 } from "@/lib/api-types";
+import { FUNDING_STAGE_OPTIONS } from "@/lib/company-funding-stage";
+import { cn } from "@/lib/utils";
 import { proxyPost } from "@/lib/proxy-client";
 import { useGraphEvents } from "@/lib/use-graph-events";
 import { useJobEvents } from "@/lib/use-job-events";
@@ -65,6 +67,9 @@ export function JobSetupCards({
   const [locationCity, setLocationCity] = useState<string>("");
   const [commuteMaxMinutes, setCommuteMaxMinutes] = useState<string>("");
   const [commuteNote, setCommuteNote] = useState<string>("");
+  const [preferredFundingStages, setPreferredFundingStages] = useState<
+    string[] | null
+  >(null);
 
   const sourcesQuery = useQuery({
     queryKey: ["sources"],
@@ -224,6 +229,11 @@ export function JobSetupCards({
     if (serverCommuteNote !== null && commuteNote === "") {
       setCommuteNote(serverCommuteNote);
     }
+    const serverStages: string[] | null =
+      jobPreferencesQuery.data?.preferred_funding_stages ?? null;
+    if (serverStages !== null && preferredFundingStages === null) {
+      setPreferredFundingStages(serverStages);
+    }
   }, [
     jobPreferencesQuery.data?.text,
     jobPreferencesQuery.data?.suggested_text,
@@ -231,11 +241,13 @@ export function JobSetupCards({
     jobPreferencesQuery.data?.location_city,
     jobPreferencesQuery.data?.commute_max_minutes,
     jobPreferencesQuery.data?.commute_note,
+    jobPreferencesQuery.data?.preferred_funding_stages,
     preferencesText,
     locationPref,
     locationCity,
     commuteMaxMinutes,
     commuteNote,
+    preferredFundingStages,
   ]);
 
   const preferencesDirty: boolean = useMemo(() => {
@@ -251,13 +263,22 @@ export function JobSetupCards({
         : "";
     const serverCommuteNote: string =
       jobPreferencesQuery.data?.commute_note ?? "";
-    if (!baselineText.trim() && !preferencesText.trim()) return false;
+    const serverStages: string[] =
+      jobPreferencesQuery.data?.preferred_funding_stages ?? [];
+    const localStages: string[] = preferredFundingStages ?? [];
+    const stagesEqual: boolean =
+      serverStages.length === localStages.length &&
+      serverStages.every((stage: string) => localStages.includes(stage));
+    if (!baselineText.trim() && !preferencesText.trim() && stagesEqual) {
+      return false;
+    }
     return (
       preferencesText.trim() !== baselineText.trim() ||
       locationPref !== serverLocPref ||
       locationCity !== serverCity ||
       commuteMaxMinutes !== serverCommute ||
-      commuteNote !== serverCommuteNote
+      commuteNote !== serverCommuteNote ||
+      !stagesEqual
     );
   }, [
     preferencesText,
@@ -265,17 +286,29 @@ export function JobSetupCards({
     locationCity,
     commuteMaxMinutes,
     commuteNote,
+    preferredFundingStages,
     jobPreferencesQuery.data?.text,
     jobPreferencesQuery.data?.suggested_text,
     jobPreferencesQuery.data?.location_pref,
     jobPreferencesQuery.data?.location_city,
     jobPreferencesQuery.data?.commute_max_minutes,
     jobPreferencesQuery.data?.commute_note,
+    jobPreferencesQuery.data?.preferred_funding_stages,
   ]);
 
   useEffect(() => {
     onDirtyChange?.(preferencesDirty);
   }, [preferencesDirty, onDirtyChange]);
+
+  const togglePreferredFundingStage = useCallback((stage: string): void => {
+    setPreferredFundingStages((current: string[] | null) => {
+      const existing: string[] = current ?? [];
+      if (existing.includes(stage)) {
+        return existing.filter((value: string) => value !== stage);
+      }
+      return [...existing, stage];
+    });
+  }, []);
 
   const handleLinkedInProfileUpload = useCallback(
     async (file: File, regenerateRoleSuggestions: boolean): Promise<void> => {
@@ -490,6 +523,33 @@ export function JobSetupCards({
             value={commuteNote}
             onChange={(e) => setCommuteNote(e.target.value)}
           />
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">
+              Preferred funding stages
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {FUNDING_STAGE_OPTIONS.map((option) => {
+                const selected: boolean = (
+                  preferredFundingStages ?? []
+                ).includes(option.value);
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className={cn(
+                      "rounded-full border px-2.5 py-0.5 text-xs transition-colors",
+                      selected
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border bg-background hover:bg-muted",
+                    )}
+                    onClick={() => togglePreferredFundingStage(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div className="flex items-center gap-2">
             <Button
               variant={preferencesDirty ? "default" : "outline"}
@@ -508,6 +568,10 @@ export function JobSetupCards({
                     ? parseInt(commuteMaxMinutes, 10)
                     : null,
                   commute_note: commuteNote.trim() || null,
+                  preferred_funding_stages:
+                    (preferredFundingStages ?? []).length > 0
+                      ? preferredFundingStages
+                      : null,
                 })
               }
             >
@@ -539,6 +603,10 @@ export function JobSetupCards({
                       ? parseInt(commuteMaxMinutes, 10)
                       : null,
                     commute_note: commuteNote.trim() || null,
+                    preferred_funding_stages:
+                      (preferredFundingStages ?? []).length > 0
+                        ? preferredFundingStages
+                        : null,
                   });
                 }}
               >

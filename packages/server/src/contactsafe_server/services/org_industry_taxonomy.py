@@ -11,6 +11,10 @@ from contactsafe_server.services.org_company_size import (
     LINKEDIN_SIZE_BAND_VALUES,
     normalize_linkedin_size_band,
 )
+from contactsafe_server.services.org_funding_stage import (
+    FUNDING_STAGE_VALUES,
+    normalize_funding_stage,
+)
 
 # NAICS 2022 sector codes (2-digit) stored as naics:{code}.
 # Friendly labels are for UI display only.
@@ -86,6 +90,7 @@ class StructuredCompanySummary:
     description: str | None
     industries: tuple[str, ...]
     company_size_band: str | None = None
+    funding_stage: str | None = None
 
 
 def industry_tag_label(tag: str) -> str:
@@ -161,6 +166,15 @@ def exa_company_summary_schema() -> dict[str, object]:
                 ),
                 "enum": list(LINKEDIN_SIZE_BAND_VALUES),
             },
+            "funding_stage": {
+                "type": "string",
+                "description": (
+                    "Best-effort funding stage. Use public for publicly traded companies, "
+                    "mature for profitable/bootstrapped/non-VC private firms, and unknown "
+                    "when unsure."
+                ),
+                "enum": list(FUNDING_STAGE_VALUES),
+            },
         },
         "required": ["description", "industries"],
         "additionalProperties": False,
@@ -170,7 +184,10 @@ def exa_company_summary_schema() -> dict[str, object]:
 def build_company_summary_query(company_name: str) -> str:
     return (
         f"Describe what {company_name} does, choose exactly one primary industry "
-        "sector tag, and estimate its LinkedIn employee count range if possible. "
+        "sector tag, estimate its LinkedIn employee count range if possible, and "
+        "estimate its funding stage (seed, series_a, series_b, series_c_plus, "
+        "mezzanine, public, mature, or unknown). Use public if it is publicly traded, "
+        "mature for profitable/bootstrapped/non-VC private firms, and unknown when unsure. "
         "For for-profit companies, return a NAICS sector such as naics:51. "
         "Only use nonprofit for registered nonprofits."
     )
@@ -205,10 +222,16 @@ def parse_structured_company_summary(raw: str) -> StructuredCompanySummary | Non
     if isinstance(size_band_raw, str):
         company_size_band = normalize_linkedin_size_band(size_band_raw)
 
+    funding_stage: str | None = None
+    funding_stage_raw: object = data.get("funding_stage")
+    if isinstance(funding_stage_raw, str):
+        funding_stage = normalize_funding_stage(funding_stage_raw)
+
     return StructuredCompanySummary(
         description=description,
         industries=tuple(select_primary_industry_tag(industries)),
         company_size_band=company_size_band,
+        funding_stage=funding_stage,
     )
 
 

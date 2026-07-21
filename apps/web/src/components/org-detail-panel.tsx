@@ -13,6 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import type { OrgDetailResult, UpdateOrgRequest } from "@/lib/api-types";
+import { formatFundingStage } from "@/lib/company-funding-stage";
 import { formatCompanySize } from "@/lib/company-size";
 import { isRecordFormDirty } from "@/lib/detail-form-dirty";
 import type { EditableDetailPanelHandle } from "@/lib/editable-detail-panel";
@@ -211,6 +212,12 @@ export const OrgDetailPanel = forwardRef<
           <dd className="mt-1 text-sm">
             {formatCompanySize(org.company_size_band, org.employee_count)}
           </dd>
+        </div>
+        <div>
+          <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+            Stage
+          </dt>
+          <dd className="mt-1 text-sm">{formatFundingStage(org.funding_stage)}</dd>
         </div>
         <div>
           <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">

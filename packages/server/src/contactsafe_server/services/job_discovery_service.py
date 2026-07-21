@@ -361,6 +361,9 @@ class JobDiscoveryService:
                         source=job.source,
                         title=job.title,
                         org_primary_domain=org.primary_domain,
+                        org_funding_stage=org.funding_stage,
+                        org_company_size_band=org.company_size_band,
+                        org_employee_count=org.employee_count,
                         location=job.location,
                         department=job.department,
                         url=job.url,
@@ -420,6 +423,15 @@ class JobDiscoveryService:
         }
         org_domain_map: dict[uuid.UUID, str | None] = {
             org.id: org.primary_domain for org in orgs
+        }
+        org_funding_stage_map: dict[uuid.UUID, str | None] = {
+            org.id: org.funding_stage for org in orgs
+        }
+        org_size_band_map: dict[uuid.UUID, str | None] = {
+            org.id: org.company_size_band for org in orgs
+        }
+        org_employee_count_map: dict[uuid.UUID, int | None] = {
+            org.id: org.employee_count for org in orgs
         }
 
         jobs_query = select(OrgJob).where(OrgJob.org_id.in_(org_ids))
@@ -488,6 +500,9 @@ class JobDiscoveryService:
                     org_name=org_name_map.get(job.org_id),
                     org_id=job.org_id,
                     org_primary_domain=org_domain_map.get(job.org_id),
+                    org_funding_stage=org_funding_stage_map.get(job.org_id),
+                    org_company_size_band=org_size_band_map.get(job.org_id),
+                    org_employee_count=org_employee_count_map.get(job.org_id),
                     location=job.location,
                     department=job.department,
                     url=job.url,
@@ -632,6 +647,9 @@ class JobDiscoveryService:
             org_name=org.canonical_name if org else None,
             org_id=job.org_id,
             org_primary_domain=org.primary_domain if org else None,
+            org_funding_stage=org.funding_stage if org else None,
+            org_company_size_band=org.company_size_band if org else None,
+            org_employee_count=org.employee_count if org else None,
             location=job.location,
             department=job.department,
             url=job.url,
@@ -666,6 +684,9 @@ class JobDiscoveryService:
             job=item,
             org_description=org.description if org else None,
             org_primary_domain=org.primary_domain if org else None,
+            org_funding_stage=org.funding_stage if org else None,
+            org_company_size_band=org.company_size_band if org else None,
+            org_employee_count=org.employee_count if org else None,
             contacts=contacts,
             contact_count=contact_count,
             message=f"Job detail for {job.title}.",
