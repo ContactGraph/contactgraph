@@ -10,11 +10,11 @@ docker-down:
 	docker compose down
 
 migrate:
-	uv run --package contactsafe-server alembic -c migrations/alembic.ini upgrade head
+	uv run --package contactsafe-server python -m alembic -c migrations/alembic.ini upgrade head
 
 migrate-new:
 	@read -p "Migration message: " msg; \
-	uv run --package contactsafe-server alembic -c migrations/alembic.ini revision --autogenerate -m "$$msg"
+	uv run --package contactsafe-server python -m alembic -c migrations/alembic.ini revision --autogenerate -m "$$msg"
 
 dev:
 	uv run --package contactsafe-server python -m uvicorn contactsafe_server.main:app --reload \
