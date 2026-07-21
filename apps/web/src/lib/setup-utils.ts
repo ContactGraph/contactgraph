@@ -64,6 +64,16 @@ export function isLinkedInProfileComplete(
   return source !== undefined && source.sync_state === "complete";
 }
 
+export function isGmailSyncComplete(
+  sources: ReadonlyArray<SourceSummary>,
+): boolean {
+  const source: SourceSummary | undefined = sourceForType(
+    sources,
+    "google_mail",
+  );
+  return source !== undefined && source.sync_state === "complete";
+}
+
 export function isGraphReady(sources: ReadonlyArray<SourceSummary>): boolean {
   return isPhoneImportComplete(sources) && isLinkedInImportComplete(sources);
 }
