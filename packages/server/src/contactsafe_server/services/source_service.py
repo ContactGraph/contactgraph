@@ -168,6 +168,7 @@ class SourceService:
         filename: str,
         content: str,
         encryptor: TokenEncryptor | None = None,
+        regenerate_role_suggestions: bool = True,
     ) -> Source:
         if source_type not in {
             SourceType.PHONE_CONTACTS_UPLOAD,
@@ -198,6 +199,7 @@ class SourceService:
             content=content,
             encryptor=encryptor,
         )
+        payload["regenerate_role_suggestions"] = regenerate_role_suggestions
 
         if existing is not None:
             existing.upload_payload = payload

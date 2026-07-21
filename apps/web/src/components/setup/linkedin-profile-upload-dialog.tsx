@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import {
   Dialog,
@@ -13,7 +14,7 @@ import { FileDropZone } from "@/components/ui/file-drop-zone";
 interface LinkedInProfileUploadDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onFileSelect: (file: File) => void;
+  onFileSelect: (file: File, regenerateRoleSuggestions: boolean) => void;
   isPending: boolean;
   isProcessing: boolean;
   error: string | null;
@@ -30,6 +31,8 @@ export function LinkedInProfileUploadDialog({
   isComplete,
 }: LinkedInProfileUploadDialogProps): React.JSX.Element {
   const isBusy: boolean = isPending || isProcessing;
+  const [regenerateRoleSuggestions, setRegenerateRoleSuggestions] =
+    useState<boolean>(true);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -70,9 +73,28 @@ export function LinkedInProfileUploadDialog({
             <p>Upload any resume PDF. Re-uploading replaces your previous profile.</p>
           </div>
 
+          {isComplete && !isBusy ? (
+            <label className="flex cursor-pointer items-start gap-2 rounded-md border bg-muted/40 px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={regenerateRoleSuggestions}
+                onChange={(e) =>
+                  setRegenerateRoleSuggestions(e.target.checked)
+                }
+              />
+              <span className="text-muted-foreground">
+                Regenerate my suggested ideal roles from this upload. Uncheck to
+                keep the roles text you already have.
+              </span>
+            </label>
+          ) : null}
+
           <FileDropZone
             accept=".pdf,application/pdf"
-            onFileSelect={onFileSelect}
+            onFileSelect={(file: File) =>
+              onFileSelect(file, isComplete ? regenerateRoleSuggestions : true)
+            }
             disabled={isBusy}
             busy={isBusy}
             busyMessage={isProcessing ? "Processing PDF…" : "Uploading…"}
@@ -82,9 +104,9 @@ export function LinkedInProfileUploadDialog({
 
           {isProcessing ? (
             <p className="text-center text-xs text-muted-foreground">
-              Reading your PDF and analyzing your background — this can take up to
-              a couple of minutes for a detailed resume. You can keep this open or
-              come back later.
+              Reading your PDF and analyzing your background — usually about 15–30
+              seconds (a little longer for a long resume). You can keep this open
+              or come back later; it finishes in the background.
             </p>
           ) : null}
         </div>

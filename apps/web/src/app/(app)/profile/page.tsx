@@ -330,6 +330,7 @@ export default function ProfilePage() {
       source_type: SourceType;
       filename: string;
       content: string;
+      regenerate_role_suggestions?: boolean;
     }) => proxyPost<UploadSourceResult>("upload-source", payload),
     onSuccess: async () => {
       setUploadError(null);
@@ -342,7 +343,7 @@ export default function ProfilePage() {
   });
 
   const handlePdfUpload = useCallback(
-    async (file: File): Promise<void> => {
+    async (file: File, regenerateRoleSuggestions: boolean): Promise<void> => {
       const buffer: ArrayBuffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       let binary = "";
@@ -354,6 +355,7 @@ export default function ProfilePage() {
         source_type: "linkedin_profile_upload",
         filename: file.name,
         content: base64,
+        regenerate_role_suggestions: regenerateRoleSuggestions,
       });
     },
     [uploadMutation],
@@ -430,7 +432,7 @@ export default function ProfilePage() {
         <>
           <FileDropZone
             accept=".pdf,application/pdf"
-            onFileSelect={(file: File) => void handlePdfUpload(file)}
+            onFileSelect={(file: File) => void handlePdfUpload(file, true)}
             disabled={linkedinProfileBusy}
             busy={linkedinProfileBusy}
             busyMessage={awaitingSync ? "Processing PDF…" : "Uploading…"}
@@ -865,8 +867,8 @@ export default function ProfilePage() {
       <LinkedInProfileUploadDialog
         open={uploadDialogOpen}
         onOpenChange={setUploadDialogOpen}
-        onFileSelect={(file: File) => {
-          void handlePdfUpload(file);
+        onFileSelect={(file: File, regenerateRoleSuggestions: boolean) => {
+          void handlePdfUpload(file, regenerateRoleSuggestions);
         }}
         isPending={uploadMutation.isPending}
         isProcessing={awaitingSync}

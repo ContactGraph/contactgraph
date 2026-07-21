@@ -131,6 +131,7 @@ export function JobSetupCards({
       source_type: SourceType;
       filename: string;
       content: string;
+      regenerate_role_suggestions?: boolean;
     }) => proxyPost<UploadSourceResult>("upload-source", payload),
     onSuccess: async (_result, variables) => {
       if (variables.source_type === "linkedin_profile_upload") {
@@ -277,7 +278,7 @@ export function JobSetupCards({
   }, [preferencesDirty, onDirtyChange]);
 
   const handleLinkedInProfileUpload = useCallback(
-    async (file: File): Promise<void> => {
+    async (file: File, regenerateRoleSuggestions: boolean): Promise<void> => {
       const buffer: ArrayBuffer = await file.arrayBuffer();
       const bytes = new Uint8Array(buffer);
       let binary = "";
@@ -289,6 +290,7 @@ export function JobSetupCards({
         source_type: "linkedin_profile_upload",
         filename: file.name,
         content: base64,
+        regenerate_role_suggestions: regenerateRoleSuggestions,
       });
     },
     [uploadMutation],
@@ -370,6 +372,13 @@ export function JobSetupCards({
                 We use your background to suggest roles and score how well you
                 match each job&apos;s requirements.
               </CardDescription>
+              {profileInProgress ? (
+                <p className="text-xs text-muted-foreground">
+                  Reading your PDF and analyzing your background — usually about
+                  15–30 seconds. You can leave this page; it finishes in the
+                  background.
+                </p>
+              ) : null}
               {linkedinProfileUploadError ? (
                 <p className="text-xs text-destructive">{linkedinProfileUploadError}</p>
               ) : null}
@@ -555,8 +564,8 @@ export function JobSetupCards({
       <LinkedInProfileUploadDialog
         open={linkedinProfileDialogOpen}
         onOpenChange={setLinkedinProfileDialogOpen}
-        onFileSelect={(file) => {
-          void handleLinkedInProfileUpload(file);
+        onFileSelect={(file, regenerateRoleSuggestions) => {
+          void handleLinkedInProfileUpload(file, regenerateRoleSuggestions);
         }}
         isPending={uploadMutation.isPending}
         isProcessing={linkedinProfileProcessing}

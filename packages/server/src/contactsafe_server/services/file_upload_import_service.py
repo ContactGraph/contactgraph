@@ -536,12 +536,21 @@ class FileUploadImportService:
         recompute = PersonProfileRecompute(self._db)
         await recompute.recompute_persons([person.id])
 
-        suggested_roles: str | None = await derive_role_suggestions(
-            profile,
-            self._settings,
-        )
-        if suggested_roles is not None:
-            user.job_suggested_roles = suggested_roles
+        existing_suggestions: str = (user.job_suggested_roles or "").strip()
+        regenerate_suggestions: bool = True
+        if isinstance(source.upload_payload, dict):
+            raw_flag: object = source.upload_payload.get(
+                "regenerate_role_suggestions"
+            )
+            if isinstance(raw_flag, bool):
+                regenerate_suggestions = raw_flag
+        if regenerate_suggestions or not existing_suggestions:
+            suggested_roles: str | None = await derive_role_suggestions(
+                profile,
+                self._settings,
+            )
+            if suggested_roles is not None:
+                user.job_suggested_roles = suggested_roles
 
         await self._db.flush()
         await self._enqueue_job_rescore(user_id)

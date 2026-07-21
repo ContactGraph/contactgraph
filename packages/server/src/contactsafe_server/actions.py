@@ -832,6 +832,7 @@ async def upload_source(
     source_type: str,
     filename: str,
     content: str,
+    regenerate_role_suggestions: bool = True,
 ) -> UploadSourceResult:
     if user_id is None:
         raise ValueError("Authentication required. Provide a Bearer token.")
@@ -859,6 +860,7 @@ async def upload_source(
             filename=filename,
             content=content,
             encryptor=ctx.encryptor,
+            regenerate_role_suggestions=regenerate_role_suggestions,
         )
         await db.commit()
         sync_result: SyncSourceResult = await sources.request_sync(source.id)
