@@ -484,6 +484,14 @@ class JobDetailResult(BaseModel):
     message: str
 
 
+class JobScoringWeights(BaseModel):
+    role: float = 1.0
+    qualification: float = 0.9
+    seniority: float = 0.6
+    location: float = 0.9
+    funding_stage: float = 0.7
+
+
 class SetJobPreferencesRequest(BaseModel):
     text: str
     location_pref: str | None = None
@@ -491,6 +499,7 @@ class SetJobPreferencesRequest(BaseModel):
     commute_max_minutes: int | None = None
     commute_note: str | None = None
     preferred_funding_stages: list[str] | None = None
+    scoring_weights: JobScoringWeights | None = None
 
 
 class JobTargetScope(BaseModel):
@@ -511,6 +520,7 @@ class JobPreferencesResult(BaseModel):
     commute_max_minutes: int | None = None
     commute_note: str | None = None
     preferred_funding_stages: list[str] | None = None
+    scoring_weights: JobScoringWeights | None = None
     target_scope: JobTargetScope | None = None
     classified_job_count: int = 0
     message: str

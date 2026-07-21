@@ -1016,6 +1016,7 @@ async def api_set_job_preferences(
         commute_max_minutes=body.commute_max_minutes,
         commute_note=body.commute_note,
         preferred_funding_stages=body.preferred_funding_stages,
+        scoring_weights=body.scoring_weights,
     )
 
 

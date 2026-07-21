@@ -1,4 +1,4 @@
-"""Unit tests for job relevance function-mismatch caps and preference fallback."""
+"""Unit tests for job relevance caps and conjunctive match scoring."""
 
 from __future__ import annotations
 
@@ -7,9 +7,12 @@ from uuid import uuid4
 
 from contactsafe_server.db.models import User
 from contactsafe_server.services.job_relevance_service import (
+    DEFAULT_SCORING_WEIGHTS,
     JobRelevanceService,
-    _apply_funding_stage_boost,
     _cap_role_score_for_function_mismatch,
+    compute_match_score,
+    resolve_scoring_weights,
+    stage_match_factor,
 )
 
 
@@ -103,56 +106,141 @@ def test_effective_role_text_none_when_empty() -> None:
     assert JobRelevanceService._effective_role_text(user) is None
 
 
-def test_funding_stage_boost_applies_when_preferred() -> None:
-    score, reason = _apply_funding_stage_boost(
-        70,
-        "Strong role fit",
-        org_funding_stage="series_b",
-        preferred_funding_stages=["series_a", "series_b"],
+def test_resolve_scoring_weights_defaults() -> None:
+    assert resolve_scoring_weights(None) == DEFAULT_SCORING_WEIGHTS
+
+
+def test_resolve_scoring_weights_merges_and_clamps() -> None:
+    resolved = resolve_scoring_weights({"role": 0.5, "location": 2.0, "seniority": -1})
+    assert resolved["role"] == 0.5
+    assert resolved["location"] == 1.0
+    assert resolved["seniority"] == 0.0
+    assert resolved["qualification"] == DEFAULT_SCORING_WEIGHTS["qualification"]
+
+
+def test_compute_match_score_hard_gate() -> None:
+    score, note = compute_match_score(
+        role_score=100,
+        qualification_score=100,
+        seniority_score=100,
+        location_score=0,
+        weights={**DEFAULT_SCORING_WEIGHTS, "location": 1.0},
+        stage_factor=1.0,
     )
-    assert score == 78
-    assert "Series B matches your stage preference" in reason
+    assert score == 0
+    assert note is not None
+    assert "location" in note
 
 
-def test_funding_stage_boost_skipped_when_not_preferred() -> None:
-    score, reason = _apply_funding_stage_boost(
-        70,
-        "Strong role fit",
-        org_funding_stage="public",
-        preferred_funding_stages=["series_a", "series_b"],
-    )
-    assert score == 70
-    assert reason == "Strong role fit"
-
-
-def test_funding_stage_boost_noop_without_preference() -> None:
-    score, reason = _apply_funding_stage_boost(
-        70,
-        "Strong role fit",
-        org_funding_stage="series_b",
-        preferred_funding_stages=None,
-    )
-    assert score == 70
-    assert reason == "Strong role fit"
-
-
-def test_funding_stage_boost_capped_at_100() -> None:
-    score, reason = _apply_funding_stage_boost(
-        96,
-        "",
-        org_funding_stage="seed",
-        preferred_funding_stages=["seed"],
+def test_compute_match_score_weight_zero_ignores_dimension() -> None:
+    score, _note = compute_match_score(
+        role_score=100,
+        qualification_score=100,
+        seniority_score=100,
+        location_score=0,
+        weights={**DEFAULT_SCORING_WEIGHTS, "location": 0.0},
+        stage_factor=1.0,
     )
     assert score == 100
-    assert reason == "Seed matches your stage preference"
 
 
-def test_funding_stage_boost_no_penalty() -> None:
-    score, reason = _apply_funding_stage_boost(
-        40,
-        "Weak fit",
-        org_funding_stage="mature",
-        preferred_funding_stages=["seed"],
+def test_compute_match_score_partial_knockout() -> None:
+    score, _note = compute_match_score(
+        role_score=100,
+        qualification_score=100,
+        seniority_score=100,
+        location_score=0,
+        weights={**DEFAULT_SCORING_WEIGHTS, "location": 0.5},
+        stage_factor=1.0,
     )
-    assert score == 40
-    assert reason == "Weak fit"
+    assert score == 50
+
+
+def test_compute_match_score_all_high_in_expected_band() -> None:
+    score, note = compute_match_score(
+        role_score=90,
+        qualification_score=90,
+        seniority_score=90,
+        location_score=90,
+        weights=DEFAULT_SCORING_WEIGHTS,
+        stage_factor=1.0,
+    )
+    assert 55 <= score <= 90
+    assert note is None or "Limited by" in note
+
+
+def test_stage_match_factor_neutral_without_preference() -> None:
+    assert (
+        stage_match_factor(
+            org_funding_stage="series_b",
+            preferred_funding_stages=None,
+            weight=0.7,
+        )
+        == 1.0
+    )
+
+
+def test_stage_match_factor_neutral_when_unknown() -> None:
+    assert (
+        stage_match_factor(
+            org_funding_stage=None,
+            preferred_funding_stages=["series_a"],
+            weight=0.7,
+        )
+        == 1.0
+    )
+    assert (
+        stage_match_factor(
+            org_funding_stage="unknown",
+            preferred_funding_stages=["series_a"],
+            weight=1.0,
+        )
+        == 1.0
+    )
+
+
+def test_stage_match_factor_penalizes_mismatch() -> None:
+    factor = stage_match_factor(
+        org_funding_stage="public",
+        preferred_funding_stages=["series_a", "series_b"],
+        weight=0.7,
+    )
+    assert abs(factor - 0.3) < 1e-9
+
+
+def test_stage_match_factor_matches_preferred() -> None:
+    assert (
+        stage_match_factor(
+            org_funding_stage="series_b",
+            preferred_funding_stages=["series_a", "series_b"],
+            weight=0.7,
+        )
+        == 1.0
+    )
+
+
+def test_compute_match_score_with_stage_mismatch() -> None:
+    score_match, _ = compute_match_score(
+        role_score=100,
+        qualification_score=100,
+        seniority_score=100,
+        location_score=100,
+        weights=DEFAULT_SCORING_WEIGHTS,
+        stage_factor=1.0,
+    )
+    score_miss, note = compute_match_score(
+        role_score=100,
+        qualification_score=100,
+        seniority_score=100,
+        location_score=100,
+        weights=DEFAULT_SCORING_WEIGHTS,
+        stage_factor=stage_match_factor(
+            org_funding_stage="public",
+            preferred_funding_stages=["seed"],
+            weight=DEFAULT_SCORING_WEIGHTS["funding_stage"],
+        ),
+    )
+    assert score_match == 100
+    assert score_miss == 30
+    assert note is not None
+    assert "funding stage" in note

@@ -777,6 +777,14 @@ export interface DedupPersonsResult {
   message: string;
 }
 
+export interface JobScoringWeights {
+  role: number;
+  qualification: number;
+  seniority: number;
+  location: number;
+  funding_stage: number;
+}
+
 export interface SetJobPreferencesRequest {
   text: string;
   location_pref: string | null;
@@ -784,6 +792,7 @@ export interface SetJobPreferencesRequest {
   commute_max_minutes: number | null;
   commute_note: string | null;
   preferred_funding_stages: string[] | null;
+  scoring_weights: JobScoringWeights | null;
 }
 
 export interface JobTargetScopePayload {
@@ -804,6 +813,7 @@ export interface JobPreferencesResult {
   commute_max_minutes: number | null;
   commute_note: string | null;
   preferred_funding_stages: string[] | null;
+  scoring_weights: JobScoringWeights | null;
   target_scope: JobTargetScopePayload | null;
   classified_job_count: number;
   message: string;

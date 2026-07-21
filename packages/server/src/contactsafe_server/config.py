@@ -306,7 +306,7 @@ class Settings(BaseSettings):
         description="UTC hour when daily/weekly job digests are enqueued (~morning US)",
     )
     email_digest_min_match_score: int = Field(
-        default=60,
+        default=45,
         ge=0,
         le=100,
         description="Minimum match score for jobs included in email digests",
