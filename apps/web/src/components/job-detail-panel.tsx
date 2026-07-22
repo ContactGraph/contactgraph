@@ -20,6 +20,7 @@ import {
   formatFundingStage,
 } from "@/lib/company-funding-stage";
 import { formatCompanySize } from "@/lib/company-size";
+import { formatSeniorityLevel } from "@/lib/job-seniority";
 import { proxyPost } from "@/lib/proxy-client";
 import { useJobBookmarks } from "@/lib/use-job-bookmarks";
 
@@ -159,11 +160,13 @@ export function JobDetailPanel({
   const salary: string | null = formatSalary(job.salary_min, job.salary_max);
   const ownContacts = data.contacts.filter((contact) => contact.shared_from === null);
   const sharedContacts = data.contacts.filter((contact) => contact.shared_from !== null);
+  const seniorityLabel: string = formatSeniorityLevel(job.seniority_level);
   const metaParts: string[] = [
-    job.location,
+    job.location_normalized ?? job.location,
     job.department,
     job.remote_status,
-  ].filter((v): v is string => v !== null && v !== undefined);
+    seniorityLabel || null,
+  ].filter((v): v is string => v !== null && v !== undefined && v !== "");
 
   return (
     <div className="flex-1 space-y-5 overflow-y-auto px-6 py-4">

@@ -2025,22 +2025,76 @@ async def set_job_preferences(
         user: User | None = await db.get(User, user_id)
         if user is None:
             return JobPreferencesResult(text=None, classified_job_count=0, message="User not found.")
-        user.job_preferences_text = text.strip() or None
-        user.job_location_pref = location_pref
-        user.job_location_city = location_city.strip() if location_city else None
-        user.job_commute_max_minutes = commute_max_minutes
-        user.job_commute_note = commute_note.strip() if commute_note else None
+
+        new_text: str | None = text.strip() or None
+        new_city: str | None = location_city.strip() if location_city else None
+        new_note: str | None = commute_note.strip() if commute_note else None
         normalized_stages: list[str] | None = _normalize_preferred_funding_stages(
             preferred_funding_stages,
         )
-        user.preferred_funding_stages = normalized_stages
         normalized_weights: JobScoringWeights = _normalize_scoring_weights(
             scoring_weights if scoring_weights is not None else user.job_scoring_weights,
         )
+        weights_changed: bool = scoring_weights is not None and (
+            user.job_scoring_weights != normalized_weights.model_dump()
+        )
+        stages_changed: bool = user.preferred_funding_stages != normalized_stages
+        location_changed: bool = (
+            user.job_location_pref != location_pref
+            or user.job_location_city != new_city
+            or user.job_commute_max_minutes != commute_max_minutes
+            or user.job_commute_note != new_note
+        )
+        role_text_changed: bool = user.job_preferences_text != new_text
+        formula_only: bool = (
+            not role_text_changed
+            and (weights_changed or stages_changed or location_changed)
+        )
+
+        user.job_preferences_text = new_text
+        user.job_location_pref = location_pref
+        user.job_location_city = new_city
+        user.job_commute_max_minutes = commute_max_minutes
+        user.job_commute_note = new_note
+        user.preferred_funding_stages = normalized_stages
         if scoring_weights is not None:
             user.job_scoring_weights = normalized_weights.model_dump()
         suggested_text: str | None = user.job_suggested_roles
         await db.commit()
+
+    if not role_text_changed and not weights_changed and not stages_changed and not location_changed:
+        return JobPreferencesResult(
+            text=new_text,
+            suggested_text=suggested_text,
+            location_pref=location_pref,
+            location_city=new_city,
+            commute_max_minutes=commute_max_minutes,
+            commute_note=new_note,
+            preferred_funding_stages=normalized_stages,
+            scoring_weights=normalized_weights,
+            classified_job_count=0,
+            message="No changes.",
+        )
+
+    if formula_only:
+        async with ctx.session_factory() as db:
+            from contactsafe_server.services.job_relevance_service import JobRelevanceService
+
+            updated: int = await JobRelevanceService(db, ctx.settings).rescore_existing_matches(
+                user_id,
+            )
+        return JobPreferencesResult(
+            text=new_text,
+            suggested_text=suggested_text,
+            location_pref=location_pref,
+            location_city=new_city,
+            commute_max_minutes=commute_max_minutes,
+            commute_note=new_note,
+            preferred_funding_stages=normalized_stages,
+            scoring_weights=normalized_weights,
+            classified_job_count=updated,
+            message=f"Preferences updated. Rescored {updated} jobs.",
+        )
 
     import asyncio
 
@@ -2070,12 +2124,12 @@ async def set_job_preferences(
         asyncio.ensure_future(_reclassify_background())
 
     return JobPreferencesResult(
-        text=text.strip() or None,
+        text=new_text,
         suggested_text=suggested_text,
         location_pref=location_pref,
-        location_city=location_city.strip() if location_city else None,
+        location_city=new_city,
         commute_max_minutes=commute_max_minutes,
-        commute_note=commute_note.strip() if commute_note else None,
+        commute_note=new_note,
         preferred_funding_stages=normalized_stages,
         scoring_weights=normalized_weights,
         classified_job_count=0,

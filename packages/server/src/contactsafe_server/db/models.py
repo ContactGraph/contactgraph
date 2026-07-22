@@ -12,6 +12,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     LargeBinary,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -346,6 +347,10 @@ class OrgJob(Base):
     salary_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     salary_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
     remote_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    seniority_level: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    location_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_normalized: Mapped[str | None] = mapped_column(String(128), nullable=True)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
