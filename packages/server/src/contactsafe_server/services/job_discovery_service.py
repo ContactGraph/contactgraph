@@ -38,6 +38,7 @@ from contactsafe_server.db.models import (
     UserPersonObservation,
 )
 from contactsafe_server.services.ats_detection import apply_ats_detection_to_org
+from contactsafe_server.services.job_attributes import apply_job_attributes
 from contactsafe_server.services.ats_job_clients import AtsJobClient
 from contactsafe_server.services.contacts_service import ContactsService
 from contactsafe_server.services.job_discovery_scheduler import (
@@ -371,6 +372,8 @@ class JobDiscoveryService:
                         salary_min=job.salary_min,
                         salary_max=job.salary_max,
                         remote_status=job.remote_status,
+                        seniority_level=job.seniority_level,
+                        location_normalized=job.location_normalized,
                         posted_at=job.posted_at,
                         first_seen_at=job.first_seen_at,
                         last_seen_at=job.last_seen_at,
@@ -510,6 +513,8 @@ class JobDiscoveryService:
                     salary_min=job.salary_min,
                     salary_max=job.salary_max,
                     remote_status=job.remote_status,
+                    seniority_level=job.seniority_level,
+                    location_normalized=job.location_normalized,
                     posted_at=job.posted_at,
                     first_seen_at=job.first_seen_at,
                     last_seen_at=job.last_seen_at,
@@ -657,6 +662,8 @@ class JobDiscoveryService:
             salary_min=job.salary_min,
             salary_max=job.salary_max,
             remote_status=job.remote_status,
+            seniority_level=job.seniority_level,
+            location_normalized=job.location_normalized,
             posted_at=job.posted_at,
             first_seen_at=job.first_seen_at,
             last_seen_at=job.last_seen_at,
@@ -788,25 +795,25 @@ class JobDiscoveryService:
         existing: OrgJob | None = result.scalar_one_or_none()
         if existing is None:
             try:
-                self._db.add(
-                    OrgJob(
-                        org_id=org_id,
-                        external_job_id=discovered.external_job_id,
-                        source=discovered.source,
-                        title=discovered.title,
-                        location=discovered.location,
-                        department=discovered.department,
-                        url=discovered.url,
-                        description_snippet=discovered.description_snippet,
-                        salary_min=discovered.salary_min,
-                        salary_max=discovered.salary_max,
-                        remote_status=discovered.remote_status,
-                        posted_at=discovered.posted_at,
-                        first_seen_at=now,
-                        last_seen_at=now,
-                        is_active=True,
-                    ),
+                new_job: OrgJob = OrgJob(
+                    org_id=org_id,
+                    external_job_id=discovered.external_job_id,
+                    source=discovered.source,
+                    title=discovered.title,
+                    location=discovered.location,
+                    department=discovered.department,
+                    url=discovered.url,
+                    description_snippet=discovered.description_snippet,
+                    salary_min=discovered.salary_min,
+                    salary_max=discovered.salary_max,
+                    remote_status=discovered.remote_status,
+                    posted_at=discovered.posted_at,
+                    first_seen_at=now,
+                    last_seen_at=now,
+                    is_active=True,
                 )
+                apply_job_attributes(new_job)
+                self._db.add(new_job)
                 await self._db.flush()
                 return True
             except IntegrityError:
@@ -832,6 +839,7 @@ class JobDiscoveryService:
             existing.posted_at = discovered.posted_at
         existing.last_seen_at = now
         existing.is_active = True
+        apply_job_attributes(existing)
         return False
 
     async def _discover_jobs_for_org(

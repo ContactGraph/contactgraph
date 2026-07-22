@@ -68,6 +68,46 @@ async def score_jobs_for_user(
     return count
 
 
+async def backfill_job_attributes(
+    ctx: dict[str, Any],
+    *,
+    offset: int = 0,
+    limit: int = 200,
+) -> dict[str, int]:
+    """Apply mechanical seniority + geocode to a page of org_jobs."""
+    settings: Settings = ctx["settings"]
+    factory = ctx["session_factory"]
+    started: float = time.monotonic()
+
+    from sqlalchemy import select
+
+    from contactsafe_server.db.models import OrgJob
+    from contactsafe_server.services.job_attributes import apply_job_attributes
+
+    async with factory() as db:
+        jobs: list[OrgJob] = list(
+            (
+                await db.execute(
+                    select(OrgJob)
+                    .order_by(OrgJob.created_at.desc())
+                    .offset(max(0, offset))
+                    .limit(max(1, limit)),
+                )
+            ).scalars().all(),
+        )
+        for job in jobs:
+            apply_job_attributes(job)
+        await db.commit()
+
+    duration_ms: int = int((time.monotonic() - started) * 1000)
+    await record_worker_run(
+        "backfill_job_attributes",
+        duration_ms=duration_ms,
+        settings=settings,
+    )
+    return {"processed": len(jobs), "offset": offset, "limit": limit}
+
+
 async def scrape_org_jobs(
     ctx: dict[str, Any],
     org_id: str,
@@ -330,6 +370,7 @@ def _org_enrichment_cron_minutes(settings: Settings) -> set[int]:
 class WorkerSettings:
     functions = [
         score_jobs_for_user,
+        backfill_job_attributes,
         scrape_org_jobs,
         enrich_org,
         enrich_user_orgs,

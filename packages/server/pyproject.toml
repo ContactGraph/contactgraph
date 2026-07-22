@@ -22,6 +22,7 @@ dependencies = [
     "pypdf>=4.0",
     "arq>=0.26.0",
     "redis[hiredis]>=5.0.0",
+    "geonamescache>=3.0.1",
 ]
 
 [project.scripts]

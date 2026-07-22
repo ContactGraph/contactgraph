@@ -706,6 +706,8 @@ export interface OrgJobItem {
   salary_min: number | null;
   salary_max: number | null;
   remote_status: string | null;
+  seniority_level: number | null;
+  location_normalized: string | null;
   posted_at: string | null;
   first_seen_at: string;
   last_seen_at: string;

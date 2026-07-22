@@ -415,6 +415,8 @@ class OrgJobItem(BaseModel):
     salary_min: int | None = None
     salary_max: int | None = None
     remote_status: str | None = None
+    seniority_level: int | None = None
+    location_normalized: str | None = None
     posted_at: datetime | None = None
     first_seen_at: datetime
     last_seen_at: datetime

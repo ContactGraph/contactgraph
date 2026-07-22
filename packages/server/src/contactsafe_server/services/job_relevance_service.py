@@ -32,6 +32,16 @@ from contactsafe_server.services.openai_json import (
     content_from_chat_completion,
     parse_json_object,
 )
+from contactsafe_server.services.job_geocode import (
+    geocode_location,
+    location_match_reason,
+    location_match_score,
+)
+from contactsafe_server.services.job_seniority import (
+    classify_seniority_level,
+    seniority_match_reason,
+    seniority_match_score,
+)
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -64,13 +74,14 @@ _DIMENSION_LABELS: dict[str, str] = {
 
 _SYSTEM_PROMPT: str = """\
 You are a strict job-match scoring engine. You will receive the candidate's professional \
-profile and a batch of job postings. Evaluate each job on FOUR separate dimensions.
+profile and a batch of job postings. Evaluate each job on TWO separate dimensions. \
+Seniority and location are scored separately by a non-LLM system — do NOT score them.
 
 {preferences}
 
 {profile}
 
-For each job, provide four independent sub-scores (each 0-100):
+For each job, provide two independent sub-scores (each 0-100):
 
 1. **role_score** (job function alignment): Is this job in the SAME job function the \
 candidate is targeting? This is a categorical match, not a similarity judgment.
@@ -118,14 +129,9 @@ in the profile, how realistic a fit are they for this job's stated requirements?
 - Clearly under-qualified (missing core skills/years) → 0-35
 - Clearly over-qualified (mild penalty only) → 55-75
 Base this on the job description requirements and the candidate profile, NOT on whether \
-the title matches. A paralegal role for an experienced PM should score near 0.
-
-3. **seniority_score**: How well the seniority/level matches. Senior ↔ Senior is good (80-100). \
-IC ↔ management mismatch or large level gaps should be penalized.
-
-4. **location_score**: How well the location/remote setup matches the candidate's preferences. \
-If the candidate wants remote and the job is remote, score 90-100. If commute preferences \
-are stated, penalize jobs beyond the candidate's max commute distance.
+the title matches. A paralegal role for an experienced PM should score near 0 on \
+qualification because the required skills do not overlap — but do NOT lower this score \
+just because the function differs when the skills themselves transfer.
 
 For each sub-score, provide a brief reason (1 sentence) explaining the score.
 
@@ -135,15 +141,11 @@ Respond with a JSON object containing a "results" array. Each element must have:
 - "role_reason": string (1 sentence)
 - "qualification_score": integer 0-100
 - "qualification_reason": string (1 sentence)
-- "seniority_score": integer 0-100
-- "seniority_reason": string (1 sentence)
-- "location_score": integer 0-100
-- "location_reason": string (1 sentence)
 
 Example:
 {{"results": [
-  {{"index": 0, "role_score": 12, "role_reason": "Director of Software Engineering is an engineering leadership role, not product management.", "qualification_score": 40, "qualification_reason": "Strong leadership experience but wrong function.", "seniority_score": 90, "seniority_reason": "Director level matches seniority.", "location_score": 60, "location_reason": "San Jose is within commute range but not ideal."}},
-  {{"index": 1, "role_score": 92, "role_reason": "Principal Product Manager matches the candidate's product management target.", "qualification_score": 88, "qualification_reason": "Background in B2B platform PM aligns with the JD requirements.", "seniority_score": 88, "seniority_reason": "Principal level aligns with experience.", "location_score": 70, "location_reason": "Santa Clara is a reasonable commute."}}
+  {{"index": 0, "role_score": 12, "role_reason": "Director of Software Engineering is an engineering leadership role, not product management.", "qualification_score": 70, "qualification_reason": "Strong leadership and platform experience would transfer, but core PM craft skills are not required."}},
+  {{"index": 1, "role_score": 92, "role_reason": "Principal Product Manager matches the candidate's product management target.", "qualification_score": 88, "qualification_reason": "Background in B2B platform PM aligns with the JD requirements."}}
 ]}}
 """
 
@@ -441,6 +443,10 @@ class JobRelevanceService:
 
         preferences_section: str = self._build_preferences_section(user)
         profile_section: str = await self._build_profile_section(user)
+        user_level: int | None = await self._resolve_user_seniority_level(user)
+        user_lat: float | None
+        user_lng: float | None
+        user_lat, user_lng = self._resolve_user_geocode(user)
 
         unclassified_jobs: list[OrgJob] = await self._get_unclassified_jobs(user_id)
         if not unclassified_jobs:
@@ -479,6 +485,11 @@ class JobRelevanceService:
                     preferences_text=preferences_text,
                     preferred_funding_stages=preferred_funding_stages,
                     weights=weights,
+                    user_level=user_level,
+                    user_lat=user_lat,
+                    user_lng=user_lng,
+                    user_location_pref=user.job_location_pref,
+                    user_commute_max_minutes=user.job_commute_max_minutes,
                 )
                 total_classified += classified
                 await _set_progress(user_id, total_classified, total_jobs)
@@ -549,28 +560,21 @@ class JobRelevanceService:
 
         loc_pref: str | None = user.job_location_pref
         loc_city: str | None = user.job_location_city
+        # Location is scored mechanically — keep a brief note for context only.
         if loc_pref == "remote":
-            parts.append("Location: REMOTE ONLY. Penalize any job requiring in-person attendance unless also listed as remote.")
+            parts.append("Location preference: remote only (scored mechanically).")
         elif loc_pref == "in_person" and loc_city:
             parts.append(
-                f"Location: Must be in or near {loc_city}. Penalize remote-only jobs and jobs far from {loc_city}."
+                f"Location preference: in/near {loc_city} (scored mechanically)."
             )
         elif loc_pref == "either" and loc_city:
             parts.append(
-                f"Location: Prefers remote OR in/near {loc_city}. Penalize jobs requiring in-person far from {loc_city}."
+                f"Location preference: remote or in/near {loc_city} (scored mechanically)."
             )
         elif loc_city:
-            parts.append(f"Location: Prefers jobs near {loc_city} or remote.")
-
-        commute_max: int | None = user.job_commute_max_minutes
-        commute_note: str | None = user.job_commute_note
-        if commute_max is not None and loc_city:
             parts.append(
-                f"Commute: Maximum {commute_max} minutes from {loc_city}. "
-                "Penalize jobs located significantly beyond this commute distance."
+                f"Location preference: near {loc_city} or remote (scored mechanically)."
             )
-        if commute_note:
-            parts.append(f"Commute flexibility: {commute_note}")
 
         pref_text: str = "\n".join(parts) if parts else "No specific preferences stated."
         return f"CANDIDATE PREFERENCES:\n{pref_text}"
@@ -665,6 +669,110 @@ class JobRelevanceService:
         )
         return list(result.scalars().all())
 
+    async def _resolve_user_seniority_level(self, user: User) -> int | None:
+        """Infer the user's seniority from prefs + profile titles."""
+        candidates: list[str] = []
+        if user.job_preferences_text:
+            candidates.append(user.job_preferences_text)
+        if user.person_id is not None:
+            person: Person | None = await self._db.get(Person, user.person_id)
+            if person is not None and person.current_role:
+                candidates.append(person.current_role)
+            headline_result = await self._db.execute(
+                select(PersonAttributeClaim.value)
+                .where(
+                    PersonAttributeClaim.person_id == user.person_id,
+                    PersonAttributeClaim.kind == "headline",
+                )
+                .limit(1),
+            )
+            headline: str | None = headline_result.scalar_one_or_none()
+            if headline:
+                candidates.append(headline)
+            emp_result = await self._db.execute(
+                select(EmploymentClaim.role_title)
+                .where(
+                    EmploymentClaim.person_id == user.person_id,
+                    EmploymentClaim.role_title.is_not(None),
+                )
+                .order_by(
+                    EmploymentClaim.is_current.desc(),
+                    EmploymentClaim.started_at.desc().nullslast(),
+                )
+                .limit(5),
+            )
+            for (role_title,) in emp_result.all():
+                if role_title:
+                    candidates.append(role_title)
+
+        best: int | None = None
+        for text in candidates:
+            level: int | None = classify_seniority_level(text)
+            if level is None:
+                continue
+            if best is None or level > best:
+                best = level
+        return best
+
+    @staticmethod
+    def _resolve_user_geocode(user: User) -> tuple[float | None, float | None]:
+        geo: tuple[float, float, str] | None = geocode_location(user.job_location_city)
+        if geo is None:
+            return None, None
+        return geo[0], geo[1]
+
+    @staticmethod
+    def _mechanical_seniority_location(
+        job: OrgJob,
+        *,
+        user_level: int | None,
+        user_lat: float | None,
+        user_lng: float | None,
+        user_location_pref: str | None,
+        user_commute_max_minutes: int | None,
+    ) -> tuple[int, str, int, str]:
+        job_level: int | None = job.seniority_level
+        if job_level is None:
+            job_level = classify_seniority_level(job.title, job.description_snippet)
+        seniority_score: int = seniority_match_score(job_level, user_level)
+        seniority_reason: str = seniority_match_reason(
+            job_level,
+            user_level,
+            seniority_score,
+        )
+
+        job_lat: float | None = job.location_lat
+        job_lng: float | None = job.location_lng
+        job_normalized: str | None = job.location_normalized
+        if job_lat is None or job_lng is None:
+            geo: tuple[float, float, str] | None = geocode_location(job.location)
+            if geo is not None:
+                job_lat, job_lng, job_normalized = geo
+
+        location_score: int = location_match_score(
+            job_lat=job_lat,
+            job_lng=job_lng,
+            job_remote_status=job.remote_status,
+            job_location=job.location,
+            user_lat=user_lat,
+            user_lng=user_lng,
+            user_pref=user_location_pref,
+            commute_max_minutes=user_commute_max_minutes,
+        )
+        location_reason: str = location_match_reason(
+            score=location_score,
+            job_lat=job_lat,
+            job_lng=job_lng,
+            job_remote_status=job.remote_status,
+            job_location=job.location,
+            job_location_normalized=job_normalized,
+            user_lat=user_lat,
+            user_lng=user_lng,
+            user_pref=user_location_pref,
+            commute_max_minutes=user_commute_max_minutes,
+        )
+        return seniority_score, seniority_reason, location_score, location_reason
+
     async def _classify_batch(
         self,
         user_id: uuid.UUID,
@@ -675,6 +783,11 @@ class JobRelevanceService:
         preferences_text: str | None = None,
         preferred_funding_stages: list[str] | None = None,
         weights: dict[str, float] | None = None,
+        user_level: int | None = None,
+        user_lat: float | None = None,
+        user_lng: float | None = None,
+        user_location_pref: str | None = None,
+        user_commute_max_minutes: int | None = None,
     ) -> int:
         resolved_weights: dict[str, float] = (
             weights if weights is not None else dict(DEFAULT_SCORING_WEIGHTS)
@@ -721,8 +834,6 @@ class JobRelevanceService:
                 0,
                 min(100, int(item.get("qualification_score", 50))),
             )
-            seniority_score: int = max(0, min(100, int(item.get("seniority_score", 50))))
-            location_score: int = max(0, min(100, int(item.get("location_score", 50))))
 
             role_reason: str | None = item.get("role_reason")
             role_score, role_reason = _cap_role_score_for_function_mismatch(
@@ -730,6 +841,20 @@ class JobRelevanceService:
                 job,
                 role_score,
                 role_reason,
+            )
+
+            (
+                seniority_score,
+                seniority_reason,
+                location_score,
+                location_reason,
+            ) = self._mechanical_seniority_location(
+                job,
+                user_level=user_level,
+                user_lat=user_lat,
+                user_lng=user_lng,
+                user_location_pref=user_location_pref,
+                user_commute_max_minutes=user_commute_max_minutes,
             )
 
             stage_factor: float = stage_match_factor(
@@ -747,8 +872,6 @@ class JobRelevanceService:
             )
 
             qualification_reason: str | None = item.get("qualification_reason")
-            seniority_reason: str | None = item.get("seniority_reason")
-            location_reason: str | None = item.get("location_reason")
 
             reason: str = " | ".join(
                 filter(
@@ -796,6 +919,103 @@ class JobRelevanceService:
         )
         await self._db.commit()
         return await self.classify_jobs_for_user(user_id)
+
+    async def rescore_existing_matches(self, user_id: uuid.UUID) -> int:
+        """Recompute seniority/location/match from stored role+qualification.
+
+        Used when weights, funding stages, or location prefs change — no LLM.
+        """
+        user: User | None = await self._db.get(User, user_id)
+        if user is None:
+            return 0
+
+        weights: dict[str, float] = resolve_scoring_weights(user.job_scoring_weights)
+        preferred_funding_stages: list[str] | None = (
+            list(user.preferred_funding_stages)
+            if user.preferred_funding_stages
+            else None
+        )
+        user_level: int | None = await self._resolve_user_seniority_level(user)
+        user_lat: float | None
+        user_lng: float | None
+        user_lat, user_lng = self._resolve_user_geocode(user)
+
+        rows_result = await self._db.execute(
+            select(UserJobRelevance, OrgJob)
+            .join(OrgJob, OrgJob.id == UserJobRelevance.job_id)
+            .where(UserJobRelevance.user_id == user_id),
+        )
+        rows: list[tuple[UserJobRelevance, OrgJob]] = list(rows_result.all())
+        if not rows:
+            return 0
+
+        org_ids: list[uuid.UUID] = list({job.org_id for _, job in rows})
+        org_result = await self._db.execute(
+            select(Org.id, Org.funding_stage).where(Org.id.in_(org_ids)),
+        )
+        org_stage_map: dict[uuid.UUID, str | None] = {
+            row.id: row.funding_stage for row in org_result.all()
+        }
+
+        updated: int = 0
+        for relevance, job in rows:
+            if (
+                relevance.role_score is None
+                or relevance.qualification_score is None
+            ):
+                continue
+
+            (
+                seniority_score,
+                seniority_reason,
+                location_score,
+                location_reason,
+            ) = self._mechanical_seniority_location(
+                job,
+                user_level=user_level,
+                user_lat=user_lat,
+                user_lng=user_lng,
+                user_location_pref=user.job_location_pref,
+                user_commute_max_minutes=user.job_commute_max_minutes,
+            )
+
+            stage_factor: float = stage_match_factor(
+                org_funding_stage=org_stage_map.get(job.org_id),
+                preferred_funding_stages=preferred_funding_stages,
+                weight=weights.get("funding_stage", 0.7),
+            )
+            match_score, limiting_note = compute_match_score(
+                role_score=relevance.role_score,
+                qualification_score=relevance.qualification_score,
+                seniority_score=seniority_score,
+                location_score=location_score,
+                weights=weights,
+                stage_factor=stage_factor,
+            )
+            reason: str = " | ".join(
+                filter(
+                    None,
+                    [
+                        relevance.role_reason,
+                        relevance.qualification_reason,
+                        seniority_reason,
+                        location_reason,
+                        limiting_note,
+                    ],
+                ),
+            )
+            relevance.seniority_score = seniority_score
+            relevance.seniority_reason = seniority_reason
+            relevance.location_score = location_score
+            relevance.location_reason = location_reason
+            relevance.match_score = match_score
+            relevance.is_relevant = match_score >= _MATCH_SCORE_RELEVANT_THRESHOLD
+            relevance.confidence = match_score / 100.0
+            relevance.reason = reason or None
+            updated += 1
+
+        await self._db.commit()
+        return updated
 
     async def _call_openai(
         self,
