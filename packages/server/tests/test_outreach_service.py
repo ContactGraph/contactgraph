@@ -69,20 +69,20 @@ async def _person(
 class TestAssessIndependence:
     def test_org_name_equals_person_name(self) -> None:
         v = assess_independence(
-            canonical_name="Bootsy Holler", org_name="Bootsy Holler", descriptive_tags=None
+            canonical_name="Rowan Vale", org_name="Rowan Vale", descriptive_tags=None
         )
         assert v.is_independent
         assert v.reason is not None
 
     def test_own_name_plus_practice_word(self) -> None:
         v = assess_independence(
-            canonical_name="Dan Cantrell", org_name="Dan Cantrell Music", descriptive_tags=None
+            canonical_name="Devon Reyes", org_name="Devon Reyes Music", descriptive_tags=None
         )
         assert v.is_independent
 
     def test_surname_plus_practice_word(self) -> None:
         v = assess_independence(
-            canonical_name="Christa Assad", org_name="Assad Ceramics", descriptive_tags=None
+            canonical_name="Marta Quill", org_name="Quill Ceramics", descriptive_tags=None
         )
         assert v.is_independent
 
@@ -90,14 +90,14 @@ class TestAssessIndependence:
         """The distinction the whole feature exists for: a designer at a company is not
         an independent maker, even though both carry creative tags."""
         v = assess_independence(
-            canonical_name="Azra Daniels", org_name="Figma", descriptive_tags=["designer"]
+            canonical_name="Priya Nandor", org_name="Northwind Systems", descriptive_tags=["designer"]
         )
         assert not v.is_independent
         assert v.reason is None
 
     def test_no_employer_with_creative_tag(self) -> None:
         v = assess_independence(
-            canonical_name="Trevor Justice", org_name=None, descriptive_tags=["musician", "artist"]
+            canonical_name="Kit Sorrell", org_name=None, descriptive_tags=["musician", "artist"]
         )
         assert v.is_independent
 
@@ -108,7 +108,7 @@ class TestAssessIndependence:
 
     def test_case_and_punctuation_insensitive(self) -> None:
         v = assess_independence(
-            canonical_name="R.J. Muna", org_name="RJ  MUNA", descriptive_tags=None
+            canonical_name="A.J. Okonkwo", org_name="AJ  OKONKWO", descriptive_tags=None
         )
         assert v.is_independent
 
@@ -120,13 +120,13 @@ class TestAssessIndependence:
         """Independents routinely list their own website as their org. Found by running
         this against a real graph, where it was the most common miss."""
         v = assess_independence(
-            canonical_name="Amy Karle", org_name="www.amykarle.com", descriptive_tags=None
+            canonical_name="Lena Marsh", org_name="www.lenamarsh.com", descriptive_tags=None
         )
         assert v.is_independent
 
     def test_company_domain_is_not_the_person(self) -> None:
         v = assess_independence(
-            canonical_name="Azra Daniels", org_name="figma.com", descriptive_tags=["designer"]
+            canonical_name="Priya Nandor", org_name="northwindsystems.com", descriptive_tags=["designer"]
         )
         assert not v.is_independent
 
@@ -137,7 +137,7 @@ class TestAssessIndependence:
 class TestLogOutreach:
     async def test_log_and_list(self, db_session: AsyncSession) -> None:
         user = await _user(db_session)
-        person = await _person(db_session, user, "Christa Assad", org="Christa Assad Design")
+        person = await _person(db_session, user, "Marta Quill", org="Marta Quill Design")
         svc = OutreachService(db_session)
 
         result = await svc.log_outreach(
@@ -146,7 +146,7 @@ class TestLogOutreach:
         assert result.attempt is not None
         assert result.attempt.channel == "dm_instagram"
         assert result.attempt.status == "sent"
-        assert result.attempt.person_name == "Christa Assad"
+        assert result.attempt.person_name == "Marta Quill"
 
         listed = await svc.list_outreach(user.id, person_id=person.id)
         assert len(listed.attempts) == 1
@@ -154,7 +154,7 @@ class TestLogOutreach:
     async def test_many_attempts_per_person_are_kept(self, db_session: AsyncSession) -> None:
         """Outreach is a log. A second attempt must not overwrite the first."""
         user = await _user(db_session)
-        person = await _person(db_session, user, "RJ Muna")
+        person = await _person(db_session, user, "AJ Okonkwo")
         svc = OutreachService(db_session)
         await svc.log_outreach(user.id, person_id=person.id, channel="email")
         await svc.log_outreach(user.id, person_id=person.id, channel="text_sms")
@@ -176,7 +176,7 @@ class TestLogOutreach:
 
     async def test_update_status_to_replied(self, db_session: AsyncSession) -> None:
         user = await _user(db_session)
-        person = await _person(db_session, user, "Amy Karle")
+        person = await _person(db_session, user, "Lena Marsh")
         svc = OutreachService(db_session)
         logged = await svc.log_outreach(user.id, person_id=person.id, channel="email")
         assert logged.attempt is not None
@@ -280,14 +280,14 @@ class TestOutreachQueue:
         self, db_session: AsyncSession
     ) -> None:
         user = await _user(db_session)
-        await _person(db_session, user, "Bootsy Holler", org="Bootsy Holler")
-        await _person(db_session, user, "Azra Daniels", org="Figma", tags=["designer"])
+        await _person(db_session, user, "Rowan Vale", org="Rowan Vale")
+        await _person(db_session, user, "Priya Nandor", org="Northwind Systems", tags=["designer"])
         svc = OutreachService(db_session)
 
         result = await svc.outreach_queue(user.id, queue_filter="uncontacted")
         verdicts = {p.person_name: p.is_independent for p in result.people}
-        assert verdicts["Bootsy Holler"] is True
-        assert verdicts["Azra Daniels"] is False
+        assert verdicts["Rowan Vale"] is True
+        assert verdicts["Priya Nandor"] is False
 
     async def test_queue_is_scoped_to_the_user(self, db_session: AsyncSession) -> None:
         owner = await _user(db_session)

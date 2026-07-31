@@ -51,8 +51,8 @@ VALID_FILTERS: frozenset[str] = frozenset(f.value for f in OutreachQueueFilter)
 # A status that means "this thread is still open and the ball is in their court".
 _AWAITING: frozenset[str] = frozenset({OutreachStatus.SENT.value})
 
-# Words that turn a personal name into a practice name: "Christa Assad Design",
-# "Dan Cantrell Music". Deliberately short — every addition widens the net, and a false
+# Words that turn a personal name into a practice name: "Marta Quill Design",
+# "Devon Reyes Music". Deliberately short — every addition widens the net, and a false
 # positive here mislabels a person, which is worse than missing one.
 _PRACTICE_WORDS: frozenset[str] = frozenset(
     {
@@ -103,7 +103,7 @@ _CREATIVE_TAGS: frozenset[str] = frozenset(
 _NON_WORD = re.compile(r"[^a-z0-9]+")
 
 # An independent's "employer" is very often their own website. Stripping the URL scaffolding
-# lets "www.amykarle.com" compare equal to "Amy Karle" — found by running this against a real
+# lets "www.lenamarsh.com" compare equal to "Lena Marsh" — found by running this against a real
 # graph, where it was the single most common miss.
 _URL_CHROME = re.compile(r"^(https?://)?(www\.)?|\.(com|net|org|co|io|art|studio|design|photo)(\.[a-z]{2})?/?$")
 
@@ -117,10 +117,10 @@ def _norm(value: str | None) -> str:
 def _squash(value: str | None) -> str:
     """Normalized with all separators removed.
 
-    Punctuated initials are the common case that plain tokenizing gets wrong: "R.J. Muna"
-    tokenizes to three words and "RJ Muna" to two, so they never compare equal even though
+    Punctuated initials are the common case that plain tokenizing gets wrong: "A.J. Okonkwo"
+    tokenizes to three words and "AJ Okonkwo" to two, so they never compare equal even though
     they are the same person. Comparing the squashed forms catches it, and also collapses
-    a personal domain ("amykarle.com") onto the name it is built from.
+    a personal domain ("lenamarsh.com") onto the name it is built from.
     """
     if not value:
         return ""
@@ -167,14 +167,14 @@ def assess_independence(
 
         org_words = org.split()
         name_words = name.split()
-        # "Christa Assad" ⊂ "Christa Assad Design" — the personal name, plus a practice word.
+        # "Marta Quill" ⊂ "Marta Quill Design" — the personal name, plus a practice word.
         if len(org_words) > len(name_words) and org_words[: len(name_words)] == name_words:
             extra = set(org_words[len(name_words) :])
             if extra & _PRACTICE_WORDS:
                 return IndependenceVerdict(True, "own name plus a practice word")
             return IndependenceVerdict(True, "business name starts with their own name")
 
-        # Surname + practice word, without the given name: "Assad Ceramics".
+        # Surname + practice word, without the given name: "Quill Ceramics".
         if len(name_words) > 1 and name_words[-1] in org_words:
             if set(org_words) & _PRACTICE_WORDS:
                 return IndependenceVerdict(True, "surname plus a practice word")
