@@ -19,9 +19,11 @@ from contactsafe_core.contact_schemas import (
     CancelOrgEnrichmentResult,
     CreateOrgListRequest,
     CreateOrgListResult,
+    CreatePersonListResult,
     DedupPersonsResult,
     DeleteOrgListRequest,
     DeleteOrgListResult,
+    EditPersonListResult,
     EnrichOrgsResult,
     EnrichPersonResult,
     EnrichStrongTiesResult,
@@ -35,8 +37,10 @@ from contactsafe_core.contact_schemas import (
     ListOrgJobsResult,
     ListOrgListsResult,
     ListOrgsResult,
+    ListOutreachResult,
     ListPeopleResult,
     ListStrongTiesResult,
+    LogOutreachResult,
     ModifyOrgListMembershipRequest,
     ModifyOrgListMembershipResult,
     NetworkStatusResult,
@@ -44,7 +48,9 @@ from contactsafe_core.contact_schemas import (
     NotificationPreferencesResult,
     OrgDetailResult,
     OrgEnrichmentStatusResult,
+    OutreachQueueResult,
     PersonDetailResult,
+    PersonListsResult,
     RenameOrgListRequest,
     RenameOrgListResult,
     ScrapingDogEnrichmentStatusResult,
@@ -53,6 +59,7 @@ from contactsafe_core.contact_schemas import (
     StrongTieCompaniesResult,
     StrongTieCountResult,
     UpdateOrgRequest,
+    UpdateOutreachResult,
     UpdatePersonRequest,
     UpdateTaskStatusResult,
 )
@@ -2292,3 +2299,164 @@ async def set_job_interest(
                 message=str(exc),
             )
     return SetJobInterestResult(job_id=job_id, interest=interest, message="OK")
+
+
+# --- Outreach ---------------------------------------------------------------------
+
+
+async def log_outreach(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    person_id: UUID,
+    channel: str,
+    status: str = "sent",
+    occurred_at: datetime | None = None,
+    note: str | None = None,
+    next_step_at: datetime | None = None,
+) -> LogOutreachResult:
+    if user_id is None:
+        return LogOutreachResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.outreach_service import OutreachService
+
+        service = OutreachService(db)
+        try:
+            return await service.log_outreach(
+                user_id,
+                person_id=person_id,
+                channel=channel,
+                status=status,
+                occurred_at=occurred_at,
+                note=note,
+                next_step_at=next_step_at,
+            )
+        except ValueError as exc:
+            return LogOutreachResult(message=str(exc))
+
+
+async def update_outreach(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    attempt_id: UUID,
+    status: str | None = None,
+    note: str | None = None,
+    next_step_at: datetime | None = None,
+) -> UpdateOutreachResult:
+    if user_id is None:
+        return UpdateOutreachResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.outreach_service import OutreachService
+
+        service = OutreachService(db)
+        try:
+            return await service.update_outreach(
+                user_id,
+                attempt_id=attempt_id,
+                status=status,
+                note=note,
+                next_step_at=next_step_at,
+            )
+        except ValueError as exc:
+            return UpdateOutreachResult(message=str(exc))
+
+
+async def list_outreach(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    person_id: UUID | None = None,
+    limit: int = 100,
+) -> ListOutreachResult:
+    if user_id is None:
+        return ListOutreachResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.outreach_service import OutreachService
+
+        service = OutreachService(db)
+        return await service.list_outreach(user_id, person_id=person_id, limit=limit)
+
+
+async def outreach_queue(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    queue_filter: str = "uncontacted",
+    stale_after_days: int = 30,
+    person_list_id: UUID | None = None,
+    limit: int = 50,
+) -> OutreachQueueResult:
+    if user_id is None:
+        return OutreachQueueResult(filter="uncontacted", message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.outreach_service import OutreachService
+
+        service = OutreachService(db)
+        try:
+            return await service.outreach_queue(
+                user_id,
+                queue_filter=queue_filter,
+                stale_after_days=stale_after_days,
+                person_list_id=person_list_id,
+                limit=limit,
+            )
+        except ValueError as exc:
+            return OutreachQueueResult(filter="uncontacted", message=str(exc))
+
+
+async def create_person_list(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    name: str,
+) -> CreatePersonListResult:
+    if user_id is None:
+        return CreatePersonListResult(name=name, message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.outreach_service import OutreachService
+
+        service = OutreachService(db)
+        try:
+            list_id = await service.create_person_list(user_id, name=name)
+        except ValueError as exc:
+            return CreatePersonListResult(name=name, message=str(exc))
+    return CreatePersonListResult(person_list_id=list_id, name=name.strip())
+
+
+async def edit_person_list(
+    ctx: AppContext,
+    user_id: UUID | None,
+    *,
+    person_list_id: UUID,
+    add: list[UUID] | None = None,
+    remove: list[UUID] | None = None,
+) -> EditPersonListResult:
+    if user_id is None:
+        return EditPersonListResult(
+            person_list_id=person_list_id, message="Authentication required."
+        )
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.outreach_service import OutreachService
+
+        service = OutreachService(db)
+        try:
+            count = await service.edit_person_list(
+                user_id, person_list_id=person_list_id, add=add, remove=remove
+            )
+        except ValueError as exc:
+            return EditPersonListResult(person_list_id=person_list_id, message=str(exc))
+    return EditPersonListResult(person_list_id=person_list_id, member_count=count)
+
+
+async def list_person_lists(
+    ctx: AppContext,
+    user_id: UUID | None,
+) -> PersonListsResult:
+    if user_id is None:
+        return PersonListsResult(message="Authentication required.")
+    async with ctx.session_factory() as db:
+        from contactsafe_server.services.outreach_service import OutreachService
+
+        service = OutreachService(db)
+        return await service.list_person_lists(user_id)

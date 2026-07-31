@@ -27,50 +27,63 @@ from contactsafe_core.contact_schemas import (
     CancelOrgEnrichmentResult,
     CreateOrgListRequest,
     CreateOrgListResult,
+    CreatePersonListRequest,
+    CreatePersonListResult,
     DedupPersonsResult,
     DeleteOrgListRequest,
     DeleteOrgListResult,
+    EditPersonListRequest,
+    EditPersonListResult,
     EnrichOrgsResult,
     EnrichPersonRequest,
     EnrichPersonResult,
     EnrichStrongTiesResult,
+    FlatJobListResult,
     GetOrgRequest,
     GetPersonRequest,
+    JobDetailResult,
+    JobMonitorConfigResult,
+    JobPreferencesResult,
+    JobScanStatusResult,
+    JobTargetScope,
+    ListOrgJobsResult,
     ListOrgListsResult,
     ListOrgsRequest,
     ListOrgsResult,
+    ListOutreachRequest,
+    ListOutreachResult,
     ListPeopleRequest,
     ListPeopleResult,
     ListStrongTiesResult,
-    FlatJobListResult,
-    JobDetailResult,
-    JobMonitorConfigResult,
-    JobScanStatusResult,
-    JobPreferencesResult,
-    JobTargetScope,
-    ListOrgJobsResult,
-    NextStepsResult,
-    NotificationPreferencesResult,
-    SetJobInterestRequest,
-    SetJobInterestResult,
-    SetNotificationPreferencesRequest,
+    LogOutreachRequest,
+    LogOutreachResult,
     ModifyOrgListMembershipRequest,
     ModifyOrgListMembershipResult,
     NetworkStatusResult,
-    SetJobMonitorConfigRequest,
-    SetJobPreferencesRequest,
-    SetJobTargetScopeRequest,
-    StartSingleOrgDiscoveryRequest,
-    StartSingleOrgDiscoveryResult,
+    NextStepsResult,
+    NotificationPreferencesResult,
     OrgDetailResult,
     OrgEnrichmentStatusResult,
+    OutreachQueueRequest,
+    OutreachQueueResult,
     PersonDetailResult,
+    PersonListsResult,
     RenameOrgListRequest,
     RenameOrgListResult,
     ScrapingDogEnrichmentStatusResult,
+    SetJobInterestRequest,
+    SetJobInterestResult,
+    SetJobMonitorConfigRequest,
+    SetJobPreferencesRequest,
+    SetJobTargetScopeRequest,
+    SetNotificationPreferencesRequest,
+    StartSingleOrgDiscoveryRequest,
+    StartSingleOrgDiscoveryResult,
     StrongTieCompaniesResult,
     StrongTieCountResult,
     UpdateOrgRequest,
+    UpdateOutreachRequest,
+    UpdateOutreachResult,
     UpdatePersonRequest,
     UpdateTaskStatusRequest,
     UpdateTaskStatusResult,
@@ -1116,3 +1129,92 @@ async def api_dedup_persons(ctx: Ctx, user_id: EffectiveUser) -> DedupPersonsRes
         return await actions.dedup_persons(ctx, user_id)
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc))
+
+
+@router.post("/log-outreach", response_model=LogOutreachResult)
+async def api_log_outreach(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: LogOutreachRequest,
+) -> LogOutreachResult:
+    return await actions.log_outreach(
+        ctx,
+        user_id,
+        person_id=body.person_id,
+        channel=body.channel,
+        status=body.status,
+        occurred_at=body.occurred_at,
+        note=body.note,
+        next_step_at=body.next_step_at,
+    )
+
+
+@router.post("/update-outreach", response_model=UpdateOutreachResult)
+async def api_update_outreach(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: UpdateOutreachRequest,
+) -> UpdateOutreachResult:
+    return await actions.update_outreach(
+        ctx,
+        user_id,
+        attempt_id=body.attempt_id,
+        status=body.status,
+        note=body.note,
+        next_step_at=body.next_step_at,
+    )
+
+
+@router.post("/list-outreach", response_model=ListOutreachResult)
+async def api_list_outreach(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: ListOutreachRequest,
+) -> ListOutreachResult:
+    return await actions.list_outreach(
+        ctx, user_id, person_id=body.person_id, limit=body.limit
+    )
+
+
+@router.post("/list-outreach-queue", response_model=OutreachQueueResult)
+async def api_list_outreach_queue(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: OutreachQueueRequest,
+) -> OutreachQueueResult:
+    return await actions.outreach_queue(
+        ctx,
+        user_id,
+        queue_filter=body.filter,
+        stale_after_days=body.stale_after_days,
+        person_list_id=body.person_list_id,
+        limit=body.limit,
+    )
+
+
+@router.post("/create-person-list", response_model=CreatePersonListResult)
+async def api_create_person_list(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: CreatePersonListRequest,
+) -> CreatePersonListResult:
+    return await actions.create_person_list(ctx, user_id, name=body.name)
+
+
+@router.post("/edit-person-list", response_model=EditPersonListResult)
+async def api_edit_person_list(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+    body: EditPersonListRequest,
+) -> EditPersonListResult:
+    return await actions.edit_person_list(
+        ctx, user_id, person_list_id=body.person_list_id, add=body.add, remove=body.remove
+    )
+
+
+@router.post("/list-person-lists", response_model=PersonListsResult)
+async def api_list_person_lists(
+    ctx: Ctx,
+    user_id: EffectiveUser,
+) -> PersonListsResult:
+    return await actions.list_person_lists(ctx, user_id)

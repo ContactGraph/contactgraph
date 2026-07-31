@@ -802,3 +802,95 @@ class UserTask(Base):
     payload: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+
+class OutreachAttempt(Base):
+    """One recorded attempt to reach a person, per user.
+
+    Append-a-row, not update-a-status: a relationship is a sequence of touches, and
+    collapsing that to a single "last contacted" field throws away the history that makes
+    follow-up possible. Attempts are mutable only in their outcome (sent -> replied).
+
+    person_id is SET NULL rather than CASCADE on purpose. PersonDedupService._merge_person
+    hard-deletes the losing Person row, so CASCADE would silently destroy user-authored
+    outreach history during a routine merge. The reassignment step in that service is the
+    real fix; SET NULL is the backstop for when it is missed, because an orphaned row can
+    be recovered and a deleted one cannot.
+    """
+
+    __tablename__ = "outreach_attempts"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    person_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("persons.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    org_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("orgs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    user_task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("user_tasks.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="sent")
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    next_step_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class PersonList(Base):
+    """A user-curated set of people — the candidate set that survives between sessions.
+
+    Mirrors OrgList / OrgListMembership exactly; the two should stay in step.
+    """
+
+    __tablename__ = "person_lists"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_person_lists_user_name"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class PersonListMembership(Base):
+    __tablename__ = "person_list_memberships"
+
+    person_list_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("person_lists.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    person_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("persons.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

@@ -678,3 +678,140 @@ class SetJobInterestResult(BaseModel):
     job_id: UUID
     interest: Literal["interested", "dismissed"]
     message: str = "OK"
+
+
+# --- Outreach -------------------------------------------------------------------
+# Kept as Literal aliases rather than inline unions: nine channels repeated across six
+# models is where a typo goes unnoticed. The canonical definitions are the StrEnums in
+# enums.py (OutreachChannel, OutreachStatus, OutreachQueueFilter) — these mirror them for
+# the wire contract, matching how this module already handles job interest and task status.
+
+OutreachChannelLiteral = Literal[
+    "email",
+    "text_sms",
+    "dm_instagram",
+    "dm_linkedin",
+    "dm_x",
+    "dm_bluesky",
+    "phone_call",
+    "in_person",
+    "other",
+]
+
+OutreachStatusLiteral = Literal[
+    "sent",
+    "replied",
+    "no_response",
+    "meeting_booked",
+    "declined",
+    "bounced",
+]
+
+OutreachQueueFilterLiteral = Literal["uncontacted", "awaiting_reply", "stale", "due"]
+
+
+class OutreachAttemptItem(BaseModel):
+    attempt_id: UUID
+    person_id: UUID | None = None
+    person_name: str | None = None
+    channel: OutreachChannelLiteral
+    status: OutreachStatusLiteral
+    occurred_at: datetime
+    note: str | None = None
+    next_step_at: datetime | None = None
+
+
+class LogOutreachRequest(BaseModel):
+    person_id: UUID
+    channel: OutreachChannelLiteral
+    status: OutreachStatusLiteral = "sent"
+    occurred_at: datetime | None = None
+    note: str | None = None
+    next_step_at: datetime | None = None
+
+
+class LogOutreachResult(BaseModel):
+    attempt: OutreachAttemptItem | None = None
+    message: str = "OK"
+
+
+class UpdateOutreachRequest(BaseModel):
+    attempt_id: UUID
+    status: OutreachStatusLiteral | None = None
+    note: str | None = None
+    next_step_at: datetime | None = None
+
+
+class UpdateOutreachResult(BaseModel):
+    attempt: OutreachAttemptItem | None = None
+    message: str = "OK"
+
+
+class ListOutreachRequest(BaseModel):
+    person_id: UUID | None = None
+    limit: int = 100
+
+
+class ListOutreachResult(BaseModel):
+    attempts: list[OutreachAttemptItem] = Field(default_factory=list)
+    message: str = "OK"
+
+
+class OutreachQueueItem(BaseModel):
+    person_id: UUID
+    person_name: str
+    org_name: str | None = None
+    current_role: str | None = None
+    is_independent: bool = False
+    independent_reason: str | None = None
+    last_outreach_at: datetime | None = None
+    last_outreach_channel: OutreachChannelLiteral | None = None
+    last_outreach_status: OutreachStatusLiteral | None = None
+    attempt_count: int = 0
+    next_step_at: datetime | None = None
+
+
+class OutreachQueueRequest(BaseModel):
+    filter: OutreachQueueFilterLiteral = "uncontacted"
+    stale_after_days: int = 30
+    person_list_id: UUID | None = None
+    limit: int = 50
+
+
+class OutreachQueueResult(BaseModel):
+    filter: OutreachQueueFilterLiteral
+    people: list[OutreachQueueItem] = Field(default_factory=list)
+    message: str = "OK"
+
+
+class PersonListItemSummary(BaseModel):
+    person_list_id: UUID
+    name: str
+    member_count: int = 0
+
+
+class PersonListsResult(BaseModel):
+    lists: list[PersonListItemSummary] = Field(default_factory=list)
+    message: str = "OK"
+
+
+class CreatePersonListRequest(BaseModel):
+    name: str
+
+
+class CreatePersonListResult(BaseModel):
+    person_list_id: UUID | None = None
+    name: str
+    message: str = "OK"
+
+
+class EditPersonListRequest(BaseModel):
+    person_list_id: UUID
+    add: list[UUID] = Field(default_factory=list)
+    remove: list[UUID] = Field(default_factory=list)
+
+
+class EditPersonListResult(BaseModel):
+    person_list_id: UUID
+    member_count: int = 0
+    message: str = "OK"
