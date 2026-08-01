@@ -48,7 +48,10 @@ from contactsafe_server.services.org_industry_taxonomy import (
     infer_industry_tags_from_text,
     parse_structured_company_summary,
 )
-from contactsafe_server.services.ats_detection import apply_ats_detection_to_org
+from contactsafe_server.services.ats_detection import (
+    apply_ats_detection_to_org,
+    apply_ats_page_detection_to_org,
+)
 from contactsafe_server.services.strong_tie_matcher import LINKEDIN_CONNECTIONS_RELATIONSHIP
 from contactsafe_server.services.web_search_types import WebSearchHit
 
@@ -536,6 +539,9 @@ class OrgEnrichmentService:
         if parsed.careers_url is not None:
             org.careers_url = parsed.careers_url
         apply_ats_detection_to_org(org)
+        # Vanity careers domains (e.g. mercury.com/jobs) hide a real ATS board;
+        # Layer 1 can't see it from the hostname, so look through the page.
+        await apply_ats_page_detection_to_org(org)
         if parsed.linkedin_url is not None:
             org.linkedin_url = parsed.linkedin_url
         if parsed.categories:
