@@ -489,7 +489,7 @@ class JobDetailResult(BaseModel):
 class JobScoringWeights(BaseModel):
     role: float = 1.0
     qualification: float = 0.9
-    seniority: float = 0.6
+    seniority: float = 0.85
     location: float = 0.9
     funding_stage: float = 0.7
 
@@ -502,6 +502,10 @@ class SetJobPreferencesRequest(BaseModel):
     commute_note: str | None = None
     preferred_funding_stages: list[str] | None = None
     scoring_weights: JobScoringWeights | None = None
+    # Seniority ordinals from job_seniority.py (0=Intern … 9=C-level).
+    # Null on both means "infer from my preferences text and profile".
+    target_seniority_min: int | None = Field(default=None, ge=0, le=9)
+    target_seniority_max: int | None = Field(default=None, ge=0, le=9)
 
 
 class JobTargetScope(BaseModel):
@@ -524,6 +528,9 @@ class JobPreferencesResult(BaseModel):
     preferred_funding_stages: list[str] | None = None
     scoring_weights: JobScoringWeights | None = None
     target_scope: JobTargetScope | None = None
+    target_seniority_min: int | None = None
+    target_seniority_max: int | None = None
+    resolved_seniority_label: str | None = None
     classified_job_count: int = 0
     message: str
 

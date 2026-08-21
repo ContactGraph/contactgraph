@@ -78,6 +78,66 @@ def test_cap_noop_without_pm_preference() -> None:
     assert reason == "ok"
 
 
+def test_cap_design_track_titles_that_are_not_literally_product_designer() -> None:
+    """These all escaped the old product-designer-only pattern."""
+    for title in (
+        "Product Design Manager",
+        "Staff Designer, Design Systems",
+        "Principal UX Researcher",
+        "Director of Design",
+        "Head of Product Design",
+        "Senior Content Designer",
+    ):
+        score, reason = _cap_role_score_for_function_mismatch(
+            "Staff / Principal Product Manager",
+            _job(title),  # type: ignore[arg-type]
+            75,
+            None,
+        )
+        assert score == 15, f"{title} was not capped"
+        assert reason is not None
+        assert "design" in reason.lower()
+
+
+def test_cap_program_and_product_ops_as_adjacent() -> None:
+    for title in (
+        "Staff Technical Program Manager",
+        "Director, Product Operations",
+        "Senior Project Manager",
+        "Chief of Staff",
+    ):
+        score, _ = _cap_role_score_for_function_mismatch(
+            "Staff Product Manager",
+            _job(title),  # type: ignore[arg-type]
+            70,
+            None,
+        )
+        assert score == 25, f"{title} was not capped"
+
+
+def test_cap_leaves_product_leadership_titles_alone() -> None:
+    for title in ("Head of Product", "Director of Product", "VP of Product"):
+        score, _ = _cap_role_score_for_function_mismatch(
+            "Staff Product Manager",
+            _job(title),  # type: ignore[arg-type]
+            88,
+            None,
+        )
+        assert score == 88, f"{title} was wrongly capped"
+
+
+def test_cap_does_not_bury_the_candidates_own_vertical() -> None:
+    """"Head of Product Design" matches the PM preference pattern, but a design
+    leader is not asking us to knock out every design role."""
+    score, _ = _cap_role_score_for_function_mismatch(
+        "Head of Product Design",
+        _job("Staff Product Designer"),  # type: ignore[arg-type]
+        90,
+        None,
+    )
+    assert score == 90
+
+
 def test_effective_role_text_prefers_explicit() -> None:
     user = User(
         id=uuid4(),

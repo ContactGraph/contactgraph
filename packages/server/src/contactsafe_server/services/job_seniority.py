@@ -31,11 +31,14 @@ SENIORITY_LEVEL_LABELS: Final[dict[int, str]] = {
 }
 
 # Neutral score when either side is unknown.
-_NEUTRAL_SCORE: Final[int] = 70
-# Per-level penalty for under-qualification (job higher than user).
-_UNDER_PENALTY: Final[int] = 22
-# Per-level penalty for over-qualification (user higher than job) — milder.
-_OVER_PENALTY: Final[int] = 12
+_NEUTRAL_SCORE: Final[int] = 85
+# Per-level penalty for a job BELOW the target range. Steep: under-leveled
+# postings are the dominant source of feed noise, and "Product Manager" two
+# rungs below a Staff target is a different job, not a near miss.
+_BELOW_TARGET_PENALTY: Final[int] = 45
+# Per-level penalty for a job ABOVE the target range. Mild: a stretch role is
+# usually still worth seeing.
+_ABOVE_TARGET_PENALTY: Final[int] = 18
 
 # Ordered highest-first so more specific senior titles win.
 _LEVEL_PATTERNS: Final[tuple[tuple[int, re.Pattern[str]], ...]] = (
@@ -192,39 +195,89 @@ def seniority_level_label(level: int | None) -> str:
     return SENIORITY_LEVEL_LABELS.get(level, "Unknown")
 
 
-def seniority_match_score(
-    job_level: int | None,
-    user_level: int | None,
-) -> int:
-    """Score 0-100 how well job seniority matches the user's level.
+# Fragment separators for parsing a target range out of free text, e.g.
+# "Staff / Principal Product Manager" or "Senior to Staff PM".
+_FRAGMENT_SPLIT_RE: Final[re.Pattern[str]] = re.compile(
+    r"\s*(?:[/,;|]|\bor\b|\bto\b|\band\b|\n)\s*",
+    re.IGNORECASE,
+)
 
-    Unknown on either side → neutral 70.
-    Under-qualified (job > user) penalized more than over-qualified.
+
+def extract_target_seniority_range(text: str | None) -> tuple[int, int] | None:
+    """Parse a target seniority range out of free-text preferences.
+
+    Splits on separators so each fragment classifies independently — "Staff /
+    Principal Product Manager" yields two Staff readings rather than one
+    confused one. Returns (min, max) over everything recognized, or None.
     """
-    if job_level is None or user_level is None:
+    if not text or not text.strip():
+        return None
+
+    levels: list[int] = []
+    for fragment in _FRAGMENT_SPLIT_RE.split(text):
+        cleaned: str = fragment.strip()
+        if not cleaned:
+            continue
+        level: int | None = classify_seniority_level(cleaned)
+        if level is not None:
+            levels.append(level)
+
+    if not levels:
+        return None
+    return min(levels), max(levels)
+
+
+def seniority_range_score(
+    job_level: int | None,
+    target_min: int | None,
+    target_max: int | None,
+) -> int:
+    """Score 0-100 how well a job's level sits against the target range.
+
+    Unknown on either side → neutral. Inside the range → 100. Below the range
+    is penalized steeply; above it only mildly, since a stretch role is still
+    worth surfacing while an under-leveled one is not.
+    """
+    if job_level is None or target_min is None or target_max is None:
         return _NEUTRAL_SCORE
 
-    delta: int = job_level - user_level
-    if delta == 0:
+    low: int = min(target_min, target_max)
+    high: int = max(target_min, target_max)
+
+    if low <= job_level <= high:
         return 100
-    if delta > 0:
-        # Job is more senior than user → under-qualified.
-        return max(0, min(100, 100 - _UNDER_PENALTY * delta))
-    # User is more senior than job → over-qualified (milder).
-    return max(0, min(100, 100 - _OVER_PENALTY * abs(delta)))
+    if job_level < low:
+        return max(0, min(100, 100 - _BELOW_TARGET_PENALTY * (low - job_level)))
+    return max(0, min(100, 100 - _ABOVE_TARGET_PENALTY * (job_level - high)))
 
 
-def seniority_match_reason(
+def seniority_range_label(target_min: int | None, target_max: int | None) -> str:
+    if target_min is None or target_max is None:
+        return "Unknown"
+    low: int = min(target_min, target_max)
+    high: int = max(target_min, target_max)
+    if low == high:
+        return seniority_level_label(low)
+    return f"{seniority_level_label(low)}–{seniority_level_label(high)}"
+
+
+def seniority_range_reason(
     job_level: int | None,
-    user_level: int | None,
+    target_min: int | None,
+    target_max: int | None,
     score: int,
 ) -> str:
     job_label: str = seniority_level_label(job_level)
-    user_label: str = seniority_level_label(user_level)
-    if job_level is None or user_level is None:
-        return f"Seniority unknown (job={job_label}, user={user_label}); neutral score {score}."
-    if job_level == user_level:
-        return f"Level match: both {job_label}."
-    if job_level > user_level:
-        return f"Job is {job_label}; candidate is {user_label} (under-leveled)."
-    return f"Job is {job_label}; candidate is {user_label} (over-leveled)."
+    target_label: str = seniority_range_label(target_min, target_max)
+    if job_level is None or target_min is None or target_max is None:
+        return (
+            f"Seniority unknown (job={job_label}, target={target_label}); "
+            f"neutral score {score}."
+        )
+    low: int = min(target_min, target_max)
+    high: int = max(target_min, target_max)
+    if low <= job_level <= high:
+        return f"Job is {job_label}, within the {target_label} target."
+    if job_level < low:
+        return f"Job is {job_label}, below the {target_label} target (under-leveled)."
+    return f"Job is {job_label}, above the {target_label} target (stretch)."

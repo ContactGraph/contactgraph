@@ -1017,6 +1017,8 @@ async def api_set_job_preferences(
         commute_note=body.commute_note,
         preferred_funding_stages=body.preferred_funding_stages,
         scoring_weights=body.scoring_weights,
+        target_seniority_min=body.target_seniority_min,
+        target_seniority_max=body.target_seniority_max,
     )
 
 
