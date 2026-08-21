@@ -1,6 +1,6 @@
 """Detect ATS provider and board token from organization careers URLs.
 
-Detection runs in two layers:
+Detection runs in three layers:
 
 * Layer 1 (`detect_ats_from_url`) — pure, instant. Matches when the careers URL's
   own hostname is a known ATS host (e.g. ``boards.greenhouse.io/stripe``).
@@ -8,6 +8,11 @@ Detection runs in two layers:
   careers domain (e.g. ``mercury.com/jobs``) by fetching the page and finding the
   real ATS board it redirects to or links out to. Only used where the caller can
   afford a network round-trip (org enrichment).
+* Layer 3 (`detect_ats_by_probe`) — async last resort for careers sites that
+  render their listings client-side and so never mention the ATS in their HTML
+  (e.g. ``hubspot.com/careers``, whose board is Greenhouse ``hubspotjobs``).
+  Derives candidate tokens from the org's name and domain and asks each ATS API
+  whether such a board exists.
 """
 
 from __future__ import annotations
@@ -17,7 +22,7 @@ import re
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -191,6 +196,132 @@ async def detect_ats_from_page(
     return AtsDetectionResult(provider=provider, board_token=board_token)
 
 
+# Layer-3 probe tuning.
+_PROBE_TIMEOUT_SECONDS: float = 8.0
+# Hard cap on probes per org so a bad name can't fan out into dozens of calls.
+_MAX_PROBES_PER_ORG: int = 12
+# Suffixes companies commonly append to their board token.
+_TOKEN_SUFFIXES: tuple[str, ...] = ("", "jobs", "careers", "hq", "inc")
+# Corporate suffixes to strip from a canonical name before tokenizing.
+_NAME_NOISE_RE: re.Pattern[str] = re.compile(
+    r"\b(inc|inc\.|llc|ltd|limited|corp|corporation|co|company|holdings|group|"
+    r"technologies|technology|labs|software|the)\b",
+    flags=re.IGNORECASE,
+)
+
+# Board APIs that answer "does this token exist, and does it have jobs?".
+_PROBE_ENDPOINTS: tuple[tuple[AtsProvider, str], ...] = (
+    ("greenhouse", "https://boards-api.greenhouse.io/v1/boards/{token}/jobs"),
+    ("lever", "https://api.lever.co/v0/postings/{token}?mode=json"),
+    ("ashby", "https://api.ashbyhq.com/posting-api/job-board/{token}"),
+)
+
+# A probe reports how many postings a candidate board has (0 if it doesn't exist).
+BoardProbe = Callable[[str, str], Awaitable[int]]
+
+
+def _job_count_from_payload(payload: object) -> int:
+    """Count postings in a board API response, tolerating each provider's shape."""
+    if isinstance(payload, list):
+        return len(cast(list[object], payload))
+    if isinstance(payload, dict):
+        typed: dict[str, object] = cast(dict[str, object], payload)
+        for key in ("jobs", "postings"):
+            value: object | None = typed.get(key)
+            if isinstance(value, list):
+                return len(cast(list[object], value))
+    return 0
+
+
+async def _default_board_probe(provider: str, url: str) -> int:
+    async with httpx.AsyncClient(
+        timeout=_PROBE_TIMEOUT_SECONDS,
+        follow_redirects=True,
+        headers={"User-Agent": _USER_AGENT},
+    ) as client:
+        response = await client.get(url)
+        if response.status_code != 200:
+            return 0
+        try:
+            return _job_count_from_payload(response.json())
+        except Exception:
+            return 0
+
+
+def candidate_board_tokens(
+    canonical_name: str | None,
+    careers_url: str | None,
+) -> list[str]:
+    """Guess board tokens for an org, most likely first.
+
+    Derived from the careers-URL domain label and the canonical name, each with
+    the suffixes companies tend to append (``hubspot`` -> ``hubspotjobs``).
+    """
+    bases: list[str] = []
+
+    if careers_url:
+        host: str = (urlparse(careers_url.strip()).hostname or "").lower()
+        host = re.sub(r"^www\.", "", host)
+        label: str = host.split(".")[0] if host else ""
+        if label and label not in {"jobs", "careers", "boards"}:
+            bases.append(label)
+
+    if canonical_name:
+        cleaned: str = _NAME_NOISE_RE.sub(" ", canonical_name.lower())
+        squashed: str = re.sub(r"[^a-z0-9]+", "", cleaned)
+        if squashed:
+            bases.append(squashed)
+        hyphenated: str = re.sub(r"[^a-z0-9]+", "-", cleaned).strip("-")
+        if hyphenated and hyphenated != squashed:
+            bases.append(hyphenated)
+
+    tokens: list[str] = []
+    for base in bases:
+        if len(base) < 2:
+            continue
+        for suffix in _TOKEN_SUFFIXES:
+            token: str = f"{base}{suffix}"
+            if token not in tokens:
+                tokens.append(token)
+    return tokens
+
+
+async def detect_ats_by_probe(
+    canonical_name: str | None,
+    careers_url: str | None,
+    *,
+    probe: BoardProbe | None = None,
+) -> AtsDetectionResult:
+    """Ask each ATS API directly whether a plausible board token exists.
+
+    A board is only accepted when it returns at least one posting. HubSpot's
+    Greenhouse board is ``hubspotjobs``; the obvious guess ``hubspot`` also
+    returns HTTP 200 but with zero jobs, so existence alone is not enough.
+
+    Never raises — probing is best-effort.
+    """
+    tokens: list[str] = candidate_board_tokens(canonical_name, careers_url)
+    if not tokens:
+        return AtsDetectionResult(provider=None, board_token=None)
+
+    prober: BoardProbe = probe or _default_board_probe
+    attempts: int = 0
+    for token in tokens:
+        for provider, template in _PROBE_ENDPOINTS:
+            if attempts >= _MAX_PROBES_PER_ORG:
+                logger.debug("probe cap reached for %s", canonical_name)
+                return AtsDetectionResult(provider=None, board_token=None)
+            attempts += 1
+            try:
+                count: int = await prober(provider, template.format(token=token))
+            except Exception:
+                logger.debug("probe failed for %s/%s", provider, token, exc_info=True)
+                continue
+            if count > 0:
+                return AtsDetectionResult(provider=provider, board_token=token)
+    return AtsDetectionResult(provider=None, board_token=None)
+
+
 async def apply_ats_page_detection_to_org(
     org: Org,
     *,
@@ -207,6 +338,29 @@ async def apply_ats_page_detection_to_org(
     if org.careers_url is None or not org.careers_url.strip():
         return
     result: AtsDetectionResult = await detect_ats_from_page(org.careers_url, fetch=fetch)
+    if result.provider is not None:
+        org.ats_provider = result.provider
+        org.ats_board_token = result.board_token
+
+
+async def apply_ats_probe_detection_to_org(
+    org: Org,
+    *,
+    probe: BoardProbe | None = None,
+) -> None:
+    """Layer-3 fallback — a no-op unless Layers 1 and 2 both came up empty.
+
+    Separate from :func:`apply_ats_page_detection_to_org` because it guesses
+    rather than reads: it should only run once cheaper, evidence-based detection
+    has failed.
+    """
+    if org.ats_board_token:
+        return
+    result: AtsDetectionResult = await detect_ats_by_probe(
+        org.canonical_name,
+        org.careers_url,
+        probe=probe,
+    )
     if result.provider is not None:
         org.ats_provider = result.provider
         org.ats_board_token = result.board_token
