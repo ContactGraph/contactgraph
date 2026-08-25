@@ -162,6 +162,30 @@ def _normalize_scoring_weights(
     )
 
 
+def _normalize_target_seniority(
+    raw_min: int | None,
+    raw_max: int | None,
+) -> tuple[int | None, int | None]:
+    """Clamp to the seniority ladder and order the bounds.
+
+    Either bound alone is treated as an exact single-level target.
+    """
+    def clamp(value: int | None) -> int | None:
+        if value is None:
+            return None
+        return max(0, min(9, int(value)))
+
+    low: int | None = clamp(raw_min)
+    high: int | None = clamp(raw_max)
+    if low is None and high is None:
+        return None, None
+    if low is None:
+        return high, high
+    if high is None:
+        return low, low
+    return min(low, high), max(low, high)
+
+
 from contactsafe_server.deps import (
     AppContext,
     build_enrichment_service,
@@ -1989,6 +2013,14 @@ async def get_job_preferences(
         scoring_weights: JobScoringWeights = _normalize_scoring_weights(
             user.job_scoring_weights,
         )
+        from contactsafe_server.services.job_relevance_service import JobRelevanceService
+        from contactsafe_server.services.job_seniority import seniority_range_label
+
+        resolved_min: int | None
+        resolved_max: int | None
+        resolved_min, resolved_max = await JobRelevanceService(
+            db, ctx.settings,
+        ).resolve_target_seniority_range(user)
         return JobPreferencesResult(
             text=user.job_preferences_text,
             suggested_text=user.job_suggested_roles,
@@ -2001,6 +2033,9 @@ async def get_job_preferences(
             ),
             scoring_weights=scoring_weights,
             target_scope=target_scope,
+            target_seniority_min=user.job_target_seniority_min,
+            target_seniority_max=user.job_target_seniority_max,
+            resolved_seniority_label=seniority_range_label(resolved_min, resolved_max),
             classified_job_count=count,
             message="OK",
         )
@@ -2016,6 +2051,8 @@ async def set_job_preferences(
     commute_note: str | None = None,
     preferred_funding_stages: list[str] | None = None,
     scoring_weights: JobScoringWeights | None = None,
+    target_seniority_min: int | None = None,
+    target_seniority_max: int | None = None,
 ) -> JobPreferencesResult:
     if user_id is None:
         return JobPreferencesResult(text=None, classified_job_count=0, message="Authentication required.")
@@ -2045,12 +2082,31 @@ async def set_job_preferences(
             or user.job_commute_max_minutes != commute_max_minutes
             or user.job_commute_note != new_note
         )
+        norm_target_min: int | None
+        norm_target_max: int | None
+        norm_target_min, norm_target_max = _normalize_target_seniority(
+            target_seniority_min,
+            target_seniority_max,
+        )
+        seniority_changed: bool = (
+            user.job_target_seniority_min != norm_target_min
+            or user.job_target_seniority_max != norm_target_max
+        )
         role_text_changed: bool = user.job_preferences_text != new_text
+        # Seniority is scored mechanically, so a target change only needs the
+        # cheap rescore path — no LLM re-run.
         formula_only: bool = (
             not role_text_changed
-            and (weights_changed or stages_changed or location_changed)
+            and (
+                weights_changed
+                or stages_changed
+                or location_changed
+                or seniority_changed
+            )
         )
 
+        user.job_target_seniority_min = norm_target_min
+        user.job_target_seniority_max = norm_target_max
         user.job_preferences_text = new_text
         user.job_location_pref = location_pref
         user.job_location_city = new_city
@@ -2062,7 +2118,13 @@ async def set_job_preferences(
         suggested_text: str | None = user.job_suggested_roles
         await db.commit()
 
-    if not role_text_changed and not weights_changed and not stages_changed and not location_changed:
+    if (
+        not role_text_changed
+        and not weights_changed
+        and not stages_changed
+        and not location_changed
+        and not seniority_changed
+    ):
         return JobPreferencesResult(
             text=new_text,
             suggested_text=suggested_text,
@@ -2072,6 +2134,8 @@ async def set_job_preferences(
             commute_note=new_note,
             preferred_funding_stages=normalized_stages,
             scoring_weights=normalized_weights,
+            target_seniority_min=norm_target_min,
+            target_seniority_max=norm_target_max,
             classified_job_count=0,
             message="No changes.",
         )
@@ -2092,6 +2156,8 @@ async def set_job_preferences(
             commute_note=new_note,
             preferred_funding_stages=normalized_stages,
             scoring_weights=normalized_weights,
+            target_seniority_min=norm_target_min,
+            target_seniority_max=norm_target_max,
             classified_job_count=updated,
             message=f"Preferences updated. Rescored {updated} jobs.",
         )
@@ -2132,6 +2198,8 @@ async def set_job_preferences(
         commute_note=new_note,
         preferred_funding_stages=normalized_stages,
         scoring_weights=normalized_weights,
+        target_seniority_min=norm_target_min,
+        target_seniority_max=norm_target_max,
         classified_job_count=0,
         message="Preferences saved. Rescoring jobs in background…",
     )

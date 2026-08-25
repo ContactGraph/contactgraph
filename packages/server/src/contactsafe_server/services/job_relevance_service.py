@@ -39,8 +39,9 @@ from contactsafe_server.services.job_geocode import (
 )
 from contactsafe_server.services.job_seniority import (
     classify_seniority_level,
-    seniority_match_reason,
-    seniority_match_score,
+    extract_target_seniority_range,
+    seniority_range_reason,
+    seniority_range_score,
 )
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -59,7 +60,10 @@ SCORING_WEIGHT_KEYS: tuple[str, ...] = (
 DEFAULT_SCORING_WEIGHTS: dict[str, float] = {
     "role": 1.0,
     "qualification": 0.9,
-    "seniority": 0.6,
+    # Seniority is scored mechanically against an explicit target range, so it
+    # is reliable enough to carry real weight. At 0.6 an under-leveled posting
+    # could lose its whole seniority score and still clear the relevance bar.
+    "seniority": 0.85,
     "location": 0.9,
     "funding_stage": 0.7,
 }
@@ -155,14 +159,23 @@ _JOB_TEMPLATE: str = (
 )
 
 _PM_PREFERENCE_RE: re.Pattern[str] = re.compile(
-    r"\b(product manager|product management|pm)\b",
+    r"\b("
+    r"product manager|product management|pm|"
+    r"head of product|product lead(?:ership)?|"
+    r"director[, ]+(?:of )?product|vp[, ]+(?:of )?product|"
+    r"chief product officer|cpo"
+    r")\b",
     re.IGNORECASE,
 )
 _PM_TITLE_RE: re.Pattern[str] = re.compile(
     r"\b("
     r"product manager|product management|group product manager|"
     r"principal product manager|senior product manager|associate product manager|"
-    r"director[, ]+ product|head of product|product lead|vp[, ]+ product"
+    r"product lead|"
+    # "Head of Product" is a PM title; "Head of Product Design" is not, so the
+    # leadership forms must not swallow a trailing vertical.
+    r"(?:director[, ]+(?:of )?|head of |vp[, ]+(?:of )?)product"
+    r"(?!\s+(?:operations|ops|design|marketing|analytics|engineering|success))"
     r")\b",
     re.IGNORECASE,
 )
@@ -178,20 +191,39 @@ _ENGINEERING_TITLE_RE: re.Pattern[str] = re.compile(
     re.IGNORECASE,
 )
 _MARKETING_TITLE_RE: re.Pattern[str] = re.compile(
-    r"\b(product marketing|marketing manager|product marketer)\b",
+    r"\b("
+    r"marketing|product marketer|brand\b|demand gen(?:eration)?|"
+    r"growth marketer|content strategist|communications"
+    r")\b",
     re.IGNORECASE,
 )
+# Broad on purpose: "Product Design Manager", "Senior Designer" and
+# "UX Researcher" are all design-track roles that the old product-designer-only
+# pattern let through. Genuine PM titles short-circuit before this runs.
 _DESIGN_TITLE_RE: re.Pattern[str] = re.compile(
     r"\b("
-    r"product designer|ux designer|ui designer|ux/ui designer|"
-    r"interaction designer|visual designer|design lead|head of design"
+    r"designer|product design|content design|design system|"
+    r"ux\b|ui\b|user experience|interaction design|visual design|"
+    r"design lead|design manager|design director|director[, ]+(?:of )?design|"
+    r"head of design|vp[, ]+(?:of )?design|"
+    r"ux research(?:er)?|user research(?:er)?|design research(?:er)?"
     r")\b",
     re.IGNORECASE,
 )
 _ANALYST_TITLE_RE: re.Pattern[str] = re.compile(
     r"\b("
-    r"product analyst|data analyst|business analyst|analytics manager|"
-    r"insights analyst|research analyst"
+    r"analyst|analytics|data scientist|research scientist|"
+    r"business intelligence|\bbi\b"
+    r")\b",
+    re.IGNORECASE,
+)
+# Program/project management is the classic "product-adjacent" near miss.
+_PROGRAM_TITLE_RE: re.Pattern[str] = re.compile(
+    r"\b("
+    r"program manager|project manager|programme manager|"
+    r"technical program manager|\btpm\b|scrum master|"
+    r"chief of staff|business operations|\bbizops\b|"
+    r"product operations|product ops"
     r")\b",
     re.IGNORECASE,
 )
@@ -306,6 +338,17 @@ def _publish_scoring_cancelled(user_id: uuid.UUID, scored: int, total: int) -> N
     job_event_bus.publish(user_id, event)
 
 
+# (pattern, cap, label) — checked in order against title + department.
+_MISMATCH_FUNCTIONS: tuple[tuple[re.Pattern[str], int, str], ...] = (
+    (_ENGINEERING_TITLE_RE, 15, "engineering"),
+    (_DESIGN_TITLE_RE, 15, "product design"),
+    (_LEGAL_TITLE_RE, 10, "a legal role"),
+    (_MARKETING_TITLE_RE, 20, "marketing"),
+    (_ANALYST_TITLE_RE, 20, "analytics"),
+    (_PROGRAM_TITLE_RE, 25, "program/project management"),
+)
+
+
 def _cap_role_score_for_function_mismatch(
     preferences_text: str | None,
     job: OrgJob,
@@ -321,36 +364,17 @@ def _cap_role_score_for_function_mismatch(
         return role_score, role_reason
 
     haystack: str = f"{title} {job.department or ''}"
-    if _ENGINEERING_TITLE_RE.search(haystack):
-        capped: int = min(role_score, 15)
+    for pattern, cap, label in _MISMATCH_FUNCTIONS:
+        # Never cap a vertical the candidate is themselves targeting — someone
+        # who asked for "Head of Product Design" matches the PM preference
+        # pattern but is not asking us to bury design roles.
+        if pattern.search(preferences_text):
+            continue
+        if not pattern.search(haystack):
+            continue
+        capped: int = min(role_score, cap)
         if capped < role_score:
-            return capped, (
-                "The job title indicates engineering, not product management."
-            )
-    if _MARKETING_TITLE_RE.search(haystack):
-        capped = min(role_score, 20)
-        if capped < role_score:
-            return capped, (
-                "The job title indicates marketing, not product management."
-            )
-    if _DESIGN_TITLE_RE.search(haystack):
-        capped = min(role_score, 15)
-        if capped < role_score:
-            return capped, (
-                "The job title indicates product design, not product management."
-            )
-    if _ANALYST_TITLE_RE.search(haystack):
-        capped = min(role_score, 20)
-        if capped < role_score:
-            return capped, (
-                "The job title indicates analytics, not product management."
-            )
-    if _LEGAL_TITLE_RE.search(haystack):
-        capped = min(role_score, 10)
-        if capped < role_score:
-            return capped, (
-                "The job title indicates a legal role, not product management."
-            )
+            return capped, f"The job title indicates {label}, not product management."
     return role_score, role_reason
 
 
@@ -443,7 +467,9 @@ class JobRelevanceService:
 
         preferences_section: str = self._build_preferences_section(user)
         profile_section: str = await self._build_profile_section(user)
-        user_level: int | None = await self._resolve_user_seniority_level(user)
+        target_min: int | None
+        target_max: int | None
+        target_min, target_max = await self.resolve_target_seniority_range(user)
         user_lat: float | None
         user_lng: float | None
         user_lat, user_lng = self._resolve_user_geocode(user)
@@ -485,7 +511,8 @@ class JobRelevanceService:
                     preferences_text=preferences_text,
                     preferred_funding_stages=preferred_funding_stages,
                     weights=weights,
-                    user_level=user_level,
+                    target_min=target_min,
+                    target_max=target_max,
                     user_lat=user_lat,
                     user_lng=user_lng,
                     user_location_pref=user.job_location_pref,
@@ -669,15 +696,34 @@ class JobRelevanceService:
         )
         return list(result.scalars().all())
 
-    async def _resolve_user_seniority_level(self, user: User) -> int | None:
-        """Infer the user's seniority from prefs + profile titles."""
-        candidates: list[str] = []
-        if user.job_preferences_text:
-            candidates.append(user.job_preferences_text)
+    async def resolve_target_seniority_range(
+        self,
+        user: User,
+    ) -> tuple[int | None, int | None]:
+        """Resolve the seniority band the user is actually shopping for.
+
+        Precedence: the explicit control, then what they typed, then the roles
+        we suggested, then their current title. Deliberately NOT the max over
+        their whole history — an old "Head of Product" would otherwise make
+        every Staff PM posting look under-leveled.
+        """
+        explicit_min: int | None = user.job_target_seniority_min
+        explicit_max: int | None = user.job_target_seniority_max
+        if explicit_min is not None or explicit_max is not None:
+            low: int = explicit_min if explicit_min is not None else explicit_max  # type: ignore[assignment]
+            high: int = explicit_max if explicit_max is not None else explicit_min  # type: ignore[assignment]
+            return min(low, high), max(low, high)
+
+        for text in (user.job_preferences_text, user.job_suggested_roles):
+            parsed: tuple[int, int] | None = extract_target_seniority_range(text)
+            if parsed is not None:
+                return parsed
+
         if user.person_id is not None:
             person: Person | None = await self._db.get(Person, user.person_id)
+            current_titles: list[str] = []
             if person is not None and person.current_role:
-                candidates.append(person.current_role)
+                current_titles.append(person.current_role)
             headline_result = await self._db.execute(
                 select(PersonAttributeClaim.value)
                 .where(
@@ -688,31 +734,28 @@ class JobRelevanceService:
             )
             headline: str | None = headline_result.scalar_one_or_none()
             if headline:
-                candidates.append(headline)
+                current_titles.append(headline)
             emp_result = await self._db.execute(
                 select(EmploymentClaim.role_title)
                 .where(
                     EmploymentClaim.person_id == user.person_id,
                     EmploymentClaim.role_title.is_not(None),
+                    EmploymentClaim.is_current.is_(True),
                 )
-                .order_by(
-                    EmploymentClaim.is_current.desc(),
-                    EmploymentClaim.started_at.desc().nullslast(),
-                )
-                .limit(5),
+                .order_by(EmploymentClaim.started_at.desc().nullslast())
+                .limit(1),
             )
             for (role_title,) in emp_result.all():
                 if role_title:
-                    candidates.append(role_title)
+                    current_titles.append(role_title)
 
-        best: int | None = None
-        for text in candidates:
-            level: int | None = classify_seniority_level(text)
-            if level is None:
-                continue
-            if best is None or level > best:
-                best = level
-        return best
+            for title in current_titles:
+                level: int | None = classify_seniority_level(title)
+                if level is not None:
+                    # Someone at level L is shopping at L or a step up, not down.
+                    return level, level + 1
+
+        return None, None
 
     @staticmethod
     def _resolve_user_geocode(user: User) -> tuple[float | None, float | None]:
@@ -725,7 +768,8 @@ class JobRelevanceService:
     def _mechanical_seniority_location(
         job: OrgJob,
         *,
-        user_level: int | None,
+        target_min: int | None,
+        target_max: int | None,
         user_lat: float | None,
         user_lng: float | None,
         user_location_pref: str | None,
@@ -734,10 +778,11 @@ class JobRelevanceService:
         job_level: int | None = job.seniority_level
         if job_level is None:
             job_level = classify_seniority_level(job.title, job.description_snippet)
-        seniority_score: int = seniority_match_score(job_level, user_level)
-        seniority_reason: str = seniority_match_reason(
+        seniority_score: int = seniority_range_score(job_level, target_min, target_max)
+        seniority_reason: str = seniority_range_reason(
             job_level,
-            user_level,
+            target_min,
+            target_max,
             seniority_score,
         )
 
@@ -783,7 +828,8 @@ class JobRelevanceService:
         preferences_text: str | None = None,
         preferred_funding_stages: list[str] | None = None,
         weights: dict[str, float] | None = None,
-        user_level: int | None = None,
+        target_min: int | None = None,
+        target_max: int | None = None,
         user_lat: float | None = None,
         user_lng: float | None = None,
         user_location_pref: str | None = None,
@@ -850,7 +896,8 @@ class JobRelevanceService:
                 location_reason,
             ) = self._mechanical_seniority_location(
                 job,
-                user_level=user_level,
+                target_min=target_min,
+                target_max=target_max,
                 user_lat=user_lat,
                 user_lng=user_lng,
                 user_location_pref=user_location_pref,
@@ -924,18 +971,24 @@ class JobRelevanceService:
         """Recompute seniority/location/match from stored role+qualification.
 
         Used when weights, funding stages, or location prefs change — no LLM.
+        The function-mismatch cap is re-applied to the stored role score so that
+        tightened mismatch rules reach already-scored jobs without a re-run; the
+        cap only ever lowers a score, so this is idempotent.
         """
         user: User | None = await self._db.get(User, user_id)
         if user is None:
             return 0
 
+        preferences_text: str | None = self._effective_role_text(user)
         weights: dict[str, float] = resolve_scoring_weights(user.job_scoring_weights)
         preferred_funding_stages: list[str] | None = (
             list(user.preferred_funding_stages)
             if user.preferred_funding_stages
             else None
         )
-        user_level: int | None = await self._resolve_user_seniority_level(user)
+        target_min: int | None
+        target_max: int | None
+        target_min, target_max = await self.resolve_target_seniority_range(user)
         user_lat: float | None
         user_lng: float | None
         user_lat, user_lng = self._resolve_user_geocode(user)
@@ -965,6 +1018,15 @@ class JobRelevanceService:
             ):
                 continue
 
+            role_score: int
+            role_reason: str | None
+            role_score, role_reason = _cap_role_score_for_function_mismatch(
+                preferences_text,
+                job,
+                relevance.role_score,
+                relevance.role_reason,
+            )
+
             (
                 seniority_score,
                 seniority_reason,
@@ -972,7 +1034,8 @@ class JobRelevanceService:
                 location_reason,
             ) = self._mechanical_seniority_location(
                 job,
-                user_level=user_level,
+                target_min=target_min,
+                target_max=target_max,
                 user_lat=user_lat,
                 user_lng=user_lng,
                 user_location_pref=user.job_location_pref,
@@ -985,7 +1048,7 @@ class JobRelevanceService:
                 weight=weights.get("funding_stage", 0.7),
             )
             match_score, limiting_note = compute_match_score(
-                role_score=relevance.role_score,
+                role_score=role_score,
                 qualification_score=relevance.qualification_score,
                 seniority_score=seniority_score,
                 location_score=location_score,
@@ -996,7 +1059,7 @@ class JobRelevanceService:
                 filter(
                     None,
                     [
-                        relevance.role_reason,
+                        role_reason,
                         relevance.qualification_reason,
                         seniority_reason,
                         location_reason,
@@ -1004,6 +1067,8 @@ class JobRelevanceService:
                     ],
                 ),
             )
+            relevance.role_score = role_score
+            relevance.role_reason = role_reason
             relevance.seniority_score = seniority_score
             relevance.seniority_reason = seniority_reason
             relevance.location_score = location_score

@@ -1,6 +1,8 @@
 import pytest
 from contactsafe_server.services.ats_detection import (
     FetchedPage,
+    candidate_board_tokens,
+    detect_ats_by_probe,
     detect_ats_from_page,
     detect_ats_from_url,
 )
@@ -116,3 +118,85 @@ async def test_page_swallows_fetch_errors() -> None:
     result = await detect_ats_from_page("https://mercury.com/jobs", fetch=boom)
     assert result.provider is None
     assert result.board_token is None
+
+
+# --- Layer 3: detect_ats_by_probe (client-rendered careers sites) ---
+
+
+def test_candidate_tokens_from_domain_and_name() -> None:
+    tokens = candidate_board_tokens("HubSpot", "https://www.hubspot.com/careers")
+    assert tokens[0] == "hubspot"
+    assert "hubspotjobs" in tokens
+
+
+def test_candidate_tokens_strip_corporate_noise() -> None:
+    tokens = candidate_board_tokens("Acme Technologies, Inc.", None)
+    assert "acme" in tokens
+
+
+def test_candidate_tokens_ignore_generic_subdomains() -> None:
+    # jobs.example.com must not yield the token "jobs".
+    tokens = candidate_board_tokens(None, "https://jobs.example.com")
+    assert "jobs" not in tokens
+
+
+def test_candidate_tokens_empty_without_inputs() -> None:
+    assert candidate_board_tokens(None, None) == []
+
+
+def _probe_returning(counts: dict[str, int]):
+    """Probe stub keyed by the token embedded in the requested URL."""
+
+    async def probe(_provider: str, url: str) -> int:
+        for token, count in counts.items():
+            if f"/{token}/" in url or url.endswith(f"/{token}") or f"/{token}?" in url:
+                return count
+        return 0
+
+    return probe
+
+
+@pytest.mark.asyncio
+async def test_probe_skips_empty_board_and_finds_real_one() -> None:
+    """HubSpot's "hubspot" board answers 200 with zero jobs; the real one is
+    "hubspotjobs". Existence alone must not win."""
+    result = await detect_ats_by_probe(
+        "HubSpot",
+        "https://www.hubspot.com/careers",
+        probe=_probe_returning({"hubspot": 0, "hubspotjobs": 155}),
+    )
+    assert result.provider == "greenhouse"
+    assert result.board_token == "hubspotjobs"
+
+
+@pytest.mark.asyncio
+async def test_probe_returns_empty_when_nothing_matches() -> None:
+    result = await detect_ats_by_probe(
+        "Nonesuch",
+        "https://nonesuch.example/careers",
+        probe=_probe_returning({}),
+    )
+    assert result.provider is None
+    assert result.board_token is None
+
+
+@pytest.mark.asyncio
+async def test_probe_swallows_errors() -> None:
+    async def boom(_provider: str, _url: str) -> int:
+        raise RuntimeError("network down")
+
+    result = await detect_ats_by_probe("HubSpot", "https://hubspot.com/careers", probe=boom)
+    assert result.provider is None
+    assert result.board_token is None
+
+
+@pytest.mark.asyncio
+async def test_probe_respects_call_cap() -> None:
+    calls: list[str] = []
+
+    async def counting(_provider: str, url: str) -> int:
+        calls.append(url)
+        return 0
+
+    await detect_ats_by_probe("HubSpot", "https://www.hubspot.com/careers", probe=counting)
+    assert len(calls) <= 12

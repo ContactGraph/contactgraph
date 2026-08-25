@@ -14,7 +14,8 @@ from contactsafe_server.services.job_seniority import (
     SENIORITY_STAFF,
     SENIORITY_VP,
     classify_seniority_level,
-    seniority_match_score,
+    extract_target_seniority_range,
+    seniority_range_score,
 )
 
 
@@ -60,22 +61,67 @@ def test_unknown_returns_none() -> None:
     assert classify_seniority_level("Specialist") is None
 
 
-def test_seniority_match_score_exact() -> None:
-    assert seniority_match_score(SENIORITY_DIRECTOR, SENIORITY_DIRECTOR) == 100
+def test_seniority_range_score_inside_range_is_perfect() -> None:
+    assert seniority_range_score(SENIORITY_STAFF, SENIORITY_STAFF, SENIORITY_STAFF) == 100
+    assert seniority_range_score(SENIORITY_STAFF, SENIORITY_SENIOR, SENIORITY_DIRECTOR) == 100
+    assert seniority_range_score(SENIORITY_DIRECTOR, SENIORITY_SENIOR, SENIORITY_DIRECTOR) == 100
 
 
-def test_seniority_match_score_under_qualified_hurts_more() -> None:
-    under: int = seniority_match_score(SENIORITY_DIRECTOR, SENIORITY_MID)
-    over: int = seniority_match_score(SENIORITY_MID, SENIORITY_DIRECTOR)
-    assert under < over
-    assert under == 100 - 22 * (SENIORITY_DIRECTOR - SENIORITY_MID)
-    assert over == 100 - 12 * (SENIORITY_DIRECTOR - SENIORITY_MID)
+def test_seniority_range_score_below_target_hurts_far_more_than_above() -> None:
+    below: int = seniority_range_score(SENIORITY_SENIOR, SENIORITY_STAFF, SENIORITY_STAFF)
+    above: int = seniority_range_score(SENIORITY_MANAGER, SENIORITY_STAFF, SENIORITY_STAFF)
+    assert below < above
+    assert below == 100 - 45
+    assert above == 100 - 18
 
 
-def test_seniority_match_score_neutral_when_unknown() -> None:
-    assert seniority_match_score(None, SENIORITY_SENIOR) == 70
-    assert seniority_match_score(SENIORITY_SENIOR, None) == 70
-    assert seniority_match_score(None, None) == 70
+def test_under_leveled_pm_roles_are_knocked_out() -> None:
+    """The complaint that started this: entry/mid PM roles for a Staff target."""
+    mid: int = seniority_range_score(SENIORITY_MID, SENIORITY_STAFF, SENIORITY_STAFF)
+    associate: int = seniority_range_score(
+        SENIORITY_ASSOCIATE, SENIORITY_STAFF, SENIORITY_STAFF,
+    )
+    entry: int = seniority_range_score(SENIORITY_ENTRY, SENIORITY_STAFF, SENIORITY_STAFF)
+    assert mid == 10
+    assert associate == 0
+    assert entry == 0
+
+
+def test_stretch_roles_stay_visible() -> None:
+    """Director/VP above a Staff target should still be surfaceable."""
+    assert seniority_range_score(SENIORITY_DIRECTOR, SENIORITY_STAFF, SENIORITY_STAFF) == 64
+    assert seniority_range_score(SENIORITY_VP, SENIORITY_STAFF, SENIORITY_STAFF) == 46
+
+
+def test_seniority_range_score_neutral_when_unknown() -> None:
+    assert seniority_range_score(None, SENIORITY_STAFF, SENIORITY_STAFF) == 85
+    assert seniority_range_score(SENIORITY_STAFF, None, None) == 85
+    assert seniority_range_score(None, None, None) == 85
+
+
+def test_extract_target_range_from_preference_text() -> None:
+    assert extract_target_seniority_range("Staff Product Manager") == (
+        SENIORITY_STAFF,
+        SENIORITY_STAFF,
+    )
+    assert extract_target_seniority_range("Staff / Principal Product Manager") == (
+        SENIORITY_STAFF,
+        SENIORITY_STAFF,
+    )
+    assert extract_target_seniority_range("Senior to Staff PM") == (
+        SENIORITY_SENIOR,
+        SENIORITY_STAFF,
+    )
+    assert extract_target_seniority_range("Director of Product, Head of Product") == (
+        SENIORITY_DIRECTOR,
+        SENIORITY_VP,
+    )
+
+
+def test_extract_target_range_returns_none_when_unlevelled() -> None:
+    assert extract_target_seniority_range(None) is None
+    assert extract_target_seniority_range("") is None
+    assert extract_target_seniority_range("fintech, developer tools") is None
 
 
 def test_customer_service_and_sales_levels() -> None:

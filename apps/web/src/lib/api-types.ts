@@ -795,6 +795,9 @@ export interface SetJobPreferencesRequest {
   commute_note: string | null;
   preferred_funding_stages: string[] | null;
   scoring_weights: JobScoringWeights | null;
+  /** Seniority ordinals 0=Intern … 9=C-level. Null = infer from description. */
+  target_seniority_min: number | null;
+  target_seniority_max: number | null;
 }
 
 export interface JobTargetScopePayload {
@@ -817,6 +820,10 @@ export interface JobPreferencesResult {
   preferred_funding_stages: string[] | null;
   scoring_weights: JobScoringWeights | null;
   target_scope: JobTargetScopePayload | null;
+  target_seniority_min: number | null;
+  target_seniority_max: number | null;
+  /** What the server actually resolved, explicit or inferred — e.g. "Staff / Principal". */
+  resolved_seniority_label: string | null;
   classified_job_count: number;
   message: string;
 }

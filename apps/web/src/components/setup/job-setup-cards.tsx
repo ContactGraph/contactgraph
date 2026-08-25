@@ -49,10 +49,24 @@ import {
 const DEFAULT_SCORING_WEIGHTS: JobScoringWeights = {
   role: 1.0,
   qualification: 0.9,
-  seniority: 0.6,
+  seniority: 0.85,
   location: 0.9,
   funding_stage: 0.7,
 };
+
+// Ordinals must stay in sync with job_seniority.py.
+const SENIORITY_LEVELS: ReadonlyArray<{ value: number; label: string }> = [
+  { value: 0, label: "Intern" },
+  { value: 1, label: "Entry" },
+  { value: 2, label: "Associate" },
+  { value: 3, label: "Mid" },
+  { value: 4, label: "Senior" },
+  { value: 5, label: "Staff / Principal" },
+  { value: 6, label: "Manager" },
+  { value: 7, label: "Director" },
+  { value: 8, label: "VP" },
+  { value: 9, label: "C-level" },
+];
 
 const SCORING_WEIGHT_SLIDERS: ReadonlyArray<{
   key: keyof JobScoringWeights;
@@ -104,6 +118,13 @@ export function JobSetupCards({
   );
   const [scoringWeightsHydrated, setScoringWeightsHydrated] =
     useState<boolean>(false);
+  const [targetSeniorityMin, setTargetSeniorityMin] = useState<number | null>(
+    null,
+  );
+  const [targetSeniorityMax, setTargetSeniorityMax] = useState<number | null>(
+    null,
+  );
+  const [seniorityHydrated, setSeniorityHydrated] = useState<boolean>(false);
 
   const sourcesQuery = useQuery({
     queryKey: ["sources"],
@@ -274,6 +295,11 @@ export function JobSetupCards({
       setScoringWeights(serverWeights);
       setScoringWeightsHydrated(true);
     }
+    if (!seniorityHydrated && jobPreferencesQuery.data !== undefined) {
+      setTargetSeniorityMin(jobPreferencesQuery.data.target_seniority_min);
+      setTargetSeniorityMax(jobPreferencesQuery.data.target_seniority_max);
+      setSeniorityHydrated(true);
+    }
   }, [
     jobPreferencesQuery.data,
     jobPreferencesQuery.data?.text,
@@ -291,6 +317,7 @@ export function JobSetupCards({
     commuteNote,
     preferredFundingStages,
     scoringWeightsHydrated,
+    seniorityHydrated,
   ]);
 
   const effectiveScoringWeights: JobScoringWeights =
@@ -321,11 +348,17 @@ export function JobSetupCards({
       effectiveScoringWeights,
       serverWeights,
     );
+    const seniorityEqual: boolean =
+      targetSeniorityMin ===
+        (jobPreferencesQuery.data?.target_seniority_min ?? null) &&
+      targetSeniorityMax ===
+        (jobPreferencesQuery.data?.target_seniority_max ?? null);
     if (
       !baselineText.trim() &&
       !preferencesText.trim() &&
       stagesEqual &&
-      weightsEqual
+      weightsEqual &&
+      seniorityEqual
     ) {
       return false;
     }
@@ -336,7 +369,8 @@ export function JobSetupCards({
       commuteMaxMinutes !== serverCommute ||
       commuteNote !== serverCommuteNote ||
       !stagesEqual ||
-      !weightsEqual
+      !weightsEqual ||
+      !seniorityEqual
     );
   }, [
     preferencesText,
@@ -354,6 +388,10 @@ export function JobSetupCards({
     jobPreferencesQuery.data?.commute_note,
     jobPreferencesQuery.data?.preferred_funding_stages,
     jobPreferencesQuery.data?.scoring_weights,
+    jobPreferencesQuery.data?.target_seniority_min,
+    jobPreferencesQuery.data?.target_seniority_max,
+    targetSeniorityMin,
+    targetSeniorityMax,
   ]);
 
   useEffect(() => {
@@ -596,6 +634,68 @@ export function JobSetupCards({
           />
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">
+              Target level
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              <select
+                className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                value={targetSeniorityMin ?? ""}
+                onChange={(e) => {
+                  const next: number | null =
+                    e.target.value === "" ? null : parseInt(e.target.value, 10);
+                  setTargetSeniorityMin(next);
+                  if (next === null) {
+                    setTargetSeniorityMax(null);
+                  } else if (
+                    targetSeniorityMax === null ||
+                    targetSeniorityMax < next
+                  ) {
+                    setTargetSeniorityMax(next);
+                  }
+                }}
+              >
+                <option value="">Auto (from your description)</option>
+                {SENIORITY_LEVELS.map((level) => (
+                  <option key={level.value} value={level.value}>
+                    {level.label}
+                  </option>
+                ))}
+              </select>
+              {targetSeniorityMin !== null ? (
+                <>
+                  <span className="text-sm text-muted-foreground">to</span>
+                  <select
+                    className="rounded-md border bg-background px-2 py-1.5 text-sm"
+                    value={targetSeniorityMax ?? targetSeniorityMin}
+                    onChange={(e) =>
+                      setTargetSeniorityMax(parseInt(e.target.value, 10))
+                    }
+                  >
+                    {SENIORITY_LEVELS.filter(
+                      (level) => level.value >= targetSeniorityMin,
+                    ).map((level) => (
+                      <option key={level.value} value={level.value}>
+                        {level.label}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ) : null}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {targetSeniorityMin === null
+                ? `Inferred from your description and profile${
+                    jobPreferencesQuery.data?.resolved_seniority_label &&
+                    jobPreferencesQuery.data.resolved_seniority_label !==
+                      "Unknown"
+                      ? `: ${jobPreferencesQuery.data.resolved_seniority_label}`
+                      : ""
+                  }. Set it explicitly to filter harder.`
+                : "Roles below this range are heavily penalized; roles above it are treated as a stretch."}
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">
               Preferred funding stages
             </p>
             <div className="flex flex-wrap gap-1.5">
@@ -687,6 +787,8 @@ export function JobSetupCards({
                       ? preferredFundingStages
                       : null,
                   scoring_weights: effectiveScoringWeights,
+                  target_seniority_min: targetSeniorityMin,
+                  target_seniority_max: targetSeniorityMax,
                 })
               }
             >
@@ -723,6 +825,8 @@ export function JobSetupCards({
                         ? preferredFundingStages
                         : null,
                     scoring_weights: effectiveScoringWeights,
+                    target_seniority_min: targetSeniorityMin,
+                    target_seniority_max: targetSeniorityMax,
                   });
                 }}
               >

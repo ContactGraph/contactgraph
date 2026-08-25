@@ -56,6 +56,8 @@ class User(Base):
     job_commute_max_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     job_commute_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     job_target_scope: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    job_target_seniority_min: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
+    job_target_seniority_max: Mapped[int | None] = mapped_column(SmallInteger, nullable=True)
     preferred_funding_stages: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     job_scoring_weights: Mapped[dict[str, object] | None] = mapped_column(JSONB, nullable=True)
     job_digest_frequency: Mapped[str] = mapped_column(Text, nullable=False, default="daily")
