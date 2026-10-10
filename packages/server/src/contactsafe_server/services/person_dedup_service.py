@@ -18,9 +18,11 @@ from contactsafe_server.db.models import (
     EmploymentClaim,
     EnrichmentAttempt,
     InteractionExcerpt,
+    OutreachAttempt,
     Person,
     PersonAlias,
     PersonAttributeClaim,
+    PersonListMembership,
     UserOrgObservation,
     UserPersonObservation,
     UserRelationshipObservation,
@@ -375,6 +377,8 @@ class PersonDedupService:
         await self._reassign_org_observations(survivor.id, duplicate.id)
         await self._reassign_privacy_labels(survivor.id, duplicate.id)
         await self._reassign_enrichment_attempts(survivor.id, duplicate.id)
+        await self._reassign_outreach_attempts(survivor.id, duplicate.id)
+        await self._reassign_person_list_memberships(survivor.id, duplicate.id)
 
     def _merge_person_fields(self, survivor: Person, duplicate: Person) -> None:
         if not survivor.primary_email and duplicate.primary_email:
@@ -565,6 +569,54 @@ class PersonDedupService:
             .where(InteractionExcerpt.person_id == duplicate_id)
             .values(person_id=survivor_id)
         )
+
+    async def _reassign_outreach_attempts(
+        self,
+        survivor_id: uuid.UUID,
+        duplicate_id: uuid.UUID,
+    ) -> None:
+        """Move outreach history onto the survivor before the duplicate is deleted.
+
+        This is user-authored content, not derived signal — it cannot be recomputed from a
+        re-sync the way claims and observations can. The FK is SET NULL so a miss here
+        orphans rather than destroys, but an orphaned attempt is still invisible in every
+        per-person view, so the reassignment is the actual fix.
+
+        No unique constraint to reconcile: many attempts per person is the whole point.
+        """
+        await self._db.execute(
+            update(OutreachAttempt)
+            .where(OutreachAttempt.person_id == duplicate_id)
+            .values(person_id=survivor_id)
+        )
+
+    async def _reassign_person_list_memberships(
+        self,
+        survivor_id: uuid.UUID,
+        duplicate_id: uuid.UUID,
+    ) -> None:
+        """Move list membership across, skipping lists that already hold the survivor.
+
+        The composite primary key (person_list_id, person_id) means a blind UPDATE would
+        raise when both records sit in the same list — exactly what a merge implies.
+        """
+        result = await self._db.execute(
+            select(PersonListMembership).where(PersonListMembership.person_id == duplicate_id)
+        )
+        memberships: list[PersonListMembership] = list(result.scalars().all())
+        for membership in memberships:
+            already_present = (
+                await self._db.execute(
+                    select(PersonListMembership).where(
+                        PersonListMembership.person_list_id == membership.person_list_id,
+                        PersonListMembership.person_id == survivor_id,
+                    )
+                )
+            ).scalar_one_or_none()
+            if already_present is None:
+                membership.person_id = survivor_id
+            else:
+                await self._db.delete(membership)
 
     async def _reassign_relationship_observations(
         self,

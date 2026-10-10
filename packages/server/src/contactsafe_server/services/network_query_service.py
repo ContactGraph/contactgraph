@@ -436,42 +436,57 @@ class NetworkQueryService:
         if query_embedding is None:
             return None
 
+        # Semantic search is a best-effort enhancement, never a hard dependency. Returning
+        # None means "couldn't answer semantically" and callers fall through to keyword
+        # results or an empty list. Anything that escapes this block becomes a 500 on
+        # query_network, which is the wrong failure: the caller asked a question, and
+        # "no semantic matches" is a valid answer where "server error" is not.
+        #
+        # The realistic failure is the pgvector comparison itself — a NULL or
+        # wrong-dimension embedding in interaction_excerpts raises at execute() time, not
+        # at build time, so guarding only the cosine_distance() construction (as this did
+        # previously) leaves the query unprotected.
         try:
             distance = InteractionExcerpt.embedding.cosine_distance(query_embedding)
+
+            subq = (
+                select(
+                    InteractionExcerpt.person_id,
+                    func.min(distance).label("min_distance"),
+                )
+                .where(InteractionExcerpt.user_id == user_id)
+                .where(InteractionExcerpt.embedding.is_not(None))
+                .group_by(InteractionExcerpt.person_id)
+                .order_by(func.min(distance))
+                .limit(plan.limit)
+                .subquery()
+            )
+
+            stmt = (
+                select(Person, UserPersonObservation)
+                .join(subq, subq.c.person_id == Person.id)
+                .join(
+                    UserPersonObservation,
+                    (UserPersonObservation.person_id == Person.id)
+                    & (UserPersonObservation.user_id == user_id),
+                )
+            )
+
+            if plan.exclude_broadcast:
+                stmt = stmt.where(UserPersonObservation.is_broadcast.is_(False))
+            if plan.exclude_automated:
+                stmt = stmt.where(UserPersonObservation.is_automated.is_(False))
+
+            stmt = stmt.order_by(subq.c.min_distance)
+
+            result = await self._db.execute(stmt)
+            rows = list(result.unique().all())
         except Exception:
+            logger.exception("Semantic search failed; falling back to keyword results")
+            # A failed statement leaves the transaction aborted, so every later query on
+            # this session would raise too. Roll back so the caller can keep working.
+            await self._db.rollback()
             return None
-
-        subq = (
-            select(
-                InteractionExcerpt.person_id,
-                func.min(distance).label("min_distance"),
-            )
-            .where(InteractionExcerpt.user_id == user_id)
-            .group_by(InteractionExcerpt.person_id)
-            .order_by(func.min(distance))
-            .limit(plan.limit)
-            .subquery()
-        )
-
-        stmt = (
-            select(Person, UserPersonObservation)
-            .join(subq, subq.c.person_id == Person.id)
-            .join(
-                UserPersonObservation,
-                (UserPersonObservation.person_id == Person.id)
-                & (UserPersonObservation.user_id == user_id),
-            )
-        )
-
-        if plan.exclude_broadcast:
-            stmt = stmt.where(UserPersonObservation.is_broadcast.is_(False))
-        if plan.exclude_automated:
-            stmt = stmt.where(UserPersonObservation.is_automated.is_(False))
-
-        stmt = stmt.order_by(subq.c.min_distance)
-
-        result = await self._db.execute(stmt)
-        rows = list(result.unique().all())
         matches: list[PersonMatch] = []
         for person, obs in rows:
             aliases: list[str] = await self._load_also_known_as(person.id)

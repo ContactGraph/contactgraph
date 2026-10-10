@@ -2,21 +2,29 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
 from contactsafe_core.contact_schemas import (
     AddWatchedCompanyRequest,
     AddWatchedCompanyResult,
+    CreatePersonListResult,
     DedupPersonsResult,
+    EditPersonListResult,
     FlatJobListResult,
     JobDetailResult,
     ListOrgsResult,
+    ListOutreachResult,
     ListPeopleResult,
+    LogOutreachResult,
     NextStepsResult,
     OrgDetailResult,
+    OutreachQueueResult,
     PersonDetailResult,
+    PersonListsResult,
     SetJobInterestResult,
+    UpdateOutreachResult,
     UpdateTaskStatusResult,
 )
 from contactsafe_core.enums import SourceType
@@ -84,7 +92,13 @@ def create_mcp_server(settings: Settings) -> FastMCP:
             "list_jobs / get_job to browse job openings at network companies, "
             "add_watched_company to monitor a company with no contacts, "
             "view_trusted_users / edit_trusted_users to manage your "
-            "trust list."
+            "trust list, "
+            "log_outreach / update_outreach / list_outreach to record who you "
+            "actually contacted, through which channel, and what came back, "
+            "list_outreach_queue to find who has not been contacted, who owes a "
+            "reply, who went quiet, or who is due for follow-up, "
+            "create_person_list / edit_person_list / list_person_lists to keep a "
+            "candidate set between sessions."
         ),
         json_response=True,
         stateless_http=True,
@@ -448,6 +462,145 @@ def create_mcp_server(settings: Settings) -> FastMCP:
             job_id=UUID(job_id),
             interest=interest,  # type: ignore[arg-type]
         )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def log_outreach(
+        person_id: str,
+        channel: str,
+        status: str = "sent",
+        note: str | None = None,
+        occurred_at: str | None = None,
+        next_step_at: str | None = None,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> LogOutreachResult:
+        """Record that you contacted someone.
+
+        channel: email, text_sms, dm_instagram, dm_linkedin, dm_x, dm_bluesky,
+        phone_call, in_person, other.
+        status: sent, replied, no_response, meeting_booked, declined, bounced.
+        occurred_at / next_step_at are ISO-8601 timestamps; occurred_at defaults to now.
+        Each call appends a new attempt — it never overwrites a previous one.
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        try:
+            when = datetime.fromisoformat(occurred_at) if occurred_at else None
+            follow_up = datetime.fromisoformat(next_step_at) if next_step_at else None
+        except ValueError as exc:
+            return LogOutreachResult(message=f"Invalid timestamp: {exc}")
+        return await actions.log_outreach(
+            lifespan.app_context,
+            user_id,
+            person_id=UUID(person_id),
+            channel=channel,
+            status=status,
+            occurred_at=when,
+            note=note,
+            next_step_at=follow_up,
+        )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def update_outreach(
+        attempt_id: str,
+        status: str | None = None,
+        note: str | None = None,
+        next_step_at: str | None = None,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> UpdateOutreachResult:
+        """Update the outcome of a logged outreach attempt — typically sent -> replied."""
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        try:
+            follow_up = datetime.fromisoformat(next_step_at) if next_step_at else None
+        except ValueError as exc:
+            return UpdateOutreachResult(message=f"Invalid timestamp: {exc}")
+        return await actions.update_outreach(
+            lifespan.app_context,
+            user_id,
+            attempt_id=UUID(attempt_id),
+            status=status,
+            note=note,
+            next_step_at=follow_up,
+        )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def list_outreach(
+        person_id: str | None = None,
+        limit: int = 100,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> ListOutreachResult:
+        """List logged outreach attempts, most recent first. Pass person_id for one person."""
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.list_outreach(
+            lifespan.app_context,
+            user_id,
+            person_id=UUID(person_id) if person_id else None,
+            limit=limit,
+        )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def list_outreach_queue(
+        filter: str = "uncontacted",
+        stale_after_days: int = 30,
+        person_list_id: str | None = None,
+        limit: int = 50,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> OutreachQueueResult:
+        """Who to reach out to next.
+
+        filter: uncontacted (never contacted), awaiting_reply (last message unanswered),
+        stale (unanswered for longer than stale_after_days), due (a follow-up date has passed).
+        Results carry is_independent, which distinguishes an independent practitioner from
+        someone employed at a company — the two look identical by job title.
+        """
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.outreach_queue(
+            lifespan.app_context,
+            user_id,
+            queue_filter=filter,
+            stale_after_days=stale_after_days,
+            person_list_id=UUID(person_list_id) if person_list_id else None,
+            limit=limit,
+        )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def create_person_list(
+        name: str,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> CreatePersonListResult:
+        """Create a named list of people. Returns the existing list if the name is taken."""
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.create_person_list(lifespan.app_context, user_id, name=name)
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def edit_person_list(
+        person_list_id: str,
+        add: list[str] | None = None,
+        remove: list[str] | None = None,
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> EditPersonListResult:
+        """Add or remove people from a list. Pass person IDs."""
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.edit_person_list(
+            lifespan.app_context,
+            user_id,
+            person_list_id=UUID(person_list_id),
+            add=[UUID(p) for p in (add or [])],
+            remove=[UUID(p) for p in (remove or [])],
+        )
+
+    @mcp.tool()  # pyright: ignore[reportUnusedFunction]
+    async def list_person_lists(
+        ctx: Context[Any, Any, Any] | None = None,
+    ) -> PersonListsResult:
+        """List the user's saved people lists with member counts."""
+        lifespan: McpLifespanState = _require_lifespan(ctx)
+        user_id: UUID | None = _get_user_id_from_ctx(ctx) if ctx is not None else None
+        return await actions.list_person_lists(lifespan.app_context, user_id)
 
     @mcp.tool()  # pyright: ignore[reportUnusedFunction]
     async def add_watched_company(

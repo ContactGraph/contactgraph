@@ -99,3 +99,46 @@ class UserTaskStatus(StrEnum):
     OPEN = "open"
     DONE = "done"
     SKIPPED = "skipped"
+
+
+class OutreachChannel(StrEnum):
+    """How the user actually reached the person.
+
+    Recording the channel is the point: which channel was used carries as much signal as
+    whether a reply came back, and it is the one thing that is impossible to reconstruct
+    later.
+    """
+
+    EMAIL = "email"
+    TEXT_SMS = "text_sms"
+    DM_INSTAGRAM = "dm_instagram"
+    DM_LINKEDIN = "dm_linkedin"
+    DM_X = "dm_x"
+    DM_BLUESKY = "dm_bluesky"
+    PHONE_CALL = "phone_call"
+    IN_PERSON = "in_person"
+    OTHER = "other"
+
+
+class OutreachStatus(StrEnum):
+    """Outcome of a single attempt.
+
+    NO_RESPONSE is set deliberately by the user, never inferred from elapsed time — an
+    unanswered message is not the same fact as one the user has decided went unanswered.
+    """
+
+    SENT = "sent"
+    REPLIED = "replied"
+    NO_RESPONSE = "no_response"
+    MEETING_BOOKED = "meeting_booked"
+    DECLINED = "declined"
+    BOUNCED = "bounced"
+
+
+class OutreachQueueFilter(StrEnum):
+    """Which slice of the network to surface for outreach."""
+
+    UNCONTACTED = "uncontacted"
+    AWAITING_REPLY = "awaiting_reply"
+    STALE = "stale"
+    DUE = "due"
