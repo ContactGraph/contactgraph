@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
+import uuid
 from types import SimpleNamespace
+from typing import Any, cast
 from uuid import uuid4
 
+import pytest
+from contactsafe_server.config import get_settings
 from contactsafe_server.db.models import User
 from contactsafe_server.services.job_relevance_service import (
     DEFAULT_SCORING_WEIGHTS,
@@ -304,3 +309,161 @@ def test_compute_match_score_with_stage_mismatch() -> None:
     assert score_miss == 30
     assert note is not None
     assert "funding stage" in note
+
+
+@pytest.mark.asyncio
+async def test_reclassify_survives_cancel_flag_from_preference_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fresh scoring run must clear the cross-process cancel flag.
+
+    Changing role text calls cancel_scoring() to stop the in-flight run, then
+    queues a reclassify. With the arq worker enabled that cancel lands in Redis,
+    so the *new* run in the worker process has to clear it there — discarding
+    the in-process copy leaves the Redis flag set and the new run aborts after
+    reclassify_all() has already deleted every stored score.
+    """
+    import contactsafe_server.redis_state as redis_state
+    from contactsafe_server.services import job_relevance_service as svc_mod
+
+    user_id: uuid.UUID = uuid.uuid4()
+    cancelled_flags: set[uuid.UUID] = set()
+
+    async def fake_set_cancelled(uid: uuid.UUID, **_: object) -> None:
+        cancelled_flags.add(uid)
+
+    async def fake_clear_cancelled(uid: uuid.UUID, **_: object) -> None:
+        cancelled_flags.discard(uid)
+
+    async def fake_is_cancelled(uid: uuid.UUID, **_: object) -> bool:
+        return uid in cancelled_flags
+
+    async def fake_set_progress(*_a: object, **_k: object) -> None:
+        return None
+
+    async def fake_clear_progress(*_a: object, **_k: object) -> None:
+        return None
+
+    monkeypatch.setattr(svc_mod, "_use_redis_state", lambda: True)
+    monkeypatch.setattr(redis_state, "set_scoring_cancelled", fake_set_cancelled)
+    monkeypatch.setattr(redis_state, "clear_scoring_cancelled", fake_clear_cancelled)
+    monkeypatch.setattr(redis_state, "is_scoring_cancelled_redis", fake_is_cancelled)
+    monkeypatch.setattr(redis_state, "set_scoring_progress", fake_set_progress)
+    monkeypatch.setattr(redis_state, "clear_scoring_progress", fake_clear_progress)
+
+    user = User(
+        id=user_id,
+        person_id=None,
+        job_preferences_text="Staff product manager roles",
+        job_target_seniority_min=5,
+        job_target_seniority_max=6,
+    )
+
+    class _Db:
+        async def get(self, model: type[object], row_id: uuid.UUID) -> object | None:
+            return user if model is User and row_id == user_id else None
+
+        async def commit(self) -> None:
+            return None
+
+    service = JobRelevanceService(cast(Any, _Db()), get_settings())
+
+    pending: list[SimpleNamespace] = [
+        SimpleNamespace(id=uuid.uuid4(), title="Staff Product Manager"),
+        SimpleNamespace(id=uuid.uuid4(), title="Principal Product Manager"),
+    ]
+    batches: list[int] = []
+
+    async def fake_get_unclassified(_uid: uuid.UUID) -> list[Any]:
+        return cast(list[Any], pending)
+
+    async def fake_classify_batch(
+        _uid: uuid.UUID,
+        _prefs: str,
+        _profile: str,
+        jobs: list[Any],
+        **_kwargs: object,
+    ) -> int:
+        batches.append(len(jobs))
+        return len(jobs)
+
+    monkeypatch.setattr(service, "_get_unclassified_jobs", fake_get_unclassified)
+    monkeypatch.setattr(service, "_classify_batch", fake_classify_batch)
+
+    # What set_job_preferences() does before queueing the reclassify.
+    svc_mod.cancel_scoring(user_id)
+    await asyncio.sleep(0)  # let the fire-and-forget Redis write land
+    assert user_id in cancelled_flags
+
+    scored: int = await service.classify_jobs_for_user(user_id)
+
+    assert batches == [2], "scoring aborted before classifying anything"
+    assert scored == 2
+
+
+@pytest.mark.parametrize(
+    ("preferences", "title"),
+    [
+        # A product DOMAIN in the preferences is not a role the candidate wants.
+        ("Staff Product Manager, developer tools", "Staff Software Engineer"),
+        ("Staff Product Manager, developer platform", "Senior Backend Engineer"),
+        ("PM for analytics products", "Senior Data Analyst"),
+        ("PM for marketing tools", "Brand Marketing Manager"),
+        ("Staff Product Manager, design systems", "Staff Product Designer"),
+        ("Staff Product Manager, UX-adjacent products", "Principal UX Researcher"),
+        ("Staff Product Manager", "Staff Product Designer"),
+        ("Staff Product Manager", "Product Design Manager"),
+    ],
+)
+def test_domain_mention_does_not_disable_function_cap(
+    preferences: str,
+    title: str,
+) -> None:
+    score, _reason = _cap_role_score_for_function_mismatch(
+        preferences,
+        _job(title),  # type: ignore[arg-type]
+        90,
+        None,
+    )
+    assert score < 90, f"{title!r} leaked through for preferences {preferences!r}"
+
+
+@pytest.mark.parametrize(
+    ("preferences", "title"),
+    [
+        ("Head of Product Design", "Staff Product Designer"),
+        ("Product designer or product manager", "Senior Product Designer"),
+        ("PM or UX researcher roles", "Principal UX Researcher"),
+        ("Product manager or program manager", "Technical Program Manager"),
+    ],
+)
+def test_explicit_target_title_still_disables_cap(
+    preferences: str,
+    title: str,
+) -> None:
+    score, _reason = _cap_role_score_for_function_mismatch(
+        preferences,
+        _job(title),  # type: ignore[arg-type]
+        90,
+        None,
+    )
+    assert score == 90
+
+
+@pytest.mark.parametrize(
+    "title",
+    [
+        "Staff Product Manager",
+        "Principal Product Manager",
+        "Head of Product",
+        "Group Product Manager",
+    ],
+)
+def test_genuine_pm_titles_are_never_capped(title: str) -> None:
+    score, _reason = _cap_role_score_for_function_mismatch(
+        "Staff Product Manager",
+        _job(title),  # type: ignore[arg-type]
+        90,
+        None,
+    )
+    assert score == 90

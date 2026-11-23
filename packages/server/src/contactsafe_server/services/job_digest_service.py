@@ -295,6 +295,18 @@ class JobDigestService:
         if self._jwt is None:
             return DigestSendResult(sent=False, job_count=0, message="JWT service not configured.")
 
+        if self._settings.web_base_url is None:
+            # effective_web_base_url falls back to BASE_URL, which is the API
+            # host in production. The API serves no /jobs page, so every job
+            # link in the digest would 404. Say so loudly rather than mailing
+            # dead links.
+            logger.warning(
+                "WEB_BASE_URL is not set; digest job links will point at the API "
+                "host (%s) and will not resolve. Set WEB_BASE_URL to the web app "
+                "origin.",
+                self._settings.effective_web_base_url,
+            )
+
         html: str = self.render_digest_html(user_id=user_id, digest=digest)
         subject: str = (
             f"{digest.total_new_matches} new job match"

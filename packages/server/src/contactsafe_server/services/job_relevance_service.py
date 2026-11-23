@@ -283,6 +283,21 @@ async def get_scoring_progress_async(user_id: uuid.UUID) -> tuple[int, int] | No
     return _scoring_progress.get(user_id)
 
 
+async def _clear_cancelled(user_id: uuid.UUID) -> None:
+    """Clear the cancel signal everywhere cancel_scoring() can set it.
+
+    cancel_scoring() writes to Redis when the arq worker is enabled, so a run
+    starting in the worker process must clear it there too. Dropping only the
+    in-process copy leaves the Redis flag set and the fresh run aborts on its
+    first batch.
+    """
+    _scoring_cancelled.discard(user_id)
+    if _use_redis_state():
+        from contactsafe_server.redis_state import clear_scoring_cancelled
+
+        await clear_scoring_cancelled(user_id)
+
+
 async def _is_scoring_cancelled(user_id: uuid.UUID) -> bool:
     if _use_redis_state():
         from contactsafe_server.redis_state import is_scoring_cancelled_redis
@@ -339,13 +354,64 @@ def _publish_scoring_cancelled(user_id: uuid.UUID, scored: int, total: int) -> N
 
 
 # (pattern, cap, label) — checked in order against title + department.
-_MISMATCH_FUNCTIONS: tuple[tuple[re.Pattern[str], int, str], ...] = (
-    (_ENGINEERING_TITLE_RE, 15, "engineering"),
-    (_DESIGN_TITLE_RE, 15, "product design"),
-    (_LEGAL_TITLE_RE, 10, "a legal role"),
-    (_MARKETING_TITLE_RE, 20, "marketing"),
-    (_ANALYST_TITLE_RE, 20, "analytics"),
-    (_PROGRAM_TITLE_RE, 25, "program/project management"),
+
+# The self-targeting escape hatch needs a TIGHTER pattern than the title match.
+# "PM for developer tools", "PM, analytics products" and "PM, UX-adjacent
+# products" all name a product DOMAIN, not a job the candidate wants. Matching
+# those against the title patterns switched a whole vertical's cap off and let
+# every engineering / analytics / design posting through at full score. Only an
+# explicit role TITLE in the preferences should disable a vertical's cap.
+_ENGINEERING_TARGET_RE: re.Pattern[str] = re.compile(
+    r"\b("
+    r"software engineer(?:ing)?|engineering manager|software developer|"
+    r"staff engineer|senior engineer|principal engineer|"
+    r"data engineer|ml engineer|machine learning engineer|devops engineer|\bsre\b|"
+    r"director[, ]+(?:of )?engineering|head of engineering|vp[, ]+(?:of )?engineering"
+    r")\b",
+    re.IGNORECASE,
+)
+_DESIGN_TARGET_RE: re.Pattern[str] = re.compile(
+    r"\b("
+    r"(?:product |ux ?|ui |visual |interaction |content )?designer|"
+    r"design lead|design manager|design director|"
+    r"director[, ]+(?:of )?design|head of (?:product )?design|vp[, ]+(?:of )?design|"
+    r"ux research(?:er)?|user research(?:er)?|design research(?:er)?"
+    r")\b",
+    re.IGNORECASE,
+)
+_MARKETING_TARGET_RE: re.Pattern[str] = re.compile(
+    r"\b("
+    r"product marketing manager|\bpmm\b|marketing manager|brand manager|"
+    r"growth marketer|content strategist|"
+    r"director[, ]+(?:of )?marketing|head of marketing|vp[, ]+(?:of )?marketing"
+    r")\b",
+    re.IGNORECASE,
+)
+_ANALYST_TARGET_RE: re.Pattern[str] = re.compile(
+    r"\b("
+    r"data analyst|product analyst|business analyst|data scientist|"
+    r"research scientist|analytics manager|"
+    r"director[, ]+(?:of )?analytics|head of analytics"
+    r")\b",
+    re.IGNORECASE,
+)
+_PROGRAM_TARGET_RE: re.Pattern[str] = re.compile(
+    r"\b("
+    r"program manager|project manager|programme manager|"
+    r"technical program manager|\btpm\b|scrum master|chief of staff"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+# (title pattern, "candidate targets this" pattern, score cap, label)
+_MISMATCH_FUNCTIONS: tuple[tuple[re.Pattern[str], re.Pattern[str], int, str], ...] = (
+    (_ENGINEERING_TITLE_RE, _ENGINEERING_TARGET_RE, 15, "engineering"),
+    (_DESIGN_TITLE_RE, _DESIGN_TARGET_RE, 15, "product design"),
+    (_LEGAL_TITLE_RE, _LEGAL_TITLE_RE, 10, "a legal role"),
+    (_MARKETING_TITLE_RE, _MARKETING_TARGET_RE, 20, "marketing"),
+    (_ANALYST_TITLE_RE, _ANALYST_TARGET_RE, 20, "analytics"),
+    (_PROGRAM_TITLE_RE, _PROGRAM_TARGET_RE, 25, "program/project management"),
 )
 
 
@@ -364,11 +430,13 @@ def _cap_role_score_for_function_mismatch(
         return role_score, role_reason
 
     haystack: str = f"{title} {job.department or ''}"
-    for pattern, cap, label in _MISMATCH_FUNCTIONS:
+    for pattern, target_pattern, cap, label in _MISMATCH_FUNCTIONS:
         # Never cap a vertical the candidate is themselves targeting — someone
         # who asked for "Head of Product Design" matches the PM preference
-        # pattern but is not asking us to bury design roles.
-        if pattern.search(preferences_text):
+        # pattern but is not asking us to bury design roles. This tests for an
+        # explicit role TITLE, not a passing domain mention: "PM for developer
+        # tools" is still a PM who does not want engineering postings.
+        if target_pattern.search(preferences_text):
             continue
         if not pattern.search(haystack):
             continue
@@ -455,7 +523,7 @@ class JobRelevanceService:
 
     async def classify_jobs_for_user(self, user_id: uuid.UUID) -> int:
         """Score all unclassified active jobs for the user. Returns count scored."""
-        _scoring_cancelled.discard(user_id)
+        await _clear_cancelled(user_id)
 
         user: User | None = await self._db.get(User, user_id)
         if user is None:
